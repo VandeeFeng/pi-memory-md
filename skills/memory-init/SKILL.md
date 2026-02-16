@@ -16,13 +16,7 @@ Use this skill to set up pi-memory-md for the first time or reinitialize an exis
 ## Step 1: Install Package
 
 ```bash
-npm install -g pi-memory-md
-```
-
-Or for project-local install:
-
-```bash
-npm install pi-memory-md
+pi install npm:pi-memory-md
 ```
 
 ## Step 2: Create GitHub Repository
@@ -88,7 +82,42 @@ Created directory structure:
   - reference
 ```
 
-## Step 5: Verify Setup
+## Step 5: Import Preferences from AGENTS.md
+
+After initialization, extract relevant preferences from your `AGENTS.md` file to populate `prefer.md`:
+
+1. **Read AGENTS.md** (typically at `.pi/agent/AGENTS.md` or project root)
+
+2. **Extract relevant sections** such as:
+   - IMPORTANT Rules
+   - Code Quality Principles
+   - Coding Style Preferences
+   - Architecture Principles
+   - Development Workflow
+   - Technical Preferences
+
+3. **Present extracted content** to the user in a summarized format
+
+4. **Ask first confirmation**: Include these extracted preferences in `prefer.md`?
+   ```
+   Found these preferences in AGENTS.md:
+   - IMPORTANT Rules: [summary]
+   - Code Quality Principles: [summary]
+   - Coding Style: [summary]
+
+   Include these in core/user/prefer.md? (yes/no)
+   ```
+
+5. **Ask for additional content**: Is there anything else you want to add to your preferences?
+   ```
+   Any additional preferences you'd like to include? (e.g., communication style, specific tools, workflows)
+   ```
+
+6. **Update prefer.md** with:
+   - Extracted content from AGENTS.md (if user confirmed)
+   - Any additional preferences provided by user
+
+## Step 6: Verify Setup
 
 Check status with command:
 
@@ -104,7 +133,7 @@ List files:
 memory_list()
 ```
 
-Should show: `core/user/identity.md`
+Should show: `core/user/identity.md`, `core/user/prefer.md`
 
 ## Project Structure
 
@@ -216,22 +245,24 @@ memory_init(force=true)
 
 After setup, verify:
 
-- [ ] Package installed: `npm list -g pi-memory-md`
+- [ ] Package installed: `pi install npm:pi-memory-md`
 - [ ] Settings configured in settings file
 - [ ] GitHub repository exists and is accessible
 - [ ] Repository cloned to configured `localPath`
 - [ ] Directory structure created
 - [ ] `/memory-status` shows correct info
 - [ ] `memory_list()` returns files
+- [ ] `prefer.md` populated (either from AGENTS.md or default template)
 
 ## Next Steps
 
 After initialization:
 
-1. Edit your identity: `memory_write(path="core/user/identity.md", ...)`
-2. Edit your preferences: `memory_write(path="core/user/prefer.md", ...)`
-3. Add project context: `memory_write(path="core/project/overview.md", ...)`
-4. Learn more: See `memory-management` skill
+1. **Import preferences** - Agent will prompt to extract from AGENTS.md
+2. Edit your identity: `memory_read(path="core/user/identity.md")` then `memory_write(...)` to update
+3. Review preferences: `memory_read(path="core/user/prefer.md")`
+4. Add project context: `memory_write(path="core/project/overview.md", ...)`
+5. Learn more: See `memory-management` skill
 
 ## Related Skills
 
