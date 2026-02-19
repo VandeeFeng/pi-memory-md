@@ -27,6 +27,7 @@
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "latest",
     "@types/node": "^20.0.0",
+    "husky": "^9.1.7",
     "typescript": "^5.0.0"
   },
   "pi": {
@@ -47,5 +48,9 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
-  ]
+  ],
+  "scripts": {
+    "prepare": "husky",
+    "check": "biome check --write --error-on-warnings . && tsgo --noEmit"
+  }
 }

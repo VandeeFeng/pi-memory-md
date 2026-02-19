@@ -15,6 +15,8 @@ Letta-like memory management for [pi](https://github.com/badlogic/pi-mono) using
 ```bash
 # 1. Install
 pi install npm:pi-memory-md
+# Or for latest from GitHub:
+pi install git:github.com/VandeeFeng/pi-memory-md
 
 # 2. Create a GitHub repository (private recommended)
 
