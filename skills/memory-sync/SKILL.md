@@ -33,6 +33,14 @@ memory_sync(action="push")
 
 Auto-commits changes before pushing.
 
+**Before pushing, ALWAYS run memory_check first:**
+
+```
+memory_check()
+```
+
+This verifies that the folder structure is correct (e.g., files are in `core/project/` not in a root `project/` folder).
+
 ### Status
 
 Check uncommitted changes:

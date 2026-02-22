@@ -534,6 +534,86 @@ export function registerMemoryInit(
   });
 }
 
+export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings): void {
+  pi.registerTool({
+    name: "memory_check",
+    label: "Memory Check",
+    description: "Check current project memory folder structure",
+    parameters: Type.Object({}) as any,
+
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const memoryDir = getMemoryDir(settings, ctx);
+
+      if (!fs.existsSync(memoryDir)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Memory directory not found: ${memoryDir}\n\nProject memory may not be initialized yet.`,
+            },
+          ],
+          details: { exists: false },
+        };
+      }
+
+      const { execSync } = await import("node:child_process");
+      let treeOutput = "";
+
+      try {
+        treeOutput = execSync(`tree -L 3 -I "node_modules" "${memoryDir}"`, { encoding: "utf-8" });
+      } catch {
+        try {
+          treeOutput = execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*" | head -20`, {
+            encoding: "utf-8",
+          });
+        } catch {
+          treeOutput = "Unable to generate directory tree. Please check permissions.";
+        }
+      }
+
+      const files = listMemoryFiles(memoryDir);
+      const relPaths = files.map((f) => path.relative(memoryDir, f));
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Memory directory structure for project: ${path.basename(ctx.cwd)}\n\nPath: ${memoryDir}\n\n${treeOutput}\n\nMemory files (${relPaths.length}):\n${relPaths.map((p) => `  ${p}`).join("\n")}`,
+          },
+        ],
+        details: { path: memoryDir, fileCount: relPaths.length },
+      };
+    },
+
+    renderCall(_args, theme) {
+      return new Text(theme.fg("toolTitle", theme.bold("memory_check")), 0, 0);
+    },
+
+    renderResult(result, { expanded, isPartial }, theme) {
+      const details = result.details as { exists?: boolean; path?: string; fileCount?: number } | undefined;
+      const content = result.content[0];
+
+      if (isPartial) {
+        return new Text(theme.fg("warning", "Checking..."), 0, 0);
+      }
+
+      if (!expanded) {
+        const exists = details?.exists ?? true;
+        const fileCount = details?.fileCount ?? 0;
+        const contentText = content?.type === "text" ? content.text : "";
+        const lines = contentText.split("\n");
+        const summary = exists
+          ? theme.fg("success", `Structure: ${fileCount} files`)
+          : theme.fg("error", "Not initialized");
+        return renderWithExpandHint(summary, theme, lines.length);
+      }
+
+      const text = content?.type === "text" ? content.text : "";
+      return new Text(theme.fg("toolOutput", text), 0, 0);
+    },
+  });
+}
+
 export function registerAllTools(
   pi: ExtensionAPI,
   settings: MemoryMdSettings,
@@ -545,4 +625,5 @@ export function registerAllTools(
   registerMemoryList(pi, settings);
   registerMemorySearch(pi, settings);
   registerMemoryInit(pi, settings, isRepoInitialized);
+  registerMemoryCheck(pi, settings);
 }

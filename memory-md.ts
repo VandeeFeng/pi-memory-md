@@ -505,4 +505,31 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
       }
     },
   });
+
+  pi.registerCommand("memory-check", {
+    description: "Check memory folder structure",
+    handler: async (_args, ctx) => {
+      const memoryDir = getMemoryDir(settings, ctx);
+
+      if (!fs.existsSync(memoryDir)) {
+        ctx.ui.notify(`Memory directory not found: ${memoryDir}`, "error");
+        return;
+      }
+
+      const { execSync } = await import("node:child_process");
+      let treeOutput = "";
+
+      try {
+        treeOutput = execSync(`tree -L 3 -I "node_modules" "${memoryDir}"`, { encoding: "utf-8" });
+      } catch {
+        try {
+          treeOutput = execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*"`, { encoding: "utf-8" });
+        } catch {
+          treeOutput = "Unable to generate directory tree.";
+        }
+      }
+
+      ctx.ui.notify(treeOutput.trim(), "info");
+    },
+  });
 }

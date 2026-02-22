@@ -280,3 +280,18 @@ Use `memory-management` when:
 - `memory-sync` - Git synchronization operations
 - `memory-init` - Initial repository setup
 - `memory-search` - Finding specific information
+- `memory-check` - Validate folder structure before syncing
+
+## Before Syncing
+
+**IMPORTANT**: Before running `memory_sync(action="push")`, ALWAYS run `memory_check()` first to verify the folder structure is correct:
+
+```bash
+# Check structure first
+memory_check()
+
+# Then push if structure is correct
+memory_sync(action="push")
+```
+
+This prevents accidentally pushing files in wrong locations (e.g., root `project/` instead of `core/project/`).
