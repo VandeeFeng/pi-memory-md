@@ -31,12 +31,8 @@ pi install git:github.com/VandeeFeng/pi-memory-md
 }
 
 # 4. Start a new pi session
-# The extension will auto-initialize and sync on first run
+# type /memory-init slash command to initialize the memory files
 ```
-
-**Commands available in pi:**
-- `:memory-init` - Initialize repository structure
-- `:memory-status` - Show repository status
 
 ## How It Works
 
@@ -49,12 +45,21 @@ Session Start
     ↓
 3. Build index (descriptions + tags only - NOT full content)
     ↓
-4. Append index to conversation via prompt append (not system prompt)
+4. Append index to conversation via prompt append (or system prompt)
     ↓
 5. LLM reads full file content via tools when needed
 ```
 
-**Why index-only via prompt append?** Keeps token usage low while making full content accessible on-demand. The index is appended to the conversation, not injected into the system prompt.
+## Slash Commands In Pi
+
+You can also use these slash commands directly in pi:
+
+| Command | Description |
+|---------|-------------|
+| `/memory-init` | Initialize memory repository (clone repo, create directory structure, generate default files) |
+| `/memory-status` | Show memory repository status (project name, git status, path) |
+| `/memory-refresh` | Refresh memory context from files (rebuild cache and inject into current session) |
+| `/memory-check` | Check memory folder structure (display directory tree) |
 
 ## Available Tools
 
@@ -63,11 +68,12 @@ The LLM can use these tools to interact with memory:
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `memory_init` | `{force?: boolean}` | Initialize or reinitialize repository |
-| `memory_sync` | `{action: "pull" | "push" | "status"}` | Git operations |
+| `memory_sync` | `{action: "pull" / "push" / "status"}` | Git operations |
 | `memory_read` | `{path: string}` | Read a memory file |
 | `memory_write` | `{path, content, description, tags?}` | Create/update memory file |
 | `memory_list` | `{directory?: string}` | List all memory files |
 | `memory_search` | `{query, searchIn}` | Search by content/tags/description |
+| `memory_check` | `{}` | Check current project memory | folder structure |
 
 ## Memory File Format
 
@@ -137,7 +143,7 @@ The extension supports two modes for injecting memory into the conversation:
 ```
 
 - Memory is sent as a custom message before the user's first message
-- Not visible in the TUI (`display: false`)
+- Not visible in the TUI (`display: false` in pi-tui)
 - Persists in the session history
 - Injected only once per session (on first agent turn)
 - **Pros**: Lower token usage, memory persists naturally in conversation
@@ -158,8 +164,6 @@ The extension supports two modes for injecting memory into the conversation:
 - Always visible to the model in the system context
 - **Pros**: Memory always present in system context, no need to scroll back
 - **Cons**: Higher token usage (repeated on every prompt)
-
-**Recommendation**: Use `message-append` (default) for optimal token efficiency. Switch to `system-prompt` if you notice the model not accessing memory consistently.
 
 ## Usage Examples
 
@@ -184,13 +188,6 @@ The LLM automatically:
 - Reads memory index at session start (appended to conversation)
 - Writes new information when you ask to remember something
 - Syncs changes when needed
-
-## Commands
-
-Use these directly in pi:
-
-- `:memory-status` - Show repository status
-- `:memory-init` - Initialize repository structure
 
 ## Reference
 - [Introducing Context Repositories: Git-based Memory for Coding Agents | Letta](https://www.letta.com/blog/context-repositories)
