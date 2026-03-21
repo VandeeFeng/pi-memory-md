@@ -22,7 +22,7 @@ function renderWithExpandHint(text: string, theme: Theme, lineCount: number): Te
       "\n" +
       theme.fg("muted", `... (${remaining} more lines,`) +
       " " +
-      keyHint("expandTools", "to expand") +
+      keyHint("app.tools.expand", "to expand") +
       theme.fg("muted", ")");
   }
   return new Text(text, 0, 0);
