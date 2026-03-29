@@ -333,8 +333,9 @@ function buildMemoryContext(settings: MemoryMdSettings, ctx: ExtensionContext): 
  *
  * Lifecycle:
  * 1. session_start: Start async sync (non-blocking), build memory context
- * 2. before_agent_start: Wait for sync, then inject memory on first agent turn
- * 3. Register tools and commands for memory operations
+ * 2. session_switch: Handle /new and /resume commands, rebuild memory context for new session
+ * 3. before_agent_start: Wait for sync, then inject memory on first agent turn
+ * 4. Register tools and commands for memory operations
  *
  * Memory injection modes:
  * - message-append (default): Send as custom message with display: false, not visible in TUI but persists in session
@@ -343,6 +344,7 @@ function buildMemoryContext(settings: MemoryMdSettings, ctx: ExtensionContext): 
  * Key optimization:
  * - Sync runs asynchronously without blocking user input
  * - Memory is injected after user sends first message (before_agent_start)
+ * - Memory is re-injected when using /new to start a new session in the same pi process
  *
  * Configuration:
  * Set injection in settings to choose between "message-append" or "system-prompt"
@@ -360,22 +362,27 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
   let cachedMemoryContext: string | null = null;
   let memoryInjected = false;
 
-  pi.on("session_start", async (_event, ctx) => {
+  function initMemoryContext(
+    ctx: ExtensionContext,
+    options: { showNotification: boolean; autoSync: boolean },
+  ): boolean {
     settings = loadSettings();
 
     if (!settings.enabled) {
-      return;
+      return false;
     }
 
     const memoryDir = getMemoryDir(settings, ctx);
     const coreDir = path.join(memoryDir, "core");
 
     if (!fs.existsSync(coreDir)) {
-      ctx.ui.notify("Memory-md not initialized. Use /memory-init to set up project memory.", "info");
-      return;
+      if (options.showNotification) {
+        ctx.ui.notify("Memory-md not initialized. Use /memory-init to set up project memory.", "info");
+      }
+      return false;
     }
 
-    if (settings.autoSync?.onSessionStart && settings.localPath) {
+    if (options.autoSync && settings.autoSync?.onSessionStart && settings.localPath) {
       syncPromise = syncRepository(pi, settings, repoInitialized).then((syncResult) => {
         if (settings.repoUrl) {
           ctx.ui.notify(syncResult.message, syncResult.success ? "info" : "error");
@@ -386,6 +393,18 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
 
     cachedMemoryContext = buildMemoryContext(settings, ctx);
     memoryInjected = false;
+    return true;
+  }
+
+  pi.on("session_start", async (_event, ctx) => {
+    initMemoryContext(ctx, { showNotification: true, autoSync: true });
+  });
+
+  pi.on("session_switch", async (event, ctx) => {
+    if (event.reason !== "new") {
+      return;
+    }
+    initMemoryContext(ctx, { showNotification: false, autoSync: false });
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
