@@ -4,7 +4,10 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { GrayMatterFile } from "gray-matter";
 import matter from "gray-matter";
-import { registerAllTools } from "./tools.js";
+import { registerAllTools, registerAllTapeTools } from "./tools.js";
+import { MemoryTapeService } from "./tape/tape-service.js";
+import { MemoryFileSelector, ConversationSelector } from "./tape/tape-selector.js";
+import type { TapeConfig } from "./tape/tape-types.js";
 
 /**
  * Type definitions for memory files, settings, and git operations.
@@ -36,6 +39,7 @@ export interface MemoryMdSettings {
     maxTokens?: number;
     includeProjects?: string[];
   };
+  tape?: TapeConfig & { enabled?: boolean };
 }
 
 export interface GitResult {
@@ -58,6 +62,12 @@ export type ParsedFrontmatter = GrayMatterFile<string>["data"];
 
 const DEFAULT_LOCAL_PATH = path.join(os.homedir(), ".pi", "memory-md");
 
+let localPath: string;
+
+export function getLocalPath(): string {
+  return localPath;
+}
+
 export function getCurrentDate(): string {
   return new Date().toISOString().split("T")[0];
 }
@@ -70,8 +80,10 @@ function expandPath(p: string): string {
 }
 
 export function getMemoryDir(settings: MemoryMdSettings, ctx: ExtensionContext): string {
-  const basePath = settings.localPath || DEFAULT_LOCAL_PATH;
-  return path.join(basePath, path.basename(ctx.cwd));
+  if (!localPath) {
+    localPath = settings.localPath || DEFAULT_LOCAL_PATH;
+  }
+  return path.join(localPath, path.basename(ctx.cwd));
 }
 
 function getRepoName(settings: MemoryMdSettings): string {
@@ -90,6 +102,14 @@ function loadSettings(): MemoryMdSettings {
     systemPrompt: {
       maxTokens: 10000,
       includeProjects: ["current"],
+    },
+    tape: {
+      enabled: false,
+      context: {
+        strategy: "smart",
+        fileLimit: 10,
+      },
+      tapePath: undefined, // Use default ~/.pi/memory-md/TAPE or {localPath}/TAPE
     },
   };
 
@@ -203,8 +223,8 @@ function validateFrontmatter(data: ParsedFrontmatter): { valid: boolean; error?:
 
   const frontmatter = data as MemoryFrontmatter;
 
-  if (!frontmatter.description || typeof frontmatter.description !== "string") {
-    return { valid: false, error: "Frontmatter must have a 'description' field (string)" };
+  if (frontmatter.description !== undefined && typeof frontmatter.description !== "string") {
+    return { valid: false, error: "'description' must be a string if provided" };
   }
 
   if (frontmatter.limit !== undefined && (typeof frontmatter.limit !== "number" || frontmatter.limit <= 0)) {
@@ -222,10 +242,23 @@ export function readMemoryFile(filePath: string): MemoryFile | null {
   try {
     const content = fs.readFileSync(filePath, "utf-8");
     const parsed = matter(content);
+
+    if (!parsed.data || Object.keys(parsed.data).length === 0) {
+      return {
+        path: filePath,
+        frontmatter: { description: "No description" },
+        content: content,
+      };
+    }
+
     const validation = validateFrontmatter(parsed.data);
 
     if (!validation.valid) {
-      throw new Error(validation.error);
+      return {
+        path: filePath,
+        frontmatter: { description: "No description" },
+        content: content,
+      };
     }
 
     return {
@@ -377,6 +410,9 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
   let syncPromise: Promise<SyncResult> | null = null;
   let cachedMemoryContext: string | null = null;
   let memoryInjected = false;
+  let tapeService: MemoryTapeService | null = null;
+  let contextSelector: MemoryFileSelector | null = null;
+  let tapeToolsRegistered = false;
 
   function initMemoryContext(
     ctx: ExtensionContext,
@@ -416,6 +452,104 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
     // I like this new uniform logic event.reason: "startup" | "reload" | "new" | "resume" | "fork"
     // It's better than session_switch and session_fork!
 
+    // Initialize tape service if tape mode is enabled
+    if (settings.tape?.enabled) {
+      const memoryDir = getMemoryDir(settings, ctx);
+      const projectName = path.basename(ctx.cwd);
+      const sessionId = ctx.sessionManager.getSessionId();
+      tapeService = MemoryTapeService.create(memoryDir, settings.tape, projectName, sessionId);
+      contextSelector = new MemoryFileSelector(tapeService, memoryDir);
+      tapeService.recordSessionStart();
+
+      // Always register tape tools in tape mode (LLM queries history on demand)
+      if (!tapeToolsRegistered) {
+        registerAllTapeTools(pi, tapeService);
+        tapeToolsRegistered = true;
+      }
+
+      // Record user messages
+      pi.on("message_start", (msgEvent, _msgCtx) => {
+        if (!tapeService) return;
+        const message = msgEvent.message as { role: string; content?: string | Array<{ type: string; text?: string }> };
+        if (message.role !== "user") return;
+        const content = typeof message.content === "string" ? message.content : 
+          Array.isArray(message.content) ? message.content.map(c => c.text || "").join("") : "";
+        tapeService.startNewTurn();
+        tapeService.recordUserMessage(content);
+      });
+
+
+
+      // Record assistant messages (only when complete, not during streaming)
+      pi.on("message_end", (msgEvent, _msgCtx) => {
+        if (!tapeService) return;
+        const message = msgEvent.message as { role: string; content?: string | Array<{ type: string; text?: string }> };
+        if (message.role !== "assistant") return;
+        const content = typeof message.content === "string" ? message.content : 
+          Array.isArray(message.content) ? message.content.map(c => c.text || "").join("") : "";
+        tapeService.recordAssistantMessage(content);
+      });
+
+      // Record tool calls
+      pi.on("tool_call", (toolEvent, _toolCtx) => {
+        if (!tapeService) return;
+        tapeService.recordToolCall(toolEvent.toolName, toolEvent.input as Record<string, unknown>);
+      });
+
+      // Register tool_result listener to record memory operations and tool results
+      pi.on("tool_result", (toolEvent, _toolCtx) => {
+        if (!tapeService) return;
+
+        const { toolName, input, details } = toolEvent;
+
+        // Step 1: Record all operations first (tool_result + specific memory operations)
+        tapeService.recordToolResult(toolName, details);
+
+        // Record memory operations specifically
+        if (toolName === "memory_read") {
+          const params = input as { path: string };
+          tapeService.recordMemoryRead(params.path);
+        }
+
+        if (toolName === "memory_write") {
+          const params = input as { path: string; description: string; tags?: string[] };
+          tapeService.recordMemoryWrite(params.path, { description: params.description, tags: params.tags });
+        }
+
+        if (toolName === "memory_search") {
+          const params = input as { query: string; searchIn: string };
+          const searchDetails = details as { count?: number } | undefined;
+          tapeService.recordMemorySearch(params.query, params.searchIn, searchDetails?.count || 0);
+        }
+
+        if (toolName === "memory_sync") {
+          const params = input as { action: string };
+          const syncDetails = details as { success?: boolean; initialized?: boolean } | undefined;
+          tapeService.recordMemorySync(params.action, { success: syncDetails?.success, initialized: syncDetails?.initialized });
+        }
+
+        if (toolName === "memory_init") {
+          const params = input as { force?: boolean };
+          tapeService.recordMemoryInit(params.force || false);
+        }
+
+        // Step 2: After all recordings, check if we need to create a new anchor
+        const info = tapeService.getInfo();
+        const anchorConfig = settings.tape?.anchor ?? { mode: "threshold", threshold: 15 };
+        
+        if (anchorConfig.mode === "threshold" && info.entriesSinceLastAnchor >= (anchorConfig.threshold ?? 15)) {
+          const now = new Date();
+          const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+          tapeService.createAnchor(`auto/threshold-${timestamp}`, { 
+            reason: "Entries since last anchor exceeded threshold",
+            entriesSinceLastAnchor: info.entriesSinceLastAnchor,
+            threshold: anchorConfig.threshold
+          });
+          ctx.ui.notify(`Auto-created anchor: ${info.entriesSinceLastAnchor} entries since last anchor (${info.anchorCount} anchors total)`, "info");
+        }
+      });
+    }
+
     if (event.reason === "new" || event.reason === "fork") {
       // Clear any pending sync from previous session to avoid waiting for it
       syncPromise = null;
@@ -431,9 +565,77 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
       syncPromise = null;
     }
 
+    const mode = settings.injection || "message-append";
+    const tapeEnabled = settings.tape?.enabled;
+
+    // Tape mode: inject dynamic context with smart selection, only once
+    if (tapeEnabled && tapeService && contextSelector) {
+      try {
+        const tapeConfig = settings.tape;
+        const contextConfig = tapeConfig?.context || {
+          strategy: "smart",
+          fileLimit: 10,
+          alwaysInclude: [],
+        };
+        const limit = contextConfig.fileLimit || 10;
+        const alwaysInclude = contextConfig.alwaysInclude || [];
+
+        // Only inject memory files once per session
+        if (!memoryInjected) {
+          const memoryFiles = contextSelector.selectFilesForContext(contextConfig.strategy || "smart", limit);
+          const memoryContext = contextSelector.buildContextFromFiles([
+            ...alwaysInclude,
+            ...memoryFiles,
+          ]);
+
+          const tapeHint = `
+
+---
+💡 Tape Context Management:
+Your conversation history is recorded in tape with anchors (checkpoints).
+- Use tape_info to check current tape status
+- Use tape_search to query historical entries by kind or content
+- Use tape_anchors to list all anchor checkpoints
+- Use tape_handoff to create a new anchor/checkpoint when starting a new task
+`;
+
+          const fileCount = memoryFiles.length + alwaysInclude.length;
+
+          // In system-prompt mode, tape overrides system prompt
+          if (mode === "system-prompt") {
+            memoryInjected = true;
+            ctx.ui.notify(
+              `Tape mode: ${fileCount} memory files injected (overrides system prompt)`,
+              "info",
+            );
+            return {
+              systemPrompt: memoryContext + tapeHint,
+            };
+          }
+
+          // In message-append mode, return as custom message
+          memoryInjected = true;
+          ctx.ui.notify(
+            `Tape mode: ${fileCount} memory files injected (message-append)`,
+            "info",
+          );
+          return {
+            message: {
+              customType: "pi-memory-md-tape",
+              content: memoryContext + tapeHint,
+              display: false,
+            },
+          };
+        }
+      } catch (error) {
+        console.error("Tape injection failed:", error);
+      }
+      return undefined;
+    }
+
+    // Non-tape modes: use cached memory context
     if (!cachedMemoryContext) return undefined;
 
-    const mode = settings.injection || "message-append";
     const isFirstInjection = !memoryInjected;
 
     if (isFirstInjection) {
