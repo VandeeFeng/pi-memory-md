@@ -196,6 +196,7 @@ The LLM automatically:
 ## Tape Mode (Dynamic Context Injection)
 
 > **Experimental**: This mode is under active development. APIs and behavior may change.
+> Tape mode is not yet published to npm. Install via GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 > **Note**: This mode may consume more tokens. Adjust parameters based on your model's context window and your API quota.
 
 ### Tape vs Injection Modes
