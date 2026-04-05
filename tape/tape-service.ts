@@ -36,7 +36,7 @@ export class MemoryTapeService {
 
   recordSessionStart(): string {
     this.currentTurn = 0;
-    return this.record("session/start", { sessionId: this.sessionId ?? "unknown" });
+    return this.record("session/start", { sessionId: this.sessionId ?? "unknown", name: "INIT" });
   }
 
   startNewTurn(): void {

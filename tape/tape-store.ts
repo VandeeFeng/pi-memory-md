@@ -32,8 +32,10 @@ export class MemoryTapeStore {
     if (!fs.existsSync(this.tapeDir)) return [];
 
     const allEntries: TapeEntry[] = [];
+    // Exact match: projectName__*.jsonl (avoid matching similar project names)
+    const prefix = `${this.projectName}__`;
     const jsonlFiles = fs.readdirSync(this.tapeDir).filter(
-      (f) => f.endsWith(".jsonl") && f.startsWith(`${this.projectName}__`)
+      (f) => f.endsWith(".jsonl") && f.startsWith(prefix)
     );
 
     for (const file of jsonlFiles) {
@@ -153,13 +155,18 @@ export class MemoryTapeStore {
   }
 
   getTapeFileCount(): number {
-    return this.getAllTapeFiles().length;
+    if (!fs.existsSync(this.tapeDir)) return 0;
+    const prefix = `${this.projectName}__`;
+    return fs.readdirSync(this.tapeDir).filter(
+      (f) => f.endsWith(".jsonl") && f.startsWith(prefix)
+    ).length;
   }
 
   getAllTapeFiles(): string[] {
     if (!fs.existsSync(this.tapeDir)) return [];
+    const prefix = `${this.projectName}__`;
     return fs.readdirSync(this.tapeDir).filter(
-      (f) => f.endsWith(".jsonl") && f.startsWith(`${this.projectName}__`)
+      (f) => f.endsWith(".jsonl") && f.startsWith(prefix)
     );
   }
 

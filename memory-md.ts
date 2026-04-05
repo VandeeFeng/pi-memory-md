@@ -540,7 +540,9 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
         const anchorConfig = settings.tape?.anchor ?? { mode: "threshold", threshold: 15 };
         
         if (anchorConfig.mode === "threshold" && info.entriesSinceLastAnchor >= (anchorConfig.threshold ?? 15)) {
-          tapeService.createAnchor("auto/threshold", { 
+          const now = new Date();
+          const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+          tapeService.createAnchor(`auto/threshold-${timestamp}`, { 
             reason: "Entries since last anchor exceeded threshold",
             entriesSinceLastAnchor: info.entriesSinceLastAnchor,
             threshold: anchorConfig.threshold
