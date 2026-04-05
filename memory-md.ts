@@ -412,7 +412,6 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
   let memoryInjected = false;
   let tapeService: MemoryTapeService | null = null;
   let contextSelector: MemoryFileSelector | null = null;
-  let tapeContextSelector: ConversationSelector | null = null;
   let tapeToolsRegistered = false;
 
   function initMemoryContext(
@@ -460,7 +459,6 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
       const sessionId = ctx.sessionManager.getSessionId();
       tapeService = MemoryTapeService.create(memoryDir, settings.tape, projectName, sessionId);
       contextSelector = new MemoryFileSelector(tapeService, memoryDir);
-      tapeContextSelector = new ConversationSelector(tapeService, settings.tape);
       tapeService.recordSessionStart();
 
       // Always register tape tools in tape mode (LLM queries history on demand)

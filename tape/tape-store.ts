@@ -9,7 +9,7 @@ export class MemoryTapeStore {
   private projectName: string;
 
   constructor(
-    private memoryDir: string,
+    memoryDir: string,
     customTapePath?: string,
     projectName?: string,
     sessionId?: string,
