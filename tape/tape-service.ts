@@ -10,6 +10,7 @@ export class MemoryTapeService {
     private store: MemoryTapeStore,
     private alwaysInclude: Set<string>,
     private enableDuplicateDetection: boolean,
+    private sessionId?: string,
   ) {}
 
   static create(
@@ -21,7 +22,7 @@ export class MemoryTapeService {
     const store = new MemoryTapeStore(memoryDir, config?.tapePath, workspace, sessionId);
     const alwaysInclude = new Set(config?.context?.alwaysInclude ?? []);
     const enableDuplicateDetection = config?.enableDuplicateDetection ?? true;
-    return new MemoryTapeService(store, alwaysInclude, enableDuplicateDetection);
+    return new MemoryTapeService(store, alwaysInclude, enableDuplicateDetection, sessionId);
   }
 
   record(kind: TapeEntryKind, payload: Record<string, unknown>, turn?: number): string {
@@ -62,7 +63,7 @@ export class MemoryTapeService {
     this.currentTurn = 0;
     this.resetContentHashes();
     return this.record("session/start", {
-      sessionId: process.env.PI_SESSION_ID ?? "unknown",
+      sessionId: this.sessionId ?? "unknown",
     });
   }
 
