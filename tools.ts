@@ -116,9 +116,12 @@ function renderSyncResult(
   const text = getResultText(result);
   if (!options.expanded) {
     const lines = text.split("\n");
+    if (details?.success === false) {
+      return renderText(buildErrorText(lines[0] || "Operation failed", theme) + buildExpandHint(lines.length, theme));
+    }
     const summary = details?.success
       ? buildSuccessText(lines[0] || "Success", theme)
-      : buildErrorText("Operation failed", theme);
+      : buildSuccessText(lines[0] || "Status", theme);
     return renderText(summary + buildExpandHint(lines.length, theme));
   }
   return renderText(theme.fg("toolOutput", text));
