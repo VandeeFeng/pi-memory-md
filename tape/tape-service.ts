@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { TapeConfig, TapeEntry, TapeEntryKind } from "./tape-types.js";
 import { MemoryTapeStore } from "./tape-store.js";
+import type { TapeConfig, TapeEntry, TapeEntryKind } from "./tape-types.js";
 
 export class MemoryTapeService {
   private currentTurn = 0;
@@ -11,18 +11,15 @@ export class MemoryTapeService {
     private sessionId?: string,
   ) {}
 
-  static create(
-    memoryDir: string,
-    config?: TapeConfig,
-    workspace?: string,
-    sessionId?: string,
-  ): MemoryTapeService {
+  static create(memoryDir: string, config?: TapeConfig, workspace?: string, sessionId?: string): MemoryTapeService {
     const store = new MemoryTapeStore(memoryDir, config?.tapePath, workspace, sessionId);
     const alwaysInclude = new Set(config?.context?.alwaysInclude ?? []);
     return new MemoryTapeService(store, alwaysInclude, sessionId);
   }
 
-  record(kind: TapeEntryKind, payload: Record<string, unknown>, turn?: number): string {
+  // --- Recording methods ---
+
+  private record(kind: TapeEntryKind, payload: Record<string, unknown>, turn?: number): string {
     const entry: TapeEntry = {
       id: randomUUID(),
       kind,
@@ -63,11 +60,6 @@ export class MemoryTapeService {
     return this.record("anchor", { anchorId: randomUUID(), name, state: state ?? null });
   }
 
-  clear(): void {
-    this.store.clear();
-    this.currentTurn = 0;
-  }
-
   recordMemoryRead(path: string): void {
     this.record("memory/read", { path });
   }
@@ -88,46 +80,14 @@ export class MemoryTapeService {
     this.record("memory/init", { force });
   }
 
-  query(options: {
-    query?: string;
-    kinds?: TapeEntryKind[];
-    limit?: number;
-    since?: string;
-    sinceAnchor?: string;
-    lastAnchor?: boolean;
-    betweenAnchors?: { start: string; end: string };
-    betweenDates?: { start: string; end: string };
-  }): TapeEntry[] {
+  // --- Query methods (delegate to store) ---
+
+  query(options: Parameters<MemoryTapeStore["query"]>[0]): TapeEntry[] {
     return this.store.query(options);
   }
 
   findAnchorByName(name: string): TapeEntry | null {
-    const entries = this.store.query({ kinds: ["anchor", "session/start"] });
-    return entries.find((e) => e.payload.name === name) || null;
-  }
-
-  getEntriesAfterLastAnchor(): TapeEntry[] {
-    return this.store.query({ lastAnchor: true });
-  }
-
-  getEntriesBetweenAnchors(startAnchor: string, endAnchor: string): TapeEntry[] {
-    return this.store.query({ betweenAnchors: { start: startAnchor, end: endAnchor } });
-  }
-
-  searchEntries(query: string, limit?: number): TapeEntry[] {
-    return this.store.query({ query, limit });
-  }
-
-  getEntriesSince(anchorId?: string): TapeEntry[] {
-    return this.store.query({ sinceAnchor: anchorId });
-  }
-
-  getRecentEntries(count: number): TapeEntry[] {
-    return this.store.query({ limit: count });
-  }
-
-  getEntriesByTurn(turn: number): TapeEntry[] {
-    return this.store.query({}).filter((e) => e.turn === turn);
+    return this.store.findAnchorByName(name);
   }
 
   getLastAnchor(): TapeEntry | null {
@@ -150,13 +110,12 @@ export class MemoryTapeService {
     const anchors = entries.filter((e) => e.kind === "anchor" || e.kind === "session/start");
     const lastAnchor = anchors.at(-1) ?? null;
     const lastAnchorIdx = lastAnchor ? entries.indexOf(lastAnchor) : -1;
-    const entriesSinceLastAnchor = lastAnchorIdx >= 0 ? entries.length - lastAnchorIdx - 1 : entries.length;
 
     return {
       totalEntries: entries.length,
       anchorCount: anchors.length,
       lastAnchor,
-      entriesSinceLastAnchor,
+      entriesSinceLastAnchor: lastAnchorIdx >= 0 ? entries.length - lastAnchorIdx - 1 : entries.length,
       memoryReads: entries.filter((e) => e.kind === "memory/read").length,
       memoryWrites: entries.filter((e) => e.kind === "memory/write").length,
     };
@@ -164,5 +123,10 @@ export class MemoryTapeService {
 
   getTapeFileCount(): number {
     return this.store.getTapeFileCount();
+  }
+
+  clear(): void {
+    this.store.clear();
+    this.currentTurn = 0;
   }
 }

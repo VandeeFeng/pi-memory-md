@@ -6,7 +6,9 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { MemoryFrontmatter, MemoryMdSettings } from "./memory-md.js";
 import type { MemoryTapeService } from "./tape/tape-service.js";
+
 export { registerAllTapeTools } from "./tape/tape-tools.js";
+
 import {
   getCurrentDate,
   getMemoryDir,
@@ -25,10 +27,10 @@ function renderWithExpandHint(text: string, theme: Theme, lineCount: number): Te
   if (remaining > 0) {
     text +=
       "\n" +
-        theme.fg("muted", `... (${remaining} more lines,`) +
-        " " +
-        keyHint("app.tools.expand", "to expand") +
-        theme.fg("muted", ")");
+      theme.fg("muted", `... (${remaining} more lines,`) +
+      " " +
+      keyHint("app.tools.expand", "to expand") +
+      theme.fg("muted", ")");
   }
   return new Text(text, 0, 0);
 }
@@ -37,7 +39,7 @@ export function registerMemorySync(
   pi: ExtensionAPI,
   settings: MemoryMdSettings,
   isRepoInitialized: { value: boolean },
-  tapeService?: MemoryTapeService,
+  _tapeService?: MemoryTapeService,
 ): void {
   pi.registerTool({
     name: "memory_sync",
@@ -164,7 +166,7 @@ export function registerMemorySync(
 export function registerMemoryRead(
   pi: ExtensionAPI,
   settings: MemoryMdSettings,
-  tapeService?: MemoryTapeService,
+  _tapeService?: MemoryTapeService,
 ): void {
   pi.registerTool({
     name: "memory_read",
@@ -245,7 +247,7 @@ export function registerMemoryRead(
 export function registerMemoryWrite(
   pi: ExtensionAPI,
   settings: MemoryMdSettings,
-  tapeService?: MemoryTapeService,
+  _tapeService?: MemoryTapeService,
 ): void {
   pi.registerTool({
     name: "memory_write",
@@ -389,7 +391,7 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
 export function registerMemorySearch(
   pi: ExtensionAPI,
   settings: MemoryMdSettings,
-  tapeService?: MemoryTapeService,
+  _tapeService?: MemoryTapeService,
 ): void {
   pi.registerTool({
     name: "memory_search",
@@ -480,7 +482,7 @@ export function registerMemoryInit(
   pi: ExtensionAPI,
   settings: MemoryMdSettings,
   isRepoInitialized: { value: boolean },
-  tapeService?: MemoryTapeService,
+  _tapeService?: MemoryTapeService,
 ): void {
   pi.registerTool({
     name: "memory_init",

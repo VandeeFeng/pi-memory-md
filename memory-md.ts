@@ -4,10 +4,10 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { GrayMatterFile } from "gray-matter";
 import matter from "gray-matter";
-import { registerAllTools, registerAllTapeTools } from "./tools.js";
+import { MemoryFileSelector } from "./tape/tape-selector.js";
 import { MemoryTapeService } from "./tape/tape-service.js";
-import { MemoryFileSelector, ConversationSelector } from "./tape/tape-selector.js";
 import type { TapeConfig } from "./tape/tape-types.js";
+import { registerAllTapeTools, registerAllTools } from "./tools.js";
 
 /**
  * Type definitions for memory files, settings, and git operations.
@@ -472,21 +472,27 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
         if (!tapeService) return;
         const message = msgEvent.message as { role: string; content?: string | Array<{ type: string; text?: string }> };
         if (message.role !== "user") return;
-        const content = typeof message.content === "string" ? message.content : 
-          Array.isArray(message.content) ? message.content.map(c => c.text || "").join("") : "";
+        const content =
+          typeof message.content === "string"
+            ? message.content
+            : Array.isArray(message.content)
+              ? message.content.map((c) => c.text || "").join("")
+              : "";
         tapeService.startNewTurn();
         tapeService.recordUserMessage(content);
       });
-
-
 
       // Record assistant messages (only when complete, not during streaming)
       pi.on("message_end", (msgEvent, _msgCtx) => {
         if (!tapeService) return;
         const message = msgEvent.message as { role: string; content?: string | Array<{ type: string; text?: string }> };
         if (message.role !== "assistant") return;
-        const content = typeof message.content === "string" ? message.content : 
-          Array.isArray(message.content) ? message.content.map(c => c.text || "").join("") : "";
+        const content =
+          typeof message.content === "string"
+            ? message.content
+            : Array.isArray(message.content)
+              ? message.content.map((c) => c.text || "").join("")
+              : "";
         tapeService.recordAssistantMessage(content);
       });
 
@@ -525,7 +531,10 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
         if (toolName === "memory_sync") {
           const params = input as { action: string };
           const syncDetails = details as { success?: boolean; initialized?: boolean } | undefined;
-          tapeService.recordMemorySync(params.action, { success: syncDetails?.success, initialized: syncDetails?.initialized });
+          tapeService.recordMemorySync(params.action, {
+            success: syncDetails?.success,
+            initialized: syncDetails?.initialized,
+          });
         }
 
         if (toolName === "memory_init") {
@@ -536,16 +545,19 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
         // Step 2: After all recordings, check if we need to create a new anchor
         const info = tapeService.getInfo();
         const anchorConfig = settings.tape?.anchor ?? { mode: "threshold", threshold: 15 };
-        
+
         if (anchorConfig.mode === "threshold" && info.entriesSinceLastAnchor >= (anchorConfig.threshold ?? 15)) {
           const now = new Date();
           const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
-          tapeService.createAnchor(`auto/threshold-${timestamp}`, { 
+          tapeService.createAnchor(`auto/threshold-${timestamp}`, {
             reason: "Entries since last anchor exceeded threshold",
             entriesSinceLastAnchor: info.entriesSinceLastAnchor,
-            threshold: anchorConfig.threshold
+            threshold: anchorConfig.threshold,
           });
-          ctx.ui.notify(`Auto-created anchor: ${info.entriesSinceLastAnchor} entries since last anchor (${info.anchorCount} anchors total)`, "info");
+          ctx.ui.notify(
+            `Auto-created anchor: ${info.entriesSinceLastAnchor} entries since last anchor (${info.anchorCount} anchors total)`,
+            "info",
+          );
         }
       });
     }
@@ -583,10 +595,7 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
         // Only inject memory files once per session
         if (!memoryInjected) {
           const memoryFiles = contextSelector.selectFilesForContext(contextConfig.strategy || "smart", limit);
-          const memoryContext = contextSelector.buildContextFromFiles([
-            ...alwaysInclude,
-            ...memoryFiles,
-          ]);
+          const memoryContext = contextSelector.buildContextFromFiles([...alwaysInclude, ...memoryFiles]);
 
           const tapeHint = `
 
@@ -604,10 +613,7 @@ Your conversation history is recorded in tape with anchors (checkpoints).
           // In system-prompt mode, tape overrides system prompt
           if (mode === "system-prompt") {
             memoryInjected = true;
-            ctx.ui.notify(
-              `Tape mode: ${fileCount} memory files injected (overrides system prompt)`,
-              "info",
-            );
+            ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (overrides system prompt)`, "info");
             return {
               systemPrompt: memoryContext + tapeHint,
             };
@@ -615,10 +621,7 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 
           // In message-append mode, return as custom message
           memoryInjected = true;
-          ctx.ui.notify(
-            `Tape mode: ${fileCount} memory files injected (message-append)`,
-            "info",
-          );
+          ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (message-append)`, "info");
           return {
             message: {
               customType: "pi-memory-md-tape",

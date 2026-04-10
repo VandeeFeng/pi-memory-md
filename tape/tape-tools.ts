@@ -2,10 +2,17 @@ import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import type { MemoryTapeService } from "./tape-service.js";
 import { formatEntriesAsMessages } from "./tape-selector.js";
+import type { MemoryTapeService } from "./tape-service.js";
+import type { TapeEntryKind } from "./tape-types.js";
 
 type RenderState = { expanded: boolean; isPartial: boolean };
+
+// --- Shared render helpers ---
+
+function renderText(text: string): Text {
+  return new Text(text, 0, 0);
+}
 
 function renderWithExpandHint(text: string, theme: Theme, lineCount: number): Text {
   const remaining = lineCount - 1;
@@ -20,30 +27,71 @@ function renderWithExpandHint(text: string, theme: Theme, lineCount: number): Te
   return new Text(text, 0, 0);
 }
 
-function renderText(text: string): Text {
-  return new Text(text, 0, 0);
-}
+function renderDefaultResult(
+  result: { content: Array<{ type: string; text?: string }> },
+  state: RenderState,
+  theme: Theme,
+  collapsedSummary: string,
+): Text {
+  if (state.isPartial) return renderText(theme.fg("warning", "Loading..."));
 
-function renderPartial(theme: Theme, message: string): Text {
-  return renderText(theme.fg("warning", message));
-}
+  if (!state.expanded) {
+    const lines = result.content[0]?.text?.split("\n") ?? [];
+    return renderWithExpandHint(theme.fg("success", collapsedSummary), theme, lines.length);
+  }
 
-function renderCollapsed(theme: Theme, summary: string): Text {
-  return renderText(theme.fg("success", summary));
-}
-
-function renderExpanded(theme: Theme, content: unknown): Text {
-  const text =
-    content && typeof content === "object" && "type" in content && content.type === "text" && "text" in content
-      ? (content as { text: string }).text
-      : "";
+  const text = result.content[0]?.text ?? "";
   return renderText(theme.fg("toolOutput", text));
 }
 
-export function registerTapeHandoff(
-  pi: ExtensionAPI,
-  tapeService: MemoryTapeService,
-): void {
+// --- Entry formatting ---
+
+function formatEntrySummary(entry: { kind: string; timestamp: string; payload: Record<string, unknown> }): string {
+  const time = new Date(entry.timestamp).toLocaleTimeString();
+
+  switch (entry.kind) {
+    case "message/user":
+    case "message/assistant": {
+      const role = entry.kind === "message/user" ? "User" : "Assistant";
+      const content = (entry.payload.content as string)?.substring(0, 50) ?? "";
+      return `[${time}] ${role}: ${content}...`;
+    }
+    case "tool_call":
+      return `[${time}] Tool: ${entry.payload.tool}`;
+    case "tool_result":
+      return `[${time}] Result: ${entry.payload.tool}`;
+    case "memory/read":
+      return `[${time}] Memory read: ${entry.payload.path}`;
+    case "memory/write":
+      return `[${time}] Memory write: ${entry.payload.path}`;
+    case "anchor":
+      return `[${time}] Anchor: ${entry.payload.name ?? "unnamed"}`;
+    case "session/start":
+      return `[${time}] Session start`;
+    default:
+      return `[${time}] ${entry.kind}`;
+  }
+}
+
+// --- Tool parameter schemas (shared) ---
+
+const ENTRY_KINDS = [
+  "memory/read",
+  "memory/write",
+  "memory/search",
+  "message/user",
+  "message/assistant",
+  "tool_call",
+  "tool_result",
+  "anchor",
+  "session/start",
+] as const;
+
+const EntryKindUnion = Type.Union(ENTRY_KINDS.map((k) => Type.Literal(k)));
+
+// --- Tool registrations ---
+
+export function registerTapeHandoff(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
   pi.registerTool({
     name: "tape_handoff",
     label: "Tape Handoff",
@@ -52,15 +100,19 @@ export function registerTapeHandoff(
       name: Type.String({
         description: "Anchor name (e.g., 'session/start', 'task/begin', 'handoff')",
       }),
-      summary: Type.Optional(Type.String({
-        description: "Optional summary of this checkpoint",
-      })),
-      state: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
-        description: "Optional state to associate with this anchor",
-      })),
+      summary: Type.Optional(
+        Type.String({
+          description: "Optional summary of this checkpoint",
+        }),
+      ),
+      state: Type.Optional(
+        Type.Record(Type.String(), Type.Unknown(), {
+          description: "Optional state to associate with this anchor",
+        }),
+      ),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params) {
       const { name, summary, state } = params as {
         name: string;
         summary?: string;
@@ -87,72 +139,60 @@ export function registerTapeHandoff(
       return renderText(theme.fg("toolTitle", theme.bold("tape_handoff ")) + theme.fg("accent", args.name));
     },
 
-    renderResult(result, { isPartial, expanded }: RenderState, theme) {
-      const content = result.content[0];
-      
-      if (isPartial) return renderPartial(theme, "Creating anchor...");
-      
-      if (!expanded) {
+    renderResult(result, state: RenderState, theme) {
+      if (state.isPartial) return renderText(theme.fg("warning", "Creating anchor..."));
+
+      if (!state.expanded) {
         const name = (result.details as { name?: string })?.name ?? "Anchor created";
-        const lines = content?.type === "text" ? content.text.split("\n") : [];
-        return renderWithExpandHint(theme.fg("success", name), theme, lines.length);
+        return renderText(theme.fg("success", name));
       }
-      
-      return renderExpanded(theme, content);
+
+      return renderText(theme.fg("toolOutput", (result.content[0] as { text?: string })?.text ?? ""));
     },
   });
 }
 
-export function registerTapeAnchors(
-  pi: ExtensionAPI,
-  tapeService: MemoryTapeService,
-): void {
+export function registerTapeAnchors(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
   pi.registerTool({
     name: "tape_anchors",
     label: "Tape Anchors",
     description: "List all anchor checkpoints in the tape with context",
     parameters: Type.Object({
-      limit: Type.Optional(Type.Integer({
-        description: "Maximum number of anchors to return (default: 20)",
-        minimum: 1,
-        maximum: 100,
-      })),
-      contextLines: Type.Optional(Type.Integer({
-        description: "Number of context lines before/after each anchor (default: 1)",
-        minimum: 0,
-        maximum: 5,
-      })),
+      limit: Type.Optional(
+        Type.Integer({
+          description: "Maximum number of anchors to return (default: 20)",
+          minimum: 1,
+          maximum: 100,
+        }),
+      ),
+      contextLines: Type.Optional(
+        Type.Integer({
+          description: "Number of context lines before/after each anchor (default: 1)",
+          minimum: 0,
+          maximum: 5,
+        }),
+      ),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params) {
       const { limit = 20, contextLines = 1 } = params as { limit?: number; contextLines?: number };
-      
-      // Get all entries to find context
+
       const allEntries = tapeService.query({});
-      const anchorEntries = tapeService.query({ kinds: ["anchor", "session/start"], limit });
+      const anchorEntries = allEntries.filter((e) => e.kind === "anchor" || e.kind === "session/start").slice(-limit);
 
-      const anchorsWithContext = anchorEntries.map((anchorEntry) => {
-        const anchorIndex = allEntries.findIndex((e) => e.id === anchorEntry.id);
-        
-        // Get context before anchor
-        const beforeContext = [];
-        for (let i = anchorIndex - 1; i >= Math.max(0, anchorIndex - contextLines); i--) {
-          beforeContext.unshift(formatEntrySummary(allEntries[i]));
-        }
+      const anchorsWithContext = anchorEntries.map((anchor) => {
+        const idx = allEntries.findIndex((e) => e.id === anchor.id);
 
-        // Get context after anchor
-        const afterContext = [];
-        for (let i = anchorIndex + 1; i < Math.min(allEntries.length, anchorIndex + 1 + contextLines); i++) {
-          afterContext.push(formatEntrySummary(allEntries[i]));
-        }
+        const before = allEntries.slice(Math.max(0, idx - contextLines), idx).map(formatEntrySummary);
+        const after = allEntries.slice(idx + 1, idx + 1 + contextLines).map(formatEntrySummary);
 
         return {
-          id: anchorEntry.id,
-          name: (anchorEntry.payload.name as string) ?? "unnamed",
-          timestamp: anchorEntry.timestamp,
-          state: (anchorEntry.payload.state as Record<string, unknown>) ?? {},
-          beforeContext,
-          afterContext,
+          id: anchor.id,
+          name: (anchor.payload.name as string) ?? "unnamed",
+          timestamp: anchor.timestamp,
+          state: (anchor.payload.state as Record<string, unknown>) ?? {},
+          beforeContext: before,
+          afterContext: after,
         };
       });
 
@@ -163,16 +203,10 @@ export function registerTapeAnchors(
             anchorsWithContext
               .map((a) => {
                 const stateStr = Object.keys(a.state).length > 0 ? `\n  State: ${JSON.stringify(a.state)}` : "";
-                
-                let contextStr = "";
-                if (a.beforeContext.length > 0) {
-                  contextStr += "\n  Before:\n    " + a.beforeContext.join("\n    ");
-                }
-                if (a.afterContext.length > 0) {
-                  contextStr += "\n  After:\n    " + a.afterContext.join("\n    ");
-                }
-                
-                return `  - ${a.name} (${new Date(a.timestamp).toLocaleString()})${stateStr}${contextStr}`;
+                const beforeStr =
+                  a.beforeContext.length > 0 ? `\n  Before:\n    ${a.beforeContext.join("\n    ")}` : "";
+                const afterStr = a.afterContext.length > 0 ? `\n  After:\n    ${a.afterContext.join("\n    ")}` : "";
+                return `  - ${a.name} (${new Date(a.timestamp).toLocaleString()})${stateStr}${beforeStr}${afterStr}`;
               })
               .join("\n\n");
 
@@ -189,104 +223,68 @@ export function registerTapeAnchors(
       return renderText(text);
     },
 
-    renderResult(result, { isPartial, expanded }: RenderState, theme) {
-      const details = result.details as { anchors?: Array<{ name: string; timestamp: string; state: Record<string, unknown>; beforeContext: string[]; afterContext: string[] }>; count?: number } | undefined;
-      const content = result.content[0];
+    renderResult(result, state: RenderState, theme) {
+      if (state.isPartial) return renderText(theme.fg("warning", "Listing anchors..."));
 
-      if (isPartial) {
-        return renderPartial(theme, "Listing anchors...");
-      }
+      const details = result.details as
+        | {
+            anchors?: Array<{
+              name: string;
+              timestamp: string;
+              state: Record<string, unknown>;
+              beforeContext: string[];
+              afterContext: string[];
+            }>;
+            count?: number;
+          }
+        | undefined;
 
-      if (!expanded && details?.anchors && details.anchors.length > 0) {
+      if (!state.expanded && details?.anchors && details.anchors.length > 0) {
         const first = details.anchors[0];
         const time = new Date(first.timestamp).toLocaleTimeString();
-        
-        // Calculate total line count for expand hint
-        let lineCount = 1; // anchor name line
-        if (first.beforeContext.length > 0) {
-          lineCount += 1 + first.beforeContext.length; // "Before:" + context lines
-        }
-        if (first.afterContext.length > 0) {
-          lineCount += 1 + first.afterContext.length; // "After:" + context lines
-        }
-        if (Object.keys(first.state).length > 0) {
-          lineCount += 1; // state line
-        }
-        
-        // Total anchors to show (for hint)
-        const totalAnchors = details.count ?? 1;
-        
         let summary = theme.fg("success", `${first.name} (${time})`);
 
         if (first.beforeContext.length > 0) {
-          summary += "\n" + theme.fg("muted", "Before:");
-          first.beforeContext.forEach((ctx) => {
-            summary += "\n  " + theme.fg("muted", ctx);
-          });
+          summary +=
+            "\n" +
+            theme.fg("muted", "Before:") +
+            "\n  " +
+            first.beforeContext.map((c) => theme.fg("muted", c)).join("\n  ");
         }
-
         if (first.afterContext.length > 0) {
-          summary += "\n" + theme.fg("muted", "After:");
-          first.afterContext.forEach((ctx) => {
-            summary += "\n  " + theme.fg("muted", ctx);
-          });
+          summary +=
+            "\n" +
+            theme.fg("muted", "After:") +
+            "\n  " +
+            first.afterContext.map((c) => theme.fg("muted", c)).join("\n  ");
         }
-        
         if (Object.keys(first.state).length > 0) {
-          summary += "\n" + theme.fg("muted", `State: ${JSON.stringify(first.state)}`);
+          summary += `\n${theme.fg("muted", `State: ${JSON.stringify(first.state)}`)}`;
         }
 
-        return renderWithExpandHint(summary, theme, totalAnchors);
+        return renderWithExpandHint(summary, theme, details.count ?? 1);
       }
 
-      if (!expanded) {
-        return renderCollapsed(theme, `${details?.count ?? 0} anchor(s)`);
+      if (!state.expanded) {
+        return renderText(theme.fg("success", `${details?.count ?? 0} anchor(s)`));
       }
 
-      return renderExpanded(theme, content);
+      return renderText(theme.fg("toolOutput", (result.content[0] as { text?: string })?.text ?? ""));
     },
   });
 }
 
-function formatEntrySummary(entry: { kind: string; timestamp: string; payload: Record<string, unknown> }): string {
-  const time = new Date(entry.timestamp).toLocaleTimeString();
-  
-  switch (entry.kind) {
-    case "message/user":
-      return `[${time}] User: ${(entry.payload.content as string)?.substring(0, 50) ?? ""}...`;
-    case "message/assistant":
-      return `[${time}] Assistant: ${(entry.payload.content as string)?.substring(0, 50) ?? ""}...`;
-    case "tool_call":
-      return `[${time}] Tool: ${entry.payload.tool}`;
-    case "tool_result":
-      return `[${time}] Result: ${entry.payload.tool}`;
-    case "memory/read":
-      return `[${time}] Memory read: ${entry.payload.path}`;
-    case "memory/write":
-      return `[${time}] Memory write: ${entry.payload.path}`;
-    case "anchor":
-      return `[${time}] Anchor: ${entry.payload.name ?? "unnamed"}`;
-    case "session/start":
-      return `[${time}] Session start`;
-    default:
-      return `[${time}] ${entry.kind}`;
-  }
-}
-
-export function registerTapeInfo(
-  pi: ExtensionAPI,
-  tapeService: MemoryTapeService,
-): void {
+export function registerTapeInfo(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
   pi.registerTool({
     name: "tape_info",
     label: "Tape Info",
     description: "Get tape information (entries, anchors, last anchor, etc.)",
     parameters: Type.Object({}),
 
-    async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId) {
       const info = tapeService.getInfo();
       const lastAnchorName = info.lastAnchor
-        ? (info.lastAnchor.payload.name as string) ?? info.lastAnchor.kind
+        ? ((info.lastAnchor.payload.name as string) ?? info.lastAnchor.kind)
         : "none";
       const tapeFileCount = tapeService.getTapeFileCount();
 
@@ -327,193 +325,137 @@ export function registerTapeInfo(
       return renderText(theme.fg("toolTitle", theme.bold("tape_info")));
     },
 
-    renderResult(result, { isPartial, expanded }: RenderState, theme) {
-      const content = result.content[0];
-      
-      if (isPartial) return renderPartial(theme, "Getting info...");
-      
-      if (!expanded) {
-        const details = result.details as { totalEntries?: number; anchorCount?: number } | undefined;
-        const lines = content?.type === "text" ? content.text.split("\n") : [];
-        const summary = `📊 ${details?.totalEntries ?? 0} entries, ${details?.anchorCount ?? 0} anchors`;
-        return renderWithExpandHint(theme.fg("success", summary), theme, lines.length);
-      }
-      
-      return renderExpanded(theme, content);
+    renderResult(result, state: RenderState, theme) {
+      const details = result.details as { totalEntries?: number; anchorCount?: number } | undefined;
+      return renderDefaultResult(
+        result,
+        state,
+        theme,
+        `📊 ${details?.totalEntries ?? 0} entries, ${details?.anchorCount ?? 0} anchors`,
+      );
     },
   });
 }
 
-const ENTRY_KINDS = [
-  "memory/read",
-  "memory/write",
-  "memory/search",
-  "message/user",
-  "message/assistant",
-  "tool_call",
-  "tool_result",
-  "anchor",
-  "session/start",
-] as const;
-
-export function registerTapeSearch(
-  pi: ExtensionAPI,
-  tapeService: MemoryTapeService,
-): void {
+export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
   pi.registerTool({
     name: "tape_search",
     label: "Tape Search",
     description: "Search tape entries by kind or content",
     parameters: Type.Object({
-      kinds: Type.Optional(Type.Array(Type.Union(
-        ENTRY_KINDS.map((k) => Type.Literal(k))
-      ))),
-      limit: Type.Optional(Type.Integer({
-        description: "Maximum number of results (default: 20)",
-        minimum: 1,
-        maximum: 100,
-      })),
-      sinceAnchor: Type.Optional(Type.String({
-        description: "Anchor ID to search from (entries after this anchor)",
-      })),
+      kinds: Type.Optional(Type.Array(EntryKindUnion)),
+      limit: Type.Optional(
+        Type.Integer({
+          description: "Maximum number of results (default: 20)",
+          minimum: 1,
+          maximum: 100,
+        }),
+      ),
+      sinceAnchor: Type.Optional(
+        Type.String({
+          description: "Anchor ID to search from (entries after this anchor)",
+        }),
+      ),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const { kinds, limit = 20, sinceAnchor } = params as {
+    async execute(_toolCallId, params) {
+      const {
+        kinds,
+        limit = 20,
+        sinceAnchor,
+      } = params as {
         kinds?: string[];
         limit?: number;
         sinceAnchor?: string;
       };
 
-      const entries = tapeService.query({ kinds: kinds as any, limit, sinceAnchor });
+      const entries = tapeService.query({ kinds: kinds as TapeEntryKind[], limit, sinceAnchor });
 
-      const summary = [
+      const header = [
         `Tape search results: ${entries.length} match(es)`,
         ...(kinds ? [`Filtered by kinds: ${kinds.join(", ")}`] : []),
         ...(sinceAnchor ? [`Since anchor: ${sinceAnchor}`] : []),
-        "",
-        ...entries.slice(0, limit).map((e) => {
+      ].join("\n");
+
+      const results = entries
+        .map((e) => {
           const timestamp = new Date(e.timestamp).toLocaleTimeString();
           const payload = JSON.stringify(e.payload).slice(0, 80);
           return `[${timestamp}] ${e.kind}: ${payload}...`;
-        }),
-      ].join("\n");
+        })
+        .join("\n");
 
       return {
-        content: [{ type: "text", text: summary }],
-        details: { entries, count: entries.length, filtered: kinds?.length ? entries.length : 0 },
+        content: [{ type: "text", text: `${header}\n\n${results}` }],
+        details: { entries, count: entries.length },
       };
     },
 
     renderCall(args, theme) {
-      const text = theme.fg("toolTitle", theme.bold("tape_search")) + (args.kinds ? ` ${theme.fg("muted", args.kinds.join(","))}` : "");
-      return renderText(text);
+      return renderText(
+        theme.fg("toolTitle", theme.bold("tape_search")) +
+          (args.kinds ? ` ${theme.fg("muted", args.kinds.join(","))}` : ""),
+      );
     },
 
-    renderResult(result, { isPartial, expanded }: RenderState, theme) {
-      const content = result.content[0];
-      
-      if (isPartial) return renderPartial(theme, "Searching...");
-      
-      if (!expanded) {
-        const details = result.details as { count?: number } | undefined;
-        const lines = content?.type === "text" ? content.text.split("\n") : [];
-        const summary = `${details?.count ?? 0} match(es)`;
-        return renderWithExpandHint(theme.fg("success", summary), theme, lines.length);
-      }
-      
-      return renderExpanded(theme, content);
+    renderResult(result, state: RenderState, theme) {
+      const details = result.details as { count?: number } | undefined;
+      return renderDefaultResult(result, state, theme, `${details?.count ?? 0} match(es)`);
     },
   });
 }
 
-export function registerTapeReset(
-  pi: ExtensionAPI,
-  tapeService: MemoryTapeService,
-): void {
-  pi.registerTool({
-    name: "tape_reset",
-    label: "Tape Reset",
-    description: "Reset the tape (creates a new session/start anchor)",
-    parameters: Type.Object({
-      archive: Type.Optional(Type.Boolean({
-        description: "Archive old tape before reset (default: false)",
-      })),
-    }),
-
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const { archive = false } = params as { archive?: boolean };
-
-      tapeService.clear();
-      tapeService.recordSessionStart();
-
-      const summary = archive
-        ? "Tape archived and reset with new session/start anchor"
-        : "Tape reset with new session/start anchor";
-
-      return {
-        content: [{ type: "text", text: summary }],
-        details: { archived: archive },
-      };
-    },
-
-    renderCall(args, theme) {
-      const text = theme.fg("toolTitle", theme.bold("tape_reset")) + (args.archive ? ` ${theme.fg("warning", "--archive")}` : "");
-      return renderText(text);
-    },
-
-    renderResult(result, { isPartial, expanded }: RenderState, theme) {
-      const content = result.content[0] as { type: string; text: string } | undefined;
-      
-      if (isPartial) return renderPartial(theme, "Resetting...");
-      
-      if (!expanded) {
-        const lines = content?.text?.split("\n") ?? [];
-        return renderWithExpandHint(theme.fg("success", content?.text ?? ""), theme, lines.length);
-      }
-      
-      return renderText(theme.fg("success", content?.text ?? ""));
-    },
-  });
-}
-
-export function registerTapeRead(
-  pi: ExtensionAPI,
-  tapeService: MemoryTapeService,
-): void {
+export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
   pi.registerTool({
     name: "tape_read",
     label: "Tape Read",
-    description: "Read tape entries as formatted messages (for context). Supports fluent query: after anchor, between dates, text search, kind filter, limit",
+    description:
+      "Read tape entries as formatted messages (for context). Supports fluent query: after anchor, between dates, text search, kind filter, limit",
     parameters: Type.Object({
-      afterAnchor: Type.Optional(Type.String({
-        description: "Anchor name to read entries after (e.g., 'task/start')",
-      })),
-      lastAnchor: Type.Optional(Type.Boolean({
-        description: "Read entries after the last anchor (default: false)",
-      })),
-      betweenAnchors: Type.Optional(Type.Object({
-        start: Type.String({ description: "Start anchor name" }),
-        end: Type.String({ description: "End anchor name" }),
-      }, { description: "Read entries between two anchors" })),
-      betweenDates: Type.Optional(Type.Object({
-        start: Type.String({ description: "Start date (ISO format, e.g., '2026-01-01')" }),
-        end: Type.String({ description: "End date (ISO format, e.g., '2026-01-31')" }),
-      }, { description: "Read entries between two dates" })),
-      query: Type.Optional(Type.String({
-        description: "Text search in entry content",
-      })),
-      kinds: Type.Optional(Type.Array(Type.Union(
-        ENTRY_KINDS.map((k) => Type.Literal(k))
-      ))),
-      limit: Type.Optional(Type.Integer({
-        description: "Maximum number of entries to return (default: 20)",
-        minimum: 1,
-        maximum: 100,
-      })),
+      afterAnchor: Type.Optional(
+        Type.String({
+          description: "Anchor name to read entries after (e.g., 'task/start')",
+        }),
+      ),
+      lastAnchor: Type.Optional(
+        Type.Boolean({
+          description: "Read entries after the last anchor (default: false)",
+        }),
+      ),
+      betweenAnchors: Type.Optional(
+        Type.Object(
+          {
+            start: Type.String({ description: "Start anchor name" }),
+            end: Type.String({ description: "End anchor name" }),
+          },
+          { description: "Read entries between two anchors" },
+        ),
+      ),
+      betweenDates: Type.Optional(
+        Type.Object(
+          {
+            start: Type.String({ description: "Start date (ISO format, e.g., '2026-01-01')" }),
+            end: Type.String({ description: "End date (ISO format, e.g., '2026-01-31')" }),
+          },
+          { description: "Read entries between two dates" },
+        ),
+      ),
+      query: Type.Optional(
+        Type.String({
+          description: "Text search in entry content",
+        }),
+      ),
+      kinds: Type.Optional(Type.Array(EntryKindUnion)),
+      limit: Type.Optional(
+        Type.Integer({
+          description: "Maximum number of entries to return (default: 20)",
+          minimum: 1,
+          maximum: 100,
+        }),
+      ),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params) {
       const {
         afterAnchor,
         betweenAnchors,
@@ -532,40 +474,25 @@ export function registerTapeRead(
         limit?: number;
       };
 
-      let entries;
+      const queryOptions: Parameters<typeof tapeService.query>[0] = {
+        query,
+        kinds: kinds as TapeEntryKind[],
+        limit,
+      };
+
       if (betweenAnchors) {
-        const startAnchor = tapeService.findAnchorByName(betweenAnchors.start);
-        const endAnchor = tapeService.findAnchorByName(betweenAnchors.end);
-        if (!startAnchor || !endAnchor) {
-          return {
-            content: [{ type: "text", text: "Error: Anchor not found" }],
-            details: { error: "One or both anchors not found" },
-          };
-        }
-        entries = tapeService.query({ sinceAnchor: startAnchor.id, kinds: kinds as any, limit });
-        const endAnchorEntries = tapeService.query({ sinceAnchor: endAnchor.id, limit: 1 });
-        if (endAnchorEntries.length > 0) {
-          const endIdx = entries.findIndex((e) => e.id === endAnchor.id);
-          if (endIdx >= 0) entries = entries.slice(0, endIdx);
-        }
+        queryOptions.betweenAnchors = betweenAnchors;
       } else if (betweenDates) {
-        entries = tapeService.query({ betweenDates, query, kinds: kinds as any, limit });
+        queryOptions.betweenDates = betweenDates;
       } else if (afterAnchor) {
-        const anchor = tapeService.findAnchorByName(afterAnchor);
-        if (!anchor) {
-          return {
-            content: [{ type: "text", text: `Error: Anchor '${afterAnchor}' not found` }],
-            details: { error: "Anchor not found" },
-          };
-        }
-        entries = tapeService.query({ sinceAnchor: anchor.id, query, kinds: kinds as any, limit });
+        queryOptions.sinceAnchor = afterAnchor;
       } else if (lastAnchor) {
-        entries = tapeService.query({ lastAnchor: true, query, kinds: kinds as any, limit });
-      } else {
-        entries = tapeService.query({ query, kinds: kinds as any, limit });
+        queryOptions.lastAnchor = true;
       }
 
+      const entries = tapeService.query(queryOptions);
       const messages = formatEntriesAsMessages(entries);
+
       const summary =
         `Retrieved ${messages.length} messages from tape:\n\n` +
         messages.map((m) => `${m.role}: ${m.content.slice(0, 100)}${m.content.length > 100 ? "..." : ""}`).join("\n");
@@ -585,27 +512,59 @@ export function registerTapeRead(
       return renderText(parts.join(" "));
     },
 
-    renderResult(result, { isPartial, expanded }: RenderState, theme) {
-      const content = result.content[0];
-      
-      if (isPartial) return renderPartial(theme, "Reading tape...");
-      
-      if (!expanded) {
-        const details = result.details as { count?: number } | undefined;
-        const lines = content?.type === "text" ? content.text.split("\n") : [];
-        const summary = `${details?.count ?? 0} messages`;
-        return renderWithExpandHint(theme.fg("success", summary), theme, lines.length);
-      }
-      
-      return renderExpanded(theme, content);
+    renderResult(result, state: RenderState, theme) {
+      const details = result.details as { count?: number } | undefined;
+      return renderDefaultResult(result, state, theme, `${details?.count ?? 0} messages`);
     },
   });
 }
 
-export function registerAllTapeTools(
-  pi: ExtensionAPI,
-  tapeService: MemoryTapeService,
-): void {
+export function registerTapeReset(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
+  pi.registerTool({
+    name: "tape_reset",
+    label: "Tape Reset",
+    description: "Reset the tape (creates a new session/start anchor)",
+    parameters: Type.Object({
+      archive: Type.Optional(
+        Type.Boolean({
+          description: "Archive old tape before reset (default: false)",
+        }),
+      ),
+    }),
+
+    async execute(_toolCallId, params) {
+      const { archive = false } = params as { archive?: boolean };
+
+      tapeService.clear();
+      tapeService.recordSessionStart();
+
+      const text = archive
+        ? "Tape archived and reset with new session/start anchor"
+        : "Tape reset with new session/start anchor";
+
+      return {
+        content: [{ type: "text", text }],
+        details: { archived: archive },
+      };
+    },
+
+    renderCall(args, theme) {
+      return renderText(
+        theme.fg("toolTitle", theme.bold("tape_reset")) + (args.archive ? ` ${theme.fg("warning", "--archive")}` : ""),
+      );
+    },
+
+    renderResult(result, state: RenderState, theme) {
+      if (state.isPartial) return renderText(theme.fg("warning", "Resetting..."));
+
+      const text = (result.content[0] as { text?: string })?.text ?? "";
+      if (!state.expanded) return renderText(theme.fg("success", text));
+      return renderText(theme.fg("success", text));
+    },
+  });
+}
+
+export function registerAllTapeTools(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
   registerTapeHandoff(pi, tapeService);
   registerTapeAnchors(pi, tapeService);
   registerTapeInfo(pi, tapeService);
