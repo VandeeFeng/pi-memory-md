@@ -13,6 +13,7 @@ import {
   syncRepository,
   writeMemoryFile,
 } from "./memoryMdCore.js";
+import { type SearchField, searchMemoryFiles } from "./search-engine.js";
 import type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
 
 // Re-export types for convenience
@@ -355,42 +356,52 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
   pi.registerTool({
     name: "memory_search",
     label: "Memory Search",
-    description: "Search memory files by content or tags",
+    description:
+      "Search memory files by content, tags, or description." +
+      " Supports regex (e.g. 'typescript|javascript', 'fail.*build')." +
+      " Multi-word queries use OR logic ranked by relevance -- use keywords, not full sentences.",
     parameters: Type.Object({
-      query: Type.String({ description: "Search query" }),
-      searchIn: Type.Union([Type.Literal("content"), Type.Literal("tags"), Type.Literal("description")], {
-        description: "Where to search",
+      query: Type.String({
+        description:
+          "Search terms or regex pattern (e.g. 'hook|inject', 'fail.*build'). Multi-word = OR ranked by relevance.",
       }),
+      searchIn: Type.Union(
+        [Type.Literal("content"), Type.Literal("tags"), Type.Literal("description"), Type.Literal("all")],
+        { description: "Where to search" },
+      ),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { query, searchIn } = params as { query: string; searchIn: "content" | "tags" | "description" };
+      const { query, searchIn } = params as { query: string; searchIn: SearchField };
       const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const files = listMemoryFiles(memoryDir);
-      const results: Array<{ path: string; match: string }> = [];
-      const queryLower = query.toLowerCase();
+      const filePaths = listMemoryFiles(memoryDir);
 
-      for (const filePath of files) {
+      // Build file map
+      const fileMap = new Map<string, import("./types.js").MemoryFile>();
+      for (const filePath of filePaths) {
         const memory = readMemoryFile(filePath);
         if (!memory) continue;
         const relPath = path.relative(memoryDir, filePath);
-        const { frontmatter, content } = memory;
-
-        if (searchIn === "content" && content.toLowerCase().includes(queryLower)) {
-          const matchLine = content.split("\n").find((line) => line.toLowerCase().includes(queryLower));
-          results.push({ path: relPath, match: matchLine || content.substring(0, 100) });
-        } else if (searchIn === "tags" && frontmatter.tags?.some((tag) => tag.toLowerCase().includes(queryLower))) {
-          results.push({ path: relPath, match: `Tags: ${frontmatter.tags?.join(", ")}` });
-        } else if (searchIn === "description" && frontmatter.description.toLowerCase().includes(queryLower)) {
-          results.push({ path: relPath, match: frontmatter.description });
-        }
+        fileMap.set(relPath, memory);
       }
+
+      const hits = searchMemoryFiles({ files: fileMap, query, searchIn });
+
+      const results = hits.map((h) => ({
+        path: h.path,
+        match: h.snippet,
+        matchCount: h.matchCount,
+        matchedIn: h.matchedIn,
+      }));
 
       return {
         content: [
           {
             type: "text",
-            text: `Found ${results.length} result(s):\n\n${results.map((r) => `  ${r.path}\n  ${r.match}`).join("\n\n")}`,
+            text:
+              results.length === 0
+                ? "No results found."
+                : `Found ${results.length} result(s):\n\n${results.map((r) => `  ${r.path}\n  ${r.match}`).join("\n\n")}`,
           },
         ],
         details: { results, count: results.length },
