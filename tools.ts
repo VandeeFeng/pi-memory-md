@@ -43,18 +43,6 @@ function buildToolCallText(name: string, args: Record<string, unknown>, theme: T
   return `${text} ${theme.fg("accent", formatValue(value))}`;
 }
 
-function buildPartialText(label: string, theme: Theme): string {
-  return theme.fg("warning", label);
-}
-
-function buildErrorText(message: string, theme: Theme): string {
-  return theme.fg("error", message);
-}
-
-function buildSuccessText(message: string, theme: Theme): string {
-  return theme.fg("success", message);
-}
-
 function getResultText(result: { content: Array<{ type: string; text?: string }> }): string {
   return result.content[0]?.text ?? "";
 }
@@ -73,7 +61,7 @@ function buildExpandHint(totalLines: number, theme: Theme): string {
 
 function renderCollapsed(summary: string, fullText: string, options: { expanded: boolean }, theme: Theme): Text {
   if (options.expanded) return renderText(theme.fg("toolOutput", fullText));
-  return renderText(buildSuccessText(summary, theme) + buildExpandHint(fullText.split("\n").length, theme));
+  return renderText(theme.fg("success", summary) + buildExpandHint(fullText.split("\n").length, theme));
 }
 
 function renderMemoryResult(
@@ -82,11 +70,11 @@ function renderMemoryResult(
   theme: Theme,
   defaults?: { description?: string; tags?: string[] },
 ): Text {
-  if (options.isPartial) return renderText(buildPartialText("Reading...", theme));
+  if (options.isPartial) return renderText(theme.fg("warning", "Reading..."));
   const details = result.details as
     | { error?: boolean; frontmatter?: { description?: string; tags?: string[] } }
     | undefined;
-  if (details?.error) return renderText(buildErrorText(getResultText(result) || "Error", theme));
+  if (details?.error) return renderText(theme.fg("error", getResultText(result) || "Error"));
 
   const description = defaults?.description || details?.frontmatter?.description || "Memory file";
   const tags = defaults?.tags || details?.frontmatter?.tags || [];
@@ -108,20 +96,20 @@ function renderSyncResult(
   options: { expanded: boolean; isPartial: boolean },
   theme: Theme,
 ): Text {
-  if (options.isPartial) return renderText(buildPartialText("Syncing...", theme));
+  if (options.isPartial) return renderText(theme.fg("warning", "Syncing..."));
   const details = result.details as { success?: boolean; initialized?: boolean; timeout?: boolean } | undefined;
   if (details?.initialized === false) return renderText(theme.fg("muted", "Not initialized"));
-  if (details?.timeout) return renderText(buildErrorText(getResultText(result), theme));
+  if (details?.timeout) return renderText(theme.fg("error", getResultText(result)));
 
   const text = getResultText(result);
   if (!options.expanded) {
     const lines = text.split("\n");
     if (details?.success === false) {
-      return renderText(buildErrorText(lines[0] || "Operation failed", theme) + buildExpandHint(lines.length, theme));
+      return renderText(theme.fg("error", lines[0] || "Operation failed") + buildExpandHint(lines.length, theme));
     }
     const summary = details?.success
-      ? buildSuccessText(lines[0] || "Success", theme)
-      : buildSuccessText(lines[0] || "Status", theme);
+      ? theme.fg("success", lines[0] || "Success")
+      : theme.fg("success", lines[0] || "Status");
     return renderText(summary + buildExpandHint(lines.length, theme));
   }
   return renderText(theme.fg("toolOutput", text));
@@ -133,7 +121,7 @@ function renderCountResult(
   theme: Theme,
   label: string,
 ): Text {
-  if (options.isPartial) return renderText(buildPartialText("Loading...", theme));
+  if (options.isPartial) return renderText(theme.fg("warning", "Loading..."));
   const details = result.details as { count?: number } | undefined;
   const text = getResultText(result);
   if (!options.expanded)
@@ -250,7 +238,7 @@ export function registerMemorySync(
 
     renderCall: (args, theme) => new Text(buildToolCallText("memory_sync", args, theme), 0, 0),
     renderResult: (result, options, theme) =>
-      options.isPartial ? renderText(buildPartialText("Syncing...", theme)) : renderSyncResult(result, options, theme),
+      options.isPartial ? renderText(theme.fg("warning", "Syncing...")) : renderSyncResult(result, options, theme),
   });
 }
 
@@ -451,7 +439,7 @@ export function registerMemoryInit(
 
     renderCall: (args, theme) => new Text(buildToolCallText("memory_init", args, theme), 0, 0),
     renderResult: (result, options, theme) => {
-      if (options.isPartial) return renderText(buildPartialText("Initializing...", theme));
+      if (options.isPartial) return renderText(theme.fg("warning", "Initializing..."));
       const details = result.details as { initialized?: boolean; success?: boolean };
       if (details?.initialized) return renderText(theme.fg("muted", "Already initialized"));
       const summary = details?.success ? "Initialized" : "Initialization failed";
@@ -510,7 +498,7 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
 
     renderCall: (_args, theme) => new Text(buildToolCallText("memory_check", {}, theme), 0, 0),
     renderResult: (result, options, theme) => {
-      if (options.isPartial) return renderText(buildPartialText("Checking...", theme));
+      if (options.isPartial) return renderText(theme.fg("warning", "Checking..."));
       const details = result.details as { exists?: boolean; fileCount?: number };
       const summary = (details?.exists ?? true) ? `Structure: ${details?.fileCount ?? 0} files` : "Not initialized";
       return renderCollapsed(summary, getResultText(result), options, theme);
