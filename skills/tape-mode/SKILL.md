@@ -1,134 +1,135 @@
 ---
 name: pi-memory-md-tape-mode
-description: Tape mode for pi-memory-md - anchor-based conversation history and context management. This SKILL provides tape architecture principles, design philosophy, and comprehensive usage guide for all tape tools.
+description: Tape mode for pi-memory-md - anchor-based conversation history and context management using pi session as data source. This SKILL provides tape provides architecture, design philosophy, and comprehensive usage guide.
 ---
 
 # Tape Mode
 
-Tape mode is a **conversation history management system** that records all interactions to a local JSONL file and provides **on-demand, anchor-based context retrieval**. Unlike traditional conversational memory that auto-injects history, tape mode puts the LLM in control of what context to retrieve.
+Tape mode is an **anchor-based conversation history management system** that uses pi session as the data source and maintains only an anchor index locally. It provides on-demand context retrieval with intelligent memory file selection.
 
 ## Design Philosophy
-
 **"Record everything, retrieve on-demand"**
 
 Tape mode is inspired by:
-- **LSTM memory** - Sequential context with checkpoint gates
-- **Git workflow** - Anchors as commits, conversation as branches
-- **Letta memory** - Explicit memory operations with tools
+-- **LSTM memory** - Sequential context with checkpoint gates
+-- **Git workflow** - Anchors as commits, conversation as branches
+-- **Letta memory** - Explicit memory operations with tools
 
-### Key Differences from Traditional Memory
+Tape mode records all interactions from the pi session and provides on-demand, anchor-based context retrieval. Anchors act as named checkpoints that segment the conversation history, enabling efficient selective retrieval without consuming tokens on stale context.
 
-| Feature | Traditional Memory | Tape Mode |
-|---------|-------------------|-----------|
-| **History storage** | In-memory (session-only) | Persistent JSONL file |
-| **Context injection** | Automatic (last N messages) | On-demand (LLM decides) |
-| **Memory operations** | Manual (read/write files) | Auto-recorded + manual |
-| **Checkpoints** | None | Anchors (named checkpoints) |
-| **Token efficiency** | Wastes tokens on stale history | Only retrieve what's needed |
-| **Long-term memory** | Separate memory files | Built-in with search |
-| **Multi-session** | Each session isolated | Continuous across sessions |
-
-## Architecture
-
-### Three-Layer Design
+### Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                     LLM Agent Layer                      │
-│  - Uses tape tools to query history                      │
-│  - Decides what context to retrieve                      │
+│  - Uses tape tools to query session history              │
 │  - Creates anchors for phase transitions                 │
+│  - Decides what context to retrieve                      │
 └─────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────┐
 │                   Tape Service Layer                     │
-│  - Records all events automatically                      │
-│  - Manages anchors and queries                           │
-│  - Provides selectors for context building               │
+│  - Reads from pi session file (JSONL)                    │
+│  - Maintains anchor index (local JSONL)                  │
+│  - Provides query, search, and context selection          │
 └─────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────┐
 │                    Storage Layer                         │
-│  - JSONL file per project/session                        │
-│  - Append-only for performance                           │
-│  - Indexed query support                                 │
+│  - Session entries: pi session file (read-only)         │
+│  - Anchor index: {localPath}/TAPE/anchor-index/        │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Data Flow
+## Core Components
 
-**Recording Path** (Automatic):
-```
-User Message → message_start → tape_recordUserMessage → JSONL
-Tool Call    → tool_call     → tape_recordToolCall    → JSONL
-Tool Result  → tool_result   → tape_recordToolResult  → JSONL
-LLM Response → message_end   → tape_recordAssistantMsg → JSONL
-```
+### 1. Session Reader (`tape/session-reader.ts`)
 
-**Query Path** (On-demand):
-```
-LLM → tape_read(anchor) → tape_query → JSONL parse → formatted messages
-LLM → tape_search       → tape_query → JSONL parse → matching entries
-```
-
-## Tape Entry Types
-
-Every interaction is recorded as a `TapeEntry`:
-
-| Kind | Payload | Example |
-|------|---------|---------|
-| `session/start` | `{ sessionId }` | Session initialization |
-| `message/user` | `{ content }` | User message |
-| `message/assistant` | `{ content }` | LLM response |
-| `tool_call` | `{ tool, args }` | Tool invocation |
-| `tool_result` | `{ tool, result }` | Tool output |
-| `memory/read` | `{ path }` | Memory file read |
-| `memory/write` | `{ path, frontmatter }` | Memory file write |
-| `memory/search` | `{ query, searchIn, count }` | Memory search |
-| `memory/sync` | `{ action, result }` | Git sync operation |
-| `memory/init` | `{ force }` | Memory init |
-| `anchor` | `{ name, state }` | Named checkpoint |
-
-### Turn Tracking
-
-Entries are grouped by conversation `turn`:
-
-```
-Turn 1:
-  - message/user
-  - tool_call (xN)
-  - tool_result (xN)
-  - message/assistant
-
-Turn 2:
-  - message/user
-  - tool_call (xN)
-  ...
-```
-
-### Duplicate Detection
-
-Content hashing prevents recording duplicate operations:
+Reads entries directly from pi session file:
 
 ```typescript
-hash = sha256(JSON.stringify(payload))
-if (seen.has(hash)) skip
-else record()
+// Session file location: ~/.pi/agent/sessions/--{cwd}--/{sessionId}.jsonl
+getSessionFilePath(cwd: string, sessionId: string): string | null
+parseSessionFile(filePath: string): { header: SessionHeader; entries: SessionEntry[] } | null
+getEntriesAfterTimestamp(entries: SessionEntry[], timestamp: string): SessionEntry[]
 ```
 
-Resets on each anchor to allow repeated operations across phases.
+**Entry Types** (from pi session):
+- `message` - User/assistant messages
+- `custom` / `custom_message` - Custom events
+- `thinking_level_change` - Thinking level changes
+- `model_change` - Model switches
+- `compaction` - Session compactions
 
-## Tape Tools
+### 2. Anchor Index (`tape/anchor-index.ts`)
 
-### 1. tape_handoff - Create Anchor Checkpoint
+Local index of anchor checkpoints:
 
-Create a named checkpoint in the conversation history.
+```typescript
+// Storage: {localPath}/TAPE/anchor-index/{projectName}__anchors.jsonl
+// localPath comes from settings ("localPath" field), default: ~/.pi/memory-md/
+interface AnchorEntry {
+  name: string;           // Anchor name (e.g., "session/start", "task/begin")
+  sessionId: string;      // Session ID
+  sessionEntryId: string; // Related session entry ID
+  timestamp: string;      // ISO timestamp
+  state?: Record<string, unknown>;  // Optional state data
+}
+```
+
+**Key Methods:**
+- `append(entry)` - Add new anchor to index
+- `findByName(name)` - Find anchor by name
+- `findBySession(sessionId)` - Get anchors for session
+- `getLastAnchor(sessionId)` - Get most recent anchor
+- `search({ query, since, until })` - Search anchors
+
+### 3. Tape Service (`tape/tape-service.ts`)
+
+Main service combining session reading and anchor management:
+
+```typescript
+class MemoryTapeService {
+  // Anchor operations
+  createAnchor(name: string, state?: Record<string, unknown>): string
+  recordSessionStart(): string  // Creates "session/start" anchor
+  findAnchorByName(name: string): AnchorEntry | null
+  getLastAnchor(): AnchorEntry | null
+  
+  // Query operations (reads from pi session)
+  query(options: TapeQueryOptions): SessionEntry[]
+  getInfo(): {
+    totalEntries: number;
+    anchorCount: number;
+    lastAnchor: AnchorEntry | null;
+    entriesSinceLastAnchor: number;
+  }
+}
+```
+
+### 4. Tape Selectors (`tape/tape-selector.ts`)
+
+**ConversationSelector**: Builds conversation context from session entries
+- Token budget filtering (default: 1000 tokens, 40 entries)
+- Formats entries as messages for context
+
+**MemoryFileSelector**: Intelligently selects memory files
+- **Smart strategy**: Analyzes path access from entries, prioritizes by frequency
+- **Recent-only strategy**: Simply scans directory
+
+### 5. Tape Tools (`tape/tape-tools.ts`)
+
+Six tools registered with pi extension API:
+
+## Tape Tools Reference
+
+### tape_handoff - Create Anchor Checkpoint
 
 ```typescript
 tape_handoff(
-  name: string,           // Anchor name (e.g., "task/start", "session/begin")
-  summary?: string,       // Optional summary
-  state?: Record<string, unknown>  // Optional state data
+  name: string,                    // Anchor name (e.g., "task/begin", "handoff")
+  summary?: string,               // Optional summary (stored in state)
+  state?: Record<string, unknown> // Optional state data
 )
 ```
 
@@ -138,221 +139,187 @@ tape_handoff(
 - Before major context shifts
 - After important decisions
 
-**Best practices:**
+**Example:**
 ```typescript
 // Phase transition
 tape_handoff(name="task/begin", summary="Starting database migration")
 
-// Save state for later
+// Save state
 tape_handoff(
   name="migration/checkpoint",
   state={ tablesCompleted: 5, totalTables: 10 }
 )
-
-// Session milestone
-tape_handoff(name="bug/resolution", summary="Fixed connection timeout issue")
 ```
-
-**Returns:** `Anchor created: {name}` (~5-10 tokens)
 
 ---
 
-### 2. tape_anchors - List All Anchors
-
-List all anchor checkpoints in the tape.
+### tape_anchors - List All Anchors
 
 ```typescript
-tape_anchors(limit?: number)  // Max 100, default 20
+tape_anchors(
+  limit?: number,          // Max anchors (default: 20, max: 100)
+  contextLines?: number    // Context lines before/after (default: 1)
+)
 ```
 
-**Example output:**
-```
-Found 3 anchor(s):
-  - session/start (2026-04-05 14:30:00)
-  - task/begin (2026-04-05 14:35:00)
-    State: {"tablesCompleted": 5, "totalTables": 10}
-  - bug/resolution (2026-04-05 14:42:00)
-```
-
-**Returns:** Anchor list with timestamps and state (~50-200 tokens)
+**Returns:** Anchor list with timestamps, state, and entry context
 
 ---
 
-### 3. tape_info - Get Tape Statistics
-
-Get current tape status and statistics.
+### tape_info - Get Tape Statistics
 
 ```typescript
 tape_info()
 ```
 
-**Example output:**
+**Returns:**
 ```
 📊 Tape Information:
   Total entries: 42
   Anchors: 3
   Last anchor: task/begin
   Entries since last anchor: 8
-  Memory operations: 5 reads, 2 writes
-
-💡 Recommendation: Context is getting large. Consider using tape_handoff.
 ```
-
-**Returns:** Statistics and recommendations (~50-100 tokens)
 
 ---
 
-### 4. tape_read - Read Conversation History
-
-Read tape entries as formatted messages. **Most powerful and commonly used tool.**
+### tape_read - Read Conversation History
 
 ```typescript
 tape_read({
-  afterAnchor?: string,              // Anchor name to start after
-  lastAnchor?: boolean,              // Read after last anchor (default: false)
-  betweenAnchors?: {                 // Read between two anchors
-    start: string,                   //   Start anchor name
-    end: string                      //   End anchor name
-  },
-  betweenDates?: {                   // Read between dates (ISO format)
-    start: string,                   //   Start date
-    end: string                      //   End date
-  },
-  query?: string,                    // Text search in content
-  kinds?: TapeEntryKind[],           // Filter by entry kind
-  limit?: number                     // Max entries (default: 20, max 100)
+  afterAnchor?: string,              // Read after this anchor name
+  lastAnchor?: boolean,              // Read after last anchor
+  betweenAnchors?: { start, end },   // Between two anchors
+  betweenDates?: { start, end },     // ISO date range
+  query?: string,                    // Text search
+  types?: SessionEntry["type"][],    // Filter by type
+  limit?: number                     // Max entries (default: 20)
 })
 ```
 
-**Common usage patterns:**
-
+**Common patterns:**
 ```typescript
-// Get everything since last anchor
+// Everything since last anchor
 tape_read({ lastAnchor: true })
 
-// Get context since task started
+// Context since task started
 tape_read({ afterAnchor: "task/begin" })
 
-// Search for specific discussion
-tape_read({ query: "database schema", kinds: ["message/user", "message/assistant"] })
+// Search messages
+tape_read({ query: "database schema", limit: 10 })
 
-// Get recent messages only
-tape_read({ limit: 10 })
-
-// Get messages between two phases
-tape_read({
-  betweenAnchors: { start: "phase/1", end: "phase/2" }
-})
+// Date range
+tape_read({ betweenDates: { start: "2026-04-01", end: "2026-04-16" } })
 ```
-
-**Returns:** Formatted message history (~100-2000 tokens depending on results)
 
 ---
 
-### 5. tape_search - Search Tape Entries
-
-Search tape entries by kind and content.
+### tape_search - Search Entries and Anchors
 
 ```typescript
 tape_search({
-  kinds?: TapeEntryKind[],           // Filter by entry type
-  sinceAnchor?: string,              // Search after anchor
-  limit?: number                     // Max results (default: 20)
+  kinds?: ("entry" | "anchor" | "all")[],  // What to search
+  types?: SessionEntry["type"][],          // Filter entries by type
+  limit?: number,                           // Max results (default: 20)
+  sinceAnchor?: string,                     // Search from anchor
+  lastAnchor?: boolean,                     // Search from last anchor
+  betweenAnchors?: { start, end },
+  betweenDates?: { start, end },
+  query?: string                            // Text search
 })
 ```
 
-**Example usage:**
-
+**Example:**
 ```typescript
-// Find all memory operations
-tape_search({ kinds: ["memory/read", "memory/write", "memory/search"] })
+// Find anchors matching query
+tape_search({ kinds: ["anchor"], query: "bug" })
 
-// Search for tool calls since anchor
-tape_search({ kinds: ["tool_call"], sinceAnchor: "task/start" })
-
-// Get recent user messages
-tape_search({ kinds: ["message/user"], limit: 5 })
+// Find memory tool calls
+tape_search({ kinds: ["entry"], types: ["custom"], query: "memory" })
 ```
-
-**Returns:** Matching entries list (~50-500 tokens)
 
 ---
 
-### 6. tape_reset - Reset Tape
-
-Clear all tape entries and start fresh.
+### tape_reset - Reset Anchor Index
 
 ```typescript
-tape_reset(archive?: boolean)  // Archive old tape first (default: false)
+tape_reset(archive?: boolean)  // Archive flag (not implemented)
 ```
 
-**When to use:**
-- Starting a completely new session
-- Testing or debugging
-- Tape file corrupted
-
-**Warning:** Cannot undo. Use with caution.
-
-**Returns:** Confirmation message (~20 tokens)
+**Warning:** Clears anchor index and creates new `session/start` anchor.
 
 ---
 
-## Configuration
+## Session Startup Flow
 
-Tape mode is configured in `settings.json`:
+```
+session_start event
+       ↓
+┌──────────────────────────────────────┐
+│ Create MemoryTapeService             │
+│ - Read from pi session file          │
+│ - Initialize anchor index            │
+└──────────────────────────────────────┘
+       ↓
+┌──────────────────────────────────────┐
+│ Register Tape Tools (once)            │
+│ - tape_handoff, tape_anchors, etc.   │
+└──────────────────────────────────────┘
+       ↓
+┌──────────────────────────────────────┐
+│ Create "session/start" anchor        │
+└──────────────────────────────────────┘
+       ↓
+┌──────────────────────────────────────┐
+│ Register tool_result listener         │
+│ - Auto-anchor on threshold           │
+└──────────────────────────────────────┘
+       ↓
+before_agent_start event
+       ↓
+┌──────────────────────────────────────┐
+│ Inject Memory Context                │
+│ - Select memory files (smart/recent) │
+│ - Build context with tape hint       │
+│ - Inject via system-prompt or        │
+│   message-append                     │
+└──────────────────────────────────────┘
+```
 
-```json
-{
-  "pi-memory-md": {
-    "tape": {
-      "enabled": true,
-      "context": {
-        "strategy": "smart",           // "smart" or "recent-only"
-        "fileLimit": 10,               // Max memory files to inject
-        "alwaysInclude": [],           // Files to always include
-        "maxTapeTokens": 1000,         // Max tokens for tape context
-        "maxTapeEntries": 40,          // Max entries before token limit
-        "includeConversationHistory": true
-      },
-      "anchor": {
-        "mode": "threshold",           // "hand" or "threshold"
-        "threshold": 15                // Auto-create anchor after N entries
-      },
-      "enableDuplicateDetection": true,
-      "tapePath": "~/.pi/memory-md/TAPE"  // Optional custom path
-    }
+## Auto-Anchor Mechanism
+
+When `settings.tape.anchor.mode === "threshold"`:
+
+```typescript
+pi.on("tool_result", () => {
+  const info = tapeService.getInfo();
+  if (info.entriesSinceLastAnchor >= threshold) {
+    tapeService.createAnchor(`auto/threshold-${timestamp}`);
   }
+});
+```
+
+**Default threshold:** 25 entries (configurable in settings)
+
+## Memory Context Injection
+
+Tape mode injects memory files at session startup:
+
+```typescript
+// settings.tape.context
+{
+  strategy: "smart",           // "smart" or "recent-only"
+  fileLimit: 10,               // Max memory files
+  alwaysInclude: [],           // Always include these files
 }
+
+// Injection adds:
+- Memory file list with descriptions/tags
+- Tape hint with tool usage instructions
 ```
 
-### Context Strategy
-
-**Smart Strategy** (default):
-- Analyzes tape history since last anchor
-- Tracks file access frequency and recency
-- Selects most relevant memory files
-- Falls back to filesystem scan if no history
-
-**Recent-Only Strategy:**
-- Simply gets N most recently accessed files
-- Faster but less intelligent
-
-### Anchor Mode
-
-**Threshold Mode** (default):
-- Auto-creates anchor after N entries (default: 15)
-- Good for long conversations
-- Prevents context from growing too large
-
-**Hand Mode**:
-- Only creates anchors when explicitly requested via `tape_handoff`
-- Gives LLM full control
-- Risk: context may grow indefinitely
-
-### Tape Hint (Session Startup)
-
+**Tape Hint:**
 ```
----
 💡 Tape Context Management:
 Your conversation history is recorded in tape with anchors (checkpoints).
 - Use tape_info to check current tape status
@@ -361,7 +328,50 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 - Use tape_handoff to create a new anchor/checkpoint when starting a new task
 ```
 
-**Cost:** ~150 tokens (injected once per session)
+## Configuration
+
+```json
+{
+  "pi-memory-md": {
+    "tape": {
+      "enabled": true,
+      "context": {
+        "strategy": "smart",
+        "fileLimit": 10,
+        "alwaysInclude": [],
+        "maxTapeTokens": 1000,
+        "maxTapeEntries": 40,
+        "includeConversationHistory": true
+      },
+      "anchor": {
+        "mode": "threshold",
+        "threshold": 25
+      }
+    }
+  }
+}
+```
+
+### Context Strategy
+
+**Smart** (default):
+- Analyzes session entries for memory tool usage
+- Tracks file paths accessed
+- Prioritizes by access frequency + recency
+- Falls back to directory scan if no history
+
+**Recent-only**:
+- Scans memory directory directly
+- Returns N most recent files
+- Faster but less context-aware
+
+### Anchor Mode
+
+| Mode | Behavior |
+|------|----------|
+| `threshold` | Auto-creates anchor after N entries |
+| `hand` | Only manual `tape_handoff` |
+| `manual` | Same as `hand` |
 
 ## Usage Patterns
 
@@ -373,7 +383,7 @@ tape_handoff(name="task/auth-api", summary="Implement authentication API")
 
 // ... work on task ...
 
-// Complete milestone
+// Save checkpoint
 tape_handoff(
   name="auth/api-endpoint",
   state={ endpoint: "/api/auth/login", completed: true }
@@ -386,42 +396,26 @@ tape_read({ afterAnchor: "task/auth-api" })
 ### Pattern 2: Debugging Sessions
 
 ```typescript
-// Create checkpoint before changes
+// Checkpoint before changes
 tape_handoff(name="debug/before-fix", state={ bug: "timeout error" })
 
 // ... attempt fix ...
 
-// If successful
-tape_handoff(name="debug/after-fix", summary="Fixed by increasing timeout to 30s")
+// Success or failure anchor
+tape_handoff(name="debug/after-fix", summary="Fixed by increasing timeout")
 
-// If not, revert and review
+// Review what happened
 tape_read({ betweenAnchors: { start: "debug/before-fix", end: "debug/after-fix" } })
 ```
 
-### Pattern 3: Long-Running Projects
-
-```typescript
-// Daily session start
-tape_info()  // Check current state
-
-// Get context since last session
-tape_read({ lastAnchor: true })
-
-// Create session anchor
-tape_handoff(
-  name="session/2025-04-05-morning",
-  state={ focus: "API documentation" }
-)
-```
-
-### Pattern 4: Context Switching
+### Pattern 3: Context Switching
 
 ```typescript
 // Save current state
-tape_handoff(name="context/save", state={ currentTask: "database migration" })
+tape_handoff(name="context/save", state={ currentTask: "migration" })
 
-// Switch to different task
-tape_handoff(name="task/urgent-fix", summary="Hotfix for production bug")
+// Switch task
+tape_handoff(name="task/urgent-fix", summary="Hotfix for production")
 
 // ... fix bug ...
 
@@ -433,15 +427,16 @@ tape_read({ afterAnchor: "context/save" })
 
 ### DO
 
-✅ **Create anchors at phase transitions**
+✅ **Create anchors at meaningful transitions**
 ```typescript
 tape_handoff(name="phase/design", summary="Moving to implementation")
 ```
 
-✅ **Use descriptive anchor names**
+✅ **Use descriptive, hierarchical names**
 ```typescript
 // Good
 tape_handoff(name="bug/auth/timeout-fix")
+tape_handoff(name="task/api/phase2")
 
 // Less useful
 tape_handoff(name="checkpoint")
@@ -455,194 +450,81 @@ tape_handoff(
 )
 ```
 
-✅ **Use `tape_read` with specific queries**
+✅ **Use targeted queries**
 ```typescript
-// Targeted query
-tape_read({ afterAnchor: "task/api", kinds: ["message/user", "message/assistant"] })
+// Specific and efficient
+tape_read({ afterAnchor: "task/api", types: ["message"], limit: 10 })
 
 // Instead of everything
-tape_read()
-```
-
-✅ **Check tape status periodically**
-```typescript
-tape_info()  // See if you need an anchor
+tape_read({})
 ```
 
 ### DON'T
 
 ❌ **Create anchors too frequently**
-```typescript
-// Don't do this
-tape_handoff(name="1")
-tape_handoff(name="2")
-tape_handoff(name="3")
-```
-
 ❌ **Use vague anchor names**
-```typescript
-tape_handoff(name="stuff")  // What stuff?
-```
+❌ **Query without filters in large sessions**
+❌ **Ignore tape_info warnings** (entriesSinceLastAnchor > 20)
 
-❌ **Query entire history without filters**
-```typescript
-tape_read()  // May return thousands of entries
-```
+## Token Costs
 
-❌ **Forget to create anchors in long conversations**
-```typescript
-// 50 messages later...
-tape_read({ lastAnchor: true })  // Returns too much context
-```
+| Tool | Token Cost | When |
+|------|------------|------|
+| `tape_handoff` | ~5-10 | When called |
+| `tape_anchors` | ~50-200 | When called |
+| `tape_info` | ~50-100 | When called |
+| `tape_read` | ~100-2000 | When called |
+| `tape_search` | ~50-500 | When called |
+| `tape_reset` | ~20 | When called |
 
-## Advanced Features
-
-### Turn-Based Analysis
-
-```typescript
-// Get all entries from a specific turn
-tape_search({ kinds: ["tool_call", "tool_result"], sinceAnchor: "task/start" })
-```
-
-### Content Deduplication
-
-```typescript
-// Duplicate operations are automatically skipped
-// This prevents redundant entries when retrying operations
-// Reset happens on each anchor to allow repeats across phases
-```
-
-### Cross-Session Continuity
-
-```typescript
-// Tape persists across sessions
-// Session IDs are recorded in session/start entries
-// Track history across days/weeks
-tape_search({ kinds: ["session/start"] })
-```
+**Key insight:** Only query tools consume tokens, and only when explicitly called.
 
 ## Troubleshooting
 
-### Issue: Tape not recording events
+### Issue: No entries returned
 
-**Symptoms:** `tape_info()` shows 0 entries
+**Check:**
+1. Session file exists: `~/.pi/agent/sessions/`
+2. Anchor name exists: `tape_anchors()`
+3. Try without filters: `tape_read({ limit: 10 })`
 
-**Solutions:**
-1. Check if tape mode is enabled: `"tape": { "enabled": true }`
-2. Restart pi after enabling
-3. Check tape path permissions
+### Issue: Auto-anchor not working
 
-### Issue: Auto-anchor not creating
+**Check:**
+1. `settings.tape.anchor.mode === "threshold"`
+2. Threshold value (default: 25)
+3. `settings.tape.enabled === true`
 
-**Symptoms:** Entries since last anchor exceeds threshold
+### Issue: Memory files not injected
 
-**Solutions:**
-1. Check anchor mode: `"anchor": { "mode": "threshold" }`
-2. Verify threshold value (default: 15)
-3. Manually create anchor: `tape_handoff(name="manual/checkpoint")`
+**Check:**
+1. `settings.tape.enabled === true`
+2. Memory repository initialized: `memory_check`
+3. `core/` directory exists
 
-### Issue: `tape_read` returns no results
+## File Structure
 
-**Symptoms:** Empty result from query
-
-**Solutions:**
-1. Check anchor name exists: `tape_anchors()`
-2. Try without anchor filter: `tape_read({ limit: 10 })`
-3. Check kinds filter matches actual entries
-
-### Issue: Tape file too large
-
-**Symptoms:** Slow queries, large file size
-
-**Solutions:**
-1. Create more anchors to segment history
-2. Use `tape_reset` to start fresh
-3. Adjust threshold to create anchors more frequently
-
-## Migration from Traditional Memory
-
-### Step 1: Enable Tape Mode
-
-```json
-{
-  "pi-memory-md": {
-    "tape": { "enabled": true }
-  }
-}
 ```
+{localPath}/                    # From settings ("localPath"), default: ~/.pi/memory-md/
+└── TAPE/
+    └── anchor-index/
+        └── {projectName}__anchors.jsonl
 
-### Step 2: Restart pi
-
-Tape recording starts automatically.
-
-### Step 3: Create Initial Anchor
-
-```typescript
-tape_handoff(name="migration/start", summary="Migrating from traditional memory")
+~/.pi/agent/sessions/           # pi session storage (read-only)
+└── --{cwd-path}--/
+    └── {sessionId}.jsonl
 ```
-
-### Step 4: Continue Using Memory Tools
-
-Memory file operations still work:
-```typescript
-memory_read(path="core/user/identity.md")
-memory_write(path="core/project/architecture.md", ...)
-```
-
-These are **automatically recorded** to tape.
-
-## When to Use Tape Mode
-
-Use tape mode when:
-
-✅ **Long-running projects** spanning multiple days/weeks
-✅ **Complex debugging** requiring decision history
-✅ **Context switching** between multiple tasks/projects
-✅ **Research work** needing to track exploration path
-✅ **Collaborative debugging** requiring conversation replay
-✅ **Token efficiency** - only retrieve what's needed
-
-## When NOT to Use Tape Mode
-
-Use traditional memory when:
-
-❌ **Simple one-off tasks** not needing history
-❌ **Privacy-sensitive work** (tape stores everything)
-❌ **Minimal context** projects (same info every session)
-❌ **Preference for simplicity** over advanced features
-
-## Token Consumption Analysis
-
-### Recording Costs (Zero)
-
-| Operation | Token Cost |
-|-----------|------------|
-| Writing to JSONL | **0** (local only) |
-| Auto-recording events | **0** (local only) |
-| Creating anchor | **0** (local only) |
-| Duplicate detection | **0** (local only) |
-
-### Query Costs (On-Demand)
-
-| Tool | Min Cost | Max Cost | When Charged |
-|------|----------|----------|--------------|
-| `tape_handoff` | ~5 | ~10 | When LLM calls it |
-| `tape_anchors` | ~50 | ~200 | When LLM calls it |
-| `tape_info` | ~50 | ~100 | When LLM calls it |
-| `tape_read` | ~100 | ~2000 | When LLM calls it |
-| `tape_search` | ~50 | ~500 | When LLM calls it |
-| `tape_reset` | ~20 | ~20 | When LLM calls it |
-
-**Key Insight:** **Only queries consume tokens**, and **only when LLM explicitly calls them**.
 
 ## Related Skills
 
-- `memory-management` - Creating and managing memory files
+- `memory-management` - Memory file CRUD operations
 - `memory-sync` - Git synchronization
-- `memory-init` - Initial repository setup
-- `memory-search` - Finding information in memory files
+- `memory-init` - Repository initialization
+- `memory-search` - Searching memory files
 
 ## Reference
-- https://tape.systems
+
+- Session entry types: `@mariozechner/pi-coding-agent` (SessionEntry)
+- Tape systems: https://tape.systems
 - https://bub.build/
 - https://github.com/bubbuild/bub/tree/main/src/bub

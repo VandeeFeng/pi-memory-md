@@ -67,7 +67,8 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
       const memoryDir = getMemoryDir(settings, ctx.cwd);
       const projectName = path.basename(ctx.cwd);
       const sessionId = ctx.sessionManager.getSessionId();
-      tapeService = MemoryTapeService.create(memoryDir, settings.tape, projectName, sessionId);
+      tapeService = MemoryTapeService.create(settings.localPath!, projectName, sessionId, ctx.cwd);
+      tapeService.setSessionManager(ctx.sessionManager);
       contextSelector = new MemoryFileSelector(tapeService, memoryDir);
       tapeService.recordSessionStart();
 
@@ -76,90 +77,16 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
         tapeToolsRegistered = true;
       }
 
-      pi.on("message_start", (msgEvent, _msgCtx) => {
+      pi.on("tool_result", (_toolEvent, _toolCtx) => {
         if (!tapeService) return;
-        const message = msgEvent.message as { role: string; content?: string | Array<{ type: string; text?: string }> };
-        if (message.role !== "user") return;
-        let content = "";
-        if (typeof message.content === "string") {
-          content = message.content;
-        } else if (Array.isArray(message.content)) {
-          content = message.content.map((c) => c.text || "").join("");
-        }
-        tapeService.startNewTurn();
-        tapeService.recordUserMessage(content);
-      });
-
-      pi.on("message_end", (msgEvent, _msgCtx) => {
-        if (!tapeService) return;
-        const message = msgEvent.message as { role: string; content?: string | Array<{ type: string; text?: string }> };
-        if (message.role !== "assistant") return;
-        let content = "";
-        if (typeof message.content === "string") {
-          content = message.content;
-        } else if (Array.isArray(message.content)) {
-          content = message.content.map((c) => c.text || "").join("");
-        }
-        tapeService.recordAssistantMessage(content);
-      });
-
-      pi.on("tool_call", (toolEvent, _toolCtx) => {
-        if (!tapeService) return;
-        tapeService.recordToolCall(toolEvent.toolName, toolEvent.input as Record<string, unknown>);
-      });
-
-      pi.on("tool_result", (toolEvent, _toolCtx) => {
-        if (!tapeService) return;
-
-        const { toolName, input, details } = toolEvent as {
-          toolName: string;
-          input: Record<string, unknown>;
-          details?: Record<string, unknown>;
-        };
-
-        tapeService.recordToolResult(toolName, details ?? {});
-
-        if (toolName === "memory_read") {
-          const params = input as { path: string };
-          tapeService.recordMemoryRead(params.path);
-        }
-
-        if (toolName === "memory_write") {
-          const params = input as { path: string; description: string; tags?: string[] };
-          tapeService.recordMemoryWrite(params.path, { description: params.description, tags: params.tags });
-        }
-
-        if (toolName === "memory_search") {
-          const params = input as { query: string; searchIn: string };
-          const searchDetails = details as { count?: number } | undefined;
-          tapeService.recordMemorySearch(params.query, params.searchIn, searchDetails?.count || 0);
-        }
-
-        if (toolName === "memory_sync") {
-          const params = input as { action: string };
-          const syncDetails = details as { success?: boolean; initialized?: boolean } | undefined;
-          tapeService.recordMemorySync(params.action, {
-            success: syncDetails?.success,
-            initialized: syncDetails?.initialized,
-          });
-        }
-
-        if (toolName === "memory_init") {
-          const params = input as { force?: boolean };
-          tapeService.recordMemoryInit(params.force || false);
-        }
 
         const info = tapeService.getInfo();
-        const anchorConfig = settings.tape?.anchor ?? { mode: "threshold", threshold: 15 };
+        const anchorConfig = settings.tape?.anchor ?? { mode: "threshold", threshold: 25 };
 
-        if (anchorConfig.mode === "threshold" && info.entriesSinceLastAnchor >= (anchorConfig.threshold ?? 15)) {
+        if (anchorConfig.mode === "threshold" && info.entriesSinceLastAnchor >= (anchorConfig.threshold ?? 25)) {
           const now = new Date();
           const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
-          tapeService.createAnchor(`auto/threshold-${timestamp}`, {
-            reason: "Entries since last anchor exceeded threshold",
-            entriesSinceLastAnchor: info.entriesSinceLastAnchor,
-            threshold: anchorConfig.threshold,
-          });
+          tapeService.createAnchor(`auto/threshold-${timestamp}`);
           ctx.ui.notify(
             `Auto-created anchor: ${info.entriesSinceLastAnchor} entries since last anchor (${info.anchorCount} anchors total)`,
             "info",
@@ -185,82 +112,40 @@ export default function memoryMdExtension(pi: ExtensionAPI) {
     const mode = settings.injection || "message-append";
     const tapeEnabled = settings.tape?.enabled;
 
-    if (tapeEnabled && tapeService && contextSelector) {
-      try {
-        const tapeConfig = settings.tape;
-        const contextConfig = tapeConfig?.context || {
-          strategy: "smart",
-          fileLimit: 10,
-          alwaysInclude: [],
-        };
-        const limit = contextConfig.fileLimit || 10;
-        const alwaysInclude = contextConfig.alwaysInclude || [];
+    if (tapeEnabled && tapeService && contextSelector && !memoryInjected) {
+      const { fileLimit = 10, alwaysInclude = [], strategy = "smart" } = settings.tape?.context ?? {};
 
-        if (!memoryInjected) {
-          const memoryFiles = contextSelector.selectFilesForContext(contextConfig.strategy || "smart", limit);
-          const memoryContext = contextSelector.buildContextFromFiles([...alwaysInclude, ...memoryFiles]);
+      const memoryFiles = contextSelector.selectFilesForContext(strategy, fileLimit);
+      const memoryContext = contextSelector.buildContextFromFiles([...alwaysInclude, ...memoryFiles]);
+      const tapeHint = `\n\n---\n💡 Tape Context Management:\nYour conversation history is recorded in tape with anchors (checkpoints).\n- Use tape_info to check current tape status\n- Use tape_search to query historical entries by kind or content\n- Use tape_anchors to list all anchor checkpoints\n- Use tape_handoff to create a new anchor/checkpoint when starting a new task\n`;
+      const fileCount = memoryFiles.length + alwaysInclude.length;
 
-          const tapeHint = `
+      memoryInjected = true;
 
----
-💡 Tape Context Management:
-Your conversation history is recorded in tape with anchors (checkpoints).
-- Use tape_info to check current tape status
-- Use tape_search to query historical entries by kind or content
-- Use tape_anchors to list all anchor checkpoints
-- Use tape_handoff to create a new anchor/checkpoint when starting a new task
-`;
-
-          const fileCount = memoryFiles.length + alwaysInclude.length;
-
-          if (mode === "system-prompt") {
-            memoryInjected = true;
-            ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (overrides system prompt)`, "info");
-            return {
-              systemPrompt: memoryContext + tapeHint,
-            };
-          }
-
-          memoryInjected = true;
-          ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (message-append)`, "info");
-          return {
-            message: {
-              customType: "pi-memory-md-tape",
-              content: memoryContext + tapeHint,
-              display: false,
-            },
-          };
-        }
-      } catch (error) {
-        console.error("Tape injection failed:", error);
+      if (mode === "system-prompt") {
+        ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (overrides system prompt)`, "info");
+        return { systemPrompt: memoryContext + tapeHint };
       }
-      return undefined;
+
+      ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (message-append)`, "info");
+      return { message: { customType: "pi-memory-md-tape", content: memoryContext + tapeHint, display: false } };
     }
 
-    if (!cachedMemoryContext) return undefined;
-
-    const isFirstInjection = !memoryInjected;
-
-    if (isFirstInjection) {
+    if (cachedMemoryContext && !memoryInjected) {
       memoryInjected = true;
       const fileCount = cachedMemoryContext.split("\n").filter((l) => l.startsWith("-")).length;
       ctx.ui.notify(`Memory injected: ${fileCount} files (${mode})`, "info");
-    }
 
-    if (mode === "message-append" && isFirstInjection) {
-      return {
-        message: {
-          customType: "pi-memory-md",
-          content: `# Project Memory\n\n${cachedMemoryContext}`,
-          display: false,
-        },
-      };
-    }
-
-    if (mode === "system-prompt") {
-      return {
-        systemPrompt: `${event.systemPrompt}\n\n# Project Memory\n\n${cachedMemoryContext}`,
-      };
+      if (mode === "message-append") {
+        return {
+          message: {
+            customType: "pi-memory-md",
+            content: `# Project Memory\n\n${cachedMemoryContext}`,
+            display: false,
+          },
+        };
+      }
+      return { systemPrompt: `${event.systemPrompt}\n\n# Project Memory\n\n${cachedMemoryContext}` };
     }
 
     return undefined;

@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { SessionEntry, SessionMessageEntry } from "@mariozechner/pi-coding-agent";
 import matter from "gray-matter";
 import type { MemoryTapeService } from "./tape-service.js";
-import type { TapeEntry } from "./tape-types.js";
 
 const CHARS_PER_TOKEN = 4;
 
@@ -13,97 +13,65 @@ export interface TapeMessage {
   name?: string;
 }
 
-function entryToMessage(entry: TapeEntry): TapeMessage | null {
-  switch (entry.kind) {
-    case "anchor":
-    case "session/start":
+export function extractMessageContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map((c) => (c as { text?: string }).text || "").join("");
+  return "";
+}
+
+function entryToMessage(entry: SessionEntry): TapeMessage | null {
+  switch (entry.type) {
+    case "message": {
+      const msg = entry as { message: { role: string; content?: unknown } };
       return {
-        role: "assistant",
-        content: `[Anchor: ${entry.payload.name}] ${JSON.stringify(entry.payload.state, null, 2)}`,
+        role: msg.message.role === "user" ? "user" : "assistant",
+        content: extractMessageContent(msg.message.content),
       };
-
-    case "message/user":
-      return { role: "user", content: entry.payload.content as string };
-
-    case "message/assistant":
-      return { role: "assistant", content: entry.payload.content as string };
-
-    case "tool_call":
-      return null; // Tool calls handled in pairs with results
-
-    case "tool_result": {
-      const callId = entry.payload.callId as string;
-      const content =
-        typeof entry.payload.result === "string" ? entry.payload.result : JSON.stringify(entry.payload.result);
-      return { role: "tool", content: content.slice(0, 5000), tool_call_id: callId };
     }
-
-    case "memory/read":
-      return { role: "assistant", content: `[Memory Read] ${entry.payload.path}` };
-
-    case "memory/write":
-      return { role: "assistant", content: `[Memory Write] ${entry.payload.path}` };
-
-    case "memory/search":
+    case "custom":
+    case "custom_message": {
+      const c = entry as { customType?: string; data?: unknown };
       return {
         role: "assistant",
-        content: `[Memory Search] "${entry.payload.query}" returned ${entry.payload.count} results`,
+        content: `[${c.customType?.split("/").pop() ?? "custom"}] ${c.data ? JSON.stringify(c.data, null, 2) : ""}`,
       };
-
+    }
+    case "thinking_level_change":
+      return { role: "assistant", content: `[Thinking level: ${entry.thinkingLevel}]` };
+    case "model_change":
+      return { role: "assistant", content: `[Model: ${entry.provider}/${entry.modelId}]` };
+    case "compaction":
+      return { role: "assistant", content: `[Compaction] ${entry.summary}` };
     default:
       return null;
   }
 }
 
-export function formatEntriesAsMessages(entries: TapeEntry[]): TapeMessage[] {
-  const messages: TapeMessage[] = [];
-  for (const entry of entries) {
-    const msg = entryToMessage(entry);
-    if (msg) messages.push(msg);
-  }
-  return messages;
+export function formatEntriesAsMessages(entries: SessionEntry[]): TapeMessage[] {
+  return entries.map(entryToMessage).filter((msg): msg is TapeMessage => msg !== null);
 }
 
-function formatEntryLine(entry: TapeEntry): string | null {
-  switch (entry.kind) {
-    case "message/user":
-    case "message/assistant": {
-      const content = (entry.payload.content as string)?.substring(0, 80) ?? "";
-      const truncated = content.length > 80 ? `${content}...` : content;
-      return `${entry.kind === "message/user" ? "User" : "Assistant"}: ${truncated}`;
+function formatEntryLine(entry: SessionEntry): string | null {
+  switch (entry.type) {
+    case "message": {
+      const msg = entry as { message: { role: string; content?: unknown } };
+      const content = extractMessageContent(msg.message.content);
+      const truncated = content.length > 80 ? `${content.substring(0, 80)}...` : content;
+      return `${msg.message.role === "user" ? "User" : "Assistant"}: ${truncated}`;
     }
-
-    case "tool_call": {
-      const argsStr = JSON.stringify(entry.payload.args).slice(0, 50);
-      return `Tool: ${entry.payload.tool}(${argsStr})`;
-    }
-
-    case "tool_result": {
-      const resultStr = JSON.stringify(entry.payload.result).slice(0, 50);
-      return `Result: ${entry.payload.tool} -> ${resultStr}`;
-    }
-
-    case "memory/read":
-      return `Memory read: ${entry.payload.path}`;
-
-    case "memory/write":
-      return `Memory write: ${entry.payload.path}`;
-
-    case "memory/search":
-      return `Memory search: ${entry.payload.query}`;
-
-    case "anchor":
-    case "session/start":
-      return `-- Anchor: ${entry.payload.name ?? "checkpoint"} --`;
-
+    case "custom":
+    case "custom_message":
+      return `-- ${(entry as { customType?: string }).customType ?? "custom"} --`;
+    case "thinking_level_change":
+      return `[Thinking: ${entry.thinkingLevel}]`;
+    case "model_change":
+      return `[Model: ${entry.provider}/${entry.modelId}]`;
+    case "compaction":
+      return `[Compaction] ${entry.summary?.substring(0, 50)}`;
     default:
       return null;
   }
 }
-
-// ============================================================================
-// Selectors
-// ============================================================================
 
 export class ConversationSelector {
   constructor(
@@ -112,25 +80,25 @@ export class ConversationSelector {
     private maxEntries = 40,
   ) {}
 
-  selectFromAnchor(anchorId?: string): TapeEntry[] {
+  selectFromAnchor(anchorId?: string): SessionEntry[] {
     const entries = this.tapeService.query({ sinceAnchor: anchorId }).slice(-this.maxEntries);
     return this.filterByTokenBudget(entries);
   }
 
-  buildFormattedContext(entries: TapeEntry[]): string {
+  buildFormattedContext(entries: SessionEntry[]): string {
     const lines = entries.map(formatEntryLine).filter((line): line is string => line !== null);
     return lines.length > 0 ? `${lines.join("\n")}\n\n---\n` : "";
   }
 
-  private filterByTokenBudget(entries: TapeEntry[]): TapeEntry[] {
+  private filterByTokenBudget(entries: SessionEntry[]): SessionEntry[] {
     let totalTokens = 0;
-    const filtered: TapeEntry[] = [];
+    const filtered: SessionEntry[] = [];
 
     for (const entry of entries) {
-      const tokens = Math.ceil(JSON.stringify(entry.payload).length / CHARS_PER_TOKEN);
+      const tokens = Math.ceil(JSON.stringify(entry).length / CHARS_PER_TOKEN);
       if (totalTokens + tokens > this.maxTokens) break;
-      filtered.push(entry);
       totalTokens += tokens;
+      filtered.push(entry);
     }
 
     return filtered;
@@ -148,36 +116,18 @@ export class MemoryFileSelector {
   }
 
   private selectRecentOnly(limit: number): string[] {
-    const entries = this.tapeService.query({ kinds: ["memory/read", "memory/write"] });
-    const paths = new Set<string>();
-
-    for (let i = entries.length - 1; i >= 0 && paths.size < limit; i--) {
-      const entryPath = entries[i].payload.path as string;
-      if (entryPath) paths.add(entryPath);
-    }
-
-    return Array.from(paths);
+    return this.scanMemoryDirectory(limit);
   }
 
   private selectSmart(limit: number): string[] {
     const anchor = this.tapeService.getLastAnchor();
-    const entries = this.tapeService.query({ sinceAnchor: anchor?.id });
+    if (!anchor) return this.scanMemoryDirectory(limit);
+
+    const entries = this.tapeService.query({ sinceAnchor: anchor.name });
     const pathStats = this.analyzePathAccess(entries);
-    const selected = new Set(this.tapeService.getAlwaysInclude());
+    if (pathStats.size === 0) return this.scanMemoryDirectory(limit);
 
-    for (const entryPath of this.sortPathsByStats(pathStats)) {
-      selected.add(entryPath);
-      if (selected.size >= limit) break;
-    }
-
-    if (selected.size === 0) {
-      for (const entryPath of this.scanMemoryDirectory(limit)) {
-        selected.add(entryPath);
-        if (selected.size >= limit) break;
-      }
-    }
-
-    return Array.from(selected);
+    return this.sortPathsByStats(pathStats).slice(0, limit);
   }
 
   buildContextFromFiles(filePaths: string[]): string {
@@ -192,29 +142,36 @@ export class MemoryFileSelector {
     return lines.join("\n");
   }
 
-  private analyzePathAccess(entries: TapeEntry[]): Map<string, { count: number; lastAccess: number }> {
+  private analyzePathAccess(entries: SessionEntry[]): Map<string, { count: number; lastAccess: number }> {
     const pathStats = new Map<string, { count: number; lastAccess: number }>();
 
     for (const entry of entries) {
-      if (entry.kind !== "memory/read" && entry.kind !== "memory/write") continue;
-      const entryPath = entry.payload.path as string;
-      if (!entryPath) continue;
+      if (entry.type !== "message") continue;
+      const msg = entry as SessionMessageEntry;
+      if (msg.message.role !== "assistant") continue;
+      if (!Array.isArray(msg.message.content)) continue;
 
-      const stats = pathStats.get(entryPath) ?? { count: 0, lastAccess: 0 };
-      stats.count++;
-      stats.lastAccess = Math.max(stats.lastAccess, new Date(entry.timestamp).getTime());
-      pathStats.set(entryPath, stats);
+      for (const block of msg.message.content) {
+        if (block.type !== "toolCall") continue;
+        if (block.name !== "memory_read" && block.name !== "memory_write") continue;
+
+        const entryPath = block.arguments.path as string | undefined;
+        if (!entryPath) continue;
+
+        const stats = pathStats.get(entryPath) ?? { count: 0, lastAccess: 0 };
+        stats.count++;
+        stats.lastAccess = Math.max(stats.lastAccess, new Date(entry.timestamp).getTime());
+        pathStats.set(entryPath, stats);
+      }
     }
 
     return pathStats;
   }
 
   private sortPathsByStats(pathStats: Map<string, { count: number; lastAccess: number }>): string[] {
-    return Array.from(pathStats.keys()).sort((a, b) => {
-      const statsA = pathStats.get(a)!;
-      const statsB = pathStats.get(b)!;
-      return statsA.count !== statsB.count ? statsB.count - statsA.count : statsB.lastAccess - statsA.lastAccess;
-    });
+    return Array.from(pathStats.entries())
+      .sort(([, a], [, b]) => b.count - a.count || b.lastAccess - a.lastAccess)
+      .map(([path]) => path);
   }
 
   private scanMemoryDirectory(limit: number): string[] {

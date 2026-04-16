@@ -1,26 +1,24 @@
-import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry, Theme } from "@mariozechner/pi-coding-agent";
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { formatEntriesAsMessages } from "./tape-selector.js";
+import { extractMessageContent } from "./tape-selector.js";
 import type { MemoryTapeService } from "./tape-service.js";
-import type { RenderState, TapeEntry, TapeEntryKind } from "./tape-types.js";
+import type { RenderState } from "./tape-types.js";
 
 function renderText(text: string): Text {
   return new Text(text, 0, 0);
 }
 
 function renderWithExpandHint(text: string, theme: Theme, totalLines: number): Text {
-  const remaining = totalLines - 1;
-  if (remaining > 0) {
-    text +=
+  if (totalLines <= 1) return renderText(text);
+  return renderText(
+    text +
       "\n" +
-      theme.fg("muted", `... (${remaining} more lines,`) +
-      " " +
+      theme.fg("muted", `... (${totalLines - 1} more lines, `) +
       keyHint("app.tools.expand", "to expand") +
-      theme.fg("muted", ")");
-  }
-  return new Text(text, 0, 0);
+      theme.fg("muted", ")"),
+  );
 }
 
 function renderDefaultResult(
@@ -30,55 +28,46 @@ function renderDefaultResult(
   collapsedSummary: string,
 ): Text {
   if (state.isPartial) return renderText(theme.fg("warning", "Loading..."));
-
-  if (!state.expanded) {
-    const lines = result.content[0]?.text?.split("\n") ?? [];
-    return renderWithExpandHint(theme.fg("success", collapsedSummary), theme, lines.length);
-  }
-
+  if (!state.expanded)
+    return renderWithExpandHint(
+      theme.fg("success", collapsedSummary),
+      theme,
+      result.content[0]?.text?.split("\n").length ?? 1,
+    );
   return renderText(theme.fg("toolOutput", result.content[0]?.text ?? ""));
 }
 
-function formatEntrySummary(entry: TapeEntry): string {
+function formatEntrySummary(entry: SessionEntry): string {
   const time = new Date(entry.timestamp).toLocaleTimeString();
 
-  switch (entry.kind) {
-    case "message/user":
-    case "message/assistant": {
-      const role = entry.kind === "message/user" ? "User" : "Assistant";
-      const content = (entry.payload.content as string)?.substring(0, 50) ?? "";
-      return `[${time}] ${role}: ${content}...`;
+  switch (entry.type) {
+    case "message": {
+      const msg = entry as { message: { role: string; content?: unknown } };
+      const content = extractMessageContent(msg.message.content).substring(0, 50);
+      return `[${time}] ${msg.message.role === "user" ? "User" : "Assistant"}: ${content}...`;
     }
-    case "tool_call":
-      return `[${time}] Tool: ${entry.payload.tool}`;
-    case "tool_result":
-      return `[${time}] Result: ${entry.payload.tool}`;
-    case "memory/read":
-      return `[${time}] Memory read: ${entry.payload.path}`;
-    case "memory/write":
-      return `[${time}] Memory write: ${entry.payload.path}`;
-    case "anchor":
-      return `[${time}] Anchor: ${entry.payload.name ?? "unnamed"}`;
-    case "session/start":
-      return `[${time}] Session start`;
+    case "custom":
+    case "custom_message":
+      return `[${time}] Custom: ${(entry as { customType?: string }).customType ?? "unknown"}`;
+    case "thinking_level_change":
+      return `[${time}] Thinking level: ${entry.thinkingLevel}`;
+    case "model_change":
+      return `[${time}] Model: ${entry.provider}/${entry.modelId}`;
+    case "compaction":
+      return `[${time}] Compaction: ${entry.summary}`;
     default:
-      return `[${time}] ${entry.kind}`;
+      return `[${time}] ${entry.type}`;
   }
 }
 
-const ENTRY_KINDS = [
-  "memory/read",
-  "memory/write",
-  "memory/search",
-  "message/user",
-  "message/assistant",
-  "tool_call",
-  "tool_result",
-  "anchor",
-  "session/start",
-] as const;
-
-const EntryKindUnion = Type.Union(ENTRY_KINDS.map((k) => Type.Literal(k)));
+const EntryTypeUnion = Type.Union([
+  Type.Literal("message"),
+  Type.Literal("custom"),
+  Type.Literal("custom_message"),
+  Type.Literal("thinking_level_change"),
+  Type.Literal("model_change"),
+  Type.Literal("compaction"),
+]);
 
 export function registerTapeHandoff(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
   pi.registerTool({
@@ -141,18 +130,19 @@ export function registerTapeAnchors(pi: ExtensionAPI, tapeService: MemoryTapeSer
 
     async execute(_toolCallId, params) {
       const { limit = 20, contextLines = 1 } = params as { limit?: number; contextLines?: number };
-      const allEntries = tapeService.query({});
-      const anchorEntries = allEntries.filter((e) => e.kind === "anchor" || e.kind === "session/start").slice(-limit);
 
-      const anchorsWithContext = anchorEntries.map((anchor) => {
-        const idx = allEntries.findIndex((e) => e.id === anchor.id);
+      const anchorIndex = tapeService.getAnchorIndex();
+      const allAnchors = anchorIndex.getAllAnchors().slice(-limit);
+
+      const anchorsWithContext = allAnchors.map((anchor) => {
+        const entries = tapeService.query({ sinceAnchor: anchor.name });
         return {
-          id: anchor.id,
-          name: (anchor.payload.name as string) ?? "unnamed",
+          id: anchor.sessionEntryId,
+          name: anchor.name,
           timestamp: anchor.timestamp,
-          state: (anchor.payload.state as Record<string, unknown>) ?? {},
-          beforeContext: allEntries.slice(Math.max(0, idx - contextLines), idx).map(formatEntrySummary),
-          afterContext: allEntries.slice(idx + 1, idx + 1 + contextLines).map(formatEntrySummary),
+          state: anchor.state ?? {},
+          beforeContext: entries.slice(0, contextLines).map(formatEntrySummary),
+          afterContext: entries.slice(contextLines, contextLines * 2).map(formatEntrySummary),
         };
       });
 
@@ -229,9 +219,7 @@ export function registerTapeInfo(pi: ExtensionAPI, tapeService: MemoryTapeServic
 
     async execute(_toolCallId) {
       const info = tapeService.getInfo();
-      const lastAnchorName = info.lastAnchor
-        ? ((info.lastAnchor.payload.name as string) ?? info.lastAnchor.kind)
-        : "none";
+      const lastAnchorName = info.lastAnchor?.name ?? "none";
       const tapeFileCount = tapeService.getTapeFileCount();
 
       let recommendation = "";
@@ -243,12 +231,10 @@ export function registerTapeInfo(pi: ExtensionAPI, tapeService: MemoryTapeServic
 
       const summary = [
         `📊 Tape Information:`,
-        `  Tape files: ${tapeFileCount}`,
         `  Total entries: ${info.totalEntries}`,
         `  Anchors: ${info.anchorCount}`,
         `  Last anchor: ${lastAnchorName}`,
         `  Entries since last anchor: ${info.entriesSinceLastAnchor}`,
-        `  Memory operations: ${info.memoryReads} reads, ${info.memoryWrites} writes`,
         recommendation,
       ].join("\n");
 
@@ -258,11 +244,9 @@ export function registerTapeInfo(pi: ExtensionAPI, tapeService: MemoryTapeServic
           tapeFileCount,
           totalEntries: info.totalEntries,
           anchorCount: info.anchorCount,
-          lastAnchor: info.lastAnchor?.id,
+          lastAnchor: info.lastAnchor?.sessionEntryId,
           lastAnchorName,
           entriesSinceLastAnchor: info.entriesSinceLastAnchor,
-          memoryReads: info.memoryReads,
-          memoryWrites: info.memoryWrites,
         },
       };
     },
@@ -283,46 +267,115 @@ export function registerTapeInfo(pi: ExtensionAPI, tapeService: MemoryTapeServic
   });
 }
 
+const SearchKindsUnion = Type.Union([Type.Literal("entry"), Type.Literal("anchor"), Type.Literal("all")]);
+
 export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
   pi.registerTool({
     name: "tape_search",
     label: "Tape Search",
-    description: "Search tape entries by kind or content",
+    description: "Search tape entries and anchors by type, content, or time range",
     parameters: Type.Object({
-      kinds: Type.Optional(Type.Array(EntryKindUnion)),
+      kinds: Type.Optional(
+        Type.Array(SearchKindsUnion, {
+          description: "What to search: 'entry' (session entries), 'anchor' (anchors), 'all' (default: all)",
+        }),
+      ),
+      types: Type.Optional(
+        Type.Array(EntryTypeUnion, { description: "Filter entries by type (only for entries search)" }),
+      ),
       limit: Type.Optional(
         Type.Integer({ description: "Maximum number of results (default: 20)", minimum: 1, maximum: 100 }),
       ),
-      sinceAnchor: Type.Optional(Type.String({ description: "Anchor ID to search from (entries after this anchor)" })),
+      sinceAnchor: Type.Optional(Type.String({ description: "Anchor name to search from" })),
+      lastAnchor: Type.Optional(Type.Boolean({ description: "Search from last anchor" })),
+      betweenAnchors: Type.Optional(
+        Type.Object({ start: Type.String(), end: Type.String() }, { description: "Between two anchors" }),
+      ),
+      betweenDates: Type.Optional(
+        Type.Object({ start: Type.String(), end: Type.String() }, { description: "Between dates (ISO)" }),
+      ),
+      query: Type.Optional(Type.String({ description: "Text search in entry/anchor content" })),
     }),
 
     async execute(_toolCallId, params) {
-      const { kinds, limit = 20, sinceAnchor } = params as { kinds?: string[]; limit?: number; sinceAnchor?: string };
-      const entries = tapeService.query({ kinds: kinds as TapeEntryKind[], limit, sinceAnchor });
+      const {
+        kinds = ["all"],
+        types,
+        limit = 20,
+        sinceAnchor,
+        lastAnchor,
+        betweenAnchors,
+        betweenDates,
+        query,
+      } = params as {
+        kinds?: string[];
+        types?: SessionEntry["type"][];
+        limit?: number;
+        sinceAnchor?: string;
+        lastAnchor?: boolean;
+        betweenAnchors?: { start: string; end: string };
+        betweenDates?: { start: string; end: string };
+        query?: string;
+      };
 
-      const header = [
-        `Tape search results: ${entries.length} found`,
-        ...(kinds ? [`Filtered by kinds: ${kinds.join(", ")}`] : []),
-        ...(sinceAnchor ? [`Since anchor: ${sinceAnchor}`] : []),
-      ].join("\n");
-      const results = entries
-        .map(
-          (e) =>
-            `[${new Date(e.timestamp).toLocaleTimeString()}] ${e.kind}: ${JSON.stringify(e.payload).slice(0, 80)}...`,
-        )
-        .join("\n");
+      const parts: string[] = [];
+      const lines: string[] = [];
+
+      if (kinds.includes("anchor") || kinds.includes("all")) {
+        const anchorIndex = tapeService.getAnchorIndex();
+        const since = sinceAnchor ? anchorIndex.findByName(sinceAnchor)?.timestamp : undefined;
+        const until = betweenDates?.end;
+
+        const anchors = anchorIndex.search({ query, limit, since, until });
+
+        if (anchors.length > 0) {
+          parts.push(`${anchors.length} anchors`);
+          lines.push("...");
+          for (const anchor of anchors.slice(-5)) {
+            const stateStr = anchor.state ? ` ${JSON.stringify(anchor.state)}` : "";
+            lines.push(`  ${anchor.name} (${new Date(anchor.timestamp).toLocaleString()})${stateStr}`);
+          }
+          if (anchors.length > 5) lines.push(`  ... and ${anchors.length - 5} more`);
+        }
+      }
+
+      if (kinds.includes("entry") || kinds.includes("all")) {
+        const entries = tapeService.query({
+          types,
+          limit,
+          sinceAnchor,
+          lastAnchor,
+          betweenAnchors,
+          betweenDates,
+          query,
+        });
+
+        if (entries.length > 0) {
+          parts.push(`${entries.length} entries`);
+          for (const entry of entries.slice(-5)) {
+            lines.push(`[${new Date(entry.timestamp).toLocaleTimeString()}] ${formatEntrySummary(entry)}`);
+          }
+          if (entries.length > 5) {
+            lines.push(`  ... and ${entries.length - 5} more`);
+          }
+        }
+      }
+
+      const header = parts.length > 0 ? `Found ${parts.join(", ")}` : "No results";
+      if (query) parts.push(`Query: "${query}"`);
 
       return {
-        content: [{ type: "text", text: `${header}\n\n${results}` }],
-        details: { entries, count: entries.length },
+        content: [{ type: "text", text: `${header}\n\n${lines.join("\n") || "(no results)"}` }],
+        details: { kinds, query, count: lines.length },
       };
     },
 
     renderCall(args, theme) {
-      return renderText(
-        theme.fg("toolTitle", theme.bold("tape_search")) +
-          (args.kinds ? ` ${theme.fg("muted", args.kinds.join(","))}` : ""),
-      );
+      const parts = [theme.fg("toolTitle", theme.bold("tape_search"))];
+      if (args.kinds?.length) parts.push(theme.fg("muted", args.kinds.join(",")));
+      if (args.sinceAnchor) parts.push(theme.fg("accent", `@${args.sinceAnchor}`));
+      if (args.query) parts.push(theme.fg("accent", `"${args.query}"`));
+      return renderText(parts.join(" "));
     },
 
     renderResult(result, state: RenderState, theme) {
@@ -336,36 +389,19 @@ export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeServic
   pi.registerTool({
     name: "tape_read",
     label: "Tape Read",
-    description:
-      "Read tape entries as formatted messages (for context). Supports fluent query: after anchor, between dates, text search, kind filter, limit",
+    description: "Read tape entries from pi session. Supports anchor-based, date-based, or query filtering.",
     parameters: Type.Object({
-      afterAnchor: Type.Optional(
-        Type.String({ description: "Anchor name to read entries after (e.g., 'task/start')" }),
-      ),
-      lastAnchor: Type.Optional(Type.Boolean({ description: "Read entries after the last anchor (default: false)" })),
+      afterAnchor: Type.Optional(Type.String({ description: "Read entries after this anchor" })),
+      lastAnchor: Type.Optional(Type.Boolean({ description: "Read entries after last anchor" })),
       betweenAnchors: Type.Optional(
-        Type.Object(
-          {
-            start: Type.String({ description: "Start anchor name" }),
-            end: Type.String({ description: "End anchor name" }),
-          },
-          { description: "Read entries between two anchors" },
-        ),
+        Type.Object({ start: Type.String(), end: Type.String() }, { description: "Between two anchors" }),
       ),
       betweenDates: Type.Optional(
-        Type.Object(
-          {
-            start: Type.String({ description: "Start date (ISO format)" }),
-            end: Type.String({ description: "End date (ISO format)" }),
-          },
-          { description: "Read entries between two dates" },
-        ),
+        Type.Object({ start: Type.String(), end: Type.String() }, { description: "Between dates (ISO)" }),
       ),
-      query: Type.Optional(Type.String({ description: "Text search in entry content" })),
-      kinds: Type.Optional(Type.Array(EntryKindUnion)),
-      limit: Type.Optional(
-        Type.Integer({ description: "Maximum number of entries to return (default: 20)", minimum: 1, maximum: 100 }),
-      ),
+      query: Type.Optional(Type.String({ description: "Text search" })),
+      types: Type.Optional(Type.Array(EntryTypeUnion)),
+      limit: Type.Optional(Type.Integer({ description: "Max entries (default: 20)", minimum: 1, maximum: 100 })),
     }),
 
     async execute(_toolCallId, params) {
@@ -373,48 +409,47 @@ export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeServic
         afterAnchor,
         betweenAnchors,
         betweenDates,
-        kinds,
+        types,
         lastAnchor = false,
         limit = 20,
         query,
       } = params as {
         afterAnchor?: string;
-        lastAnchor?: boolean;
         betweenAnchors?: { start: string; end: string };
         betweenDates?: { start: string; end: string };
-        query?: string;
-        kinds?: string[];
+        types?: SessionEntry["type"][];
+        lastAnchor?: boolean;
         limit?: number;
+        query?: string;
       };
 
-      const queryOptions: Parameters<typeof tapeService.query>[0] = { query, kinds: kinds as TapeEntryKind[], limit };
-
+      const queryOptions: Parameters<typeof tapeService.query>[0] = { types, limit, query };
       if (betweenAnchors) queryOptions.betweenAnchors = betweenAnchors;
       else if (betweenDates) queryOptions.betweenDates = betweenDates;
       else if (afterAnchor) queryOptions.sinceAnchor = afterAnchor;
       else if (lastAnchor) queryOptions.lastAnchor = true;
 
       const entries = tapeService.query(queryOptions);
-      const messages = formatEntriesAsMessages(entries);
 
-      const summary =
-        `Retrieved ${messages.length} messages from tape:\n\n` +
-        messages.map((m) => `${m.role}: ${m.content.slice(0, 100)}${m.content.length > 100 ? "..." : ""}`).join("\n");
-      return { content: [{ type: "text", text: summary }], details: { messages, count: messages.length } };
+      const formatted = entries.map(formatEntrySummary).join("\n");
+      return {
+        content: [{ type: "text", text: `Retrieved ${entries.length} entries:\n\n${formatted || "(no entries)"}` }],
+        details: { entries, count: entries.length },
+      };
     },
 
     renderCall(args, theme) {
       const parts = [theme.fg("toolTitle", theme.bold("tape_read"))];
-      if (args.afterAnchor) parts.push(theme.fg("muted", `afterAnchor=${args.afterAnchor}`));
-      if (args.lastAnchor) parts.push(theme.fg("muted", "lastAnchor"));
-      if (args.query) parts.push(theme.fg("muted", `query="${args.query}"`));
+      if (args.afterAnchor) parts.push(theme.fg("muted", `after=${args.afterAnchor}`));
+      if (args.lastAnchor) parts.push(theme.fg("accent", "@last"));
+      if (args.query) parts.push(theme.fg("muted", `"${args.query}"`));
       if (args.limit) parts.push(theme.fg("muted", `limit=${args.limit}`));
       return renderText(parts.join(" "));
     },
 
     renderResult(result, state: RenderState, theme) {
       const details = result.details as { count?: number } | undefined;
-      return renderDefaultResult(result, state, theme, `${details?.count ?? 0} messages`);
+      return renderDefaultResult(result, state, theme, `${details?.count ?? 0} entries`);
     },
   });
 }
@@ -423,9 +458,9 @@ export function registerTapeReset(pi: ExtensionAPI, tapeService: MemoryTapeServi
   pi.registerTool({
     name: "tape_reset",
     label: "Tape Reset",
-    description: "Reset the tape (creates a new session/start anchor)",
+    description: "Clear anchor index (creates new session/start anchor)",
     parameters: Type.Object({
-      archive: Type.Optional(Type.Boolean({ description: "Archive old tape before reset (default: false)" })),
+      archive: Type.Optional(Type.Boolean({ description: "Archive old tape first (not implemented)" })),
     }),
 
     async execute(_toolCallId, params) {
@@ -433,9 +468,7 @@ export function registerTapeReset(pi: ExtensionAPI, tapeService: MemoryTapeServi
       tapeService.clear();
       tapeService.recordSessionStart();
 
-      const text = archive
-        ? "Tape archived and reset with new session/start anchor"
-        : "Tape reset with new session/start anchor";
+      const text = archive ? "Tape archived and reset" : "Anchor index cleared";
       return { content: [{ type: "text", text }], details: { archived: archive } };
     },
 
@@ -447,8 +480,7 @@ export function registerTapeReset(pi: ExtensionAPI, tapeService: MemoryTapeServi
 
     renderResult(result, state: RenderState, theme) {
       if (state.isPartial) return renderText(theme.fg("warning", "Resetting..."));
-      const text = (result.content[0] as { text?: string })?.text ?? "";
-      return renderText(theme.fg("success", text));
+      return renderText(theme.fg("success", (result.content[0] as { text?: string })?.text ?? ""));
     },
   });
 }

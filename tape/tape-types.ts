@@ -1,45 +1,44 @@
 /**
  * Tape layer for pi-memory-md
- * Records memory operations and provides dynamic context injection
+ * Uses pi session as data source, only maintains anchor index
+ * Entry types are directly from pi SessionEntry
+ *
+ * @see https://tape.systems
+ * @see https://bub.build/
  */
 
 // always keep the comments in this file，it's necessary.
 
-export type TapeEntryKind =
-  // Memory operations
-  | "memory/read"
-  | "memory/write"
-  | "memory/search"
-  | "memory/sync"
-  | "memory/init"
-  // Conversation events
-  | "message/user"
-  | "message/assistant"
-  | "tool_call"
-  | "tool_result"
-  // Checkpoints
-  | "session/start"
-  | "anchor";
+import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 
 export type TapeContextStrategy = "recent-only" | "smart";
 
-export interface TapeEntry {
-  id: string;
-  kind: TapeEntryKind;
-  timestamp: string;
-  turn?: number; // Track conversation turn
-  payload: Record<string, unknown>;
-}
-
+/**
+ * Tape query options - filter pi session entries
+ *
+ * @description
+ * - `query`: Text search in entry content
+ * - `types`: Filter by session entry type (message, custom, etc.)
+ * - `limit`: Maximum results to return
+ * - `sinceAnchor` / `lastAnchor`: Filter entries after a specific anchor
+ * - `betweenAnchors`: Get entries between two anchors
+ * - `betweenDates`: Get entries within date range (ISO format)
+ */
 export interface TapeQueryOptions {
-  query?: string; // Text search in entry payload
-  kinds?: TapeEntryKind[];
+  /** Text search in entry content (case-insensitive) */
+  query?: string;
+  /** Filter by session entry type */
+  types?: SessionEntry["type"][];
+  /** Maximum number of results to return (default: 20) */
   limit?: number;
-  since?: string; // ISO timestamp
-  sinceAnchor?: string; // anchor ID
-  lastAnchor?: boolean; // Get entries after the last anchor
-  betweenAnchors?: { start: string; end: string }; // Get entries between two anchors (by name)
-  betweenDates?: { start: string; end: string }; // Get entries between two dates (ISO format)
+  /** Get entries after this anchor name */
+  sinceAnchor?: string;
+  /** Get entries after the last anchor in current session */
+  lastAnchor?: boolean;
+  /** Get entries between two anchors */
+  betweenAnchors?: { start: string; end: string };
+  /** Get entries within date range (ISO format) */
+  betweenDates?: { start: string; end: string };
 }
 
 export type ContextStrategy = TapeContextStrategy;
@@ -49,19 +48,38 @@ export interface ContextSelection {
   reason: string;
 }
 
+/**
+ * Tape configuration options
+ *
+ * @description
+ * - `tapePath`: Custom path for tape storage (default: ~/.pi/memory-md/TAPE)
+ * - `context`: Memory file selection strategy
+ * - `anchor`: Auto-anchor behavior settings
+ */
 export interface TapeConfig {
+  /** Custom tape storage path (optional) */
   tapePath?: string;
+  /** Memory file selection configuration */
   context?: {
-    strategy?: TapeContextStrategy; // "smart" (default) or "recent-only"
-    fileLimit?: number; // Max files to inject (default: 10)
-    alwaysInclude?: string[]; // Files to always include (default: [])
-    maxTapeTokens?: number; // Max tokens for tape context (default: 1000)
-    maxTapeEntries?: number; // Max entries to consider before token limit (default: 40)
-    includeConversationHistory?: boolean; // Include conversation history (default: true)
+    /** Selection strategy: "smart" (default) or "recent-only" */
+    strategy?: TapeContextStrategy;
+    /** Maximum number of memory files to inject (default: 10) */
+    fileLimit?: number;
+    /** Files to always include in context (default: []) */
+    alwaysInclude?: string[];
+    /** Maximum tokens for tape context (default: 1000) */
+    maxTapeTokens?: number;
+    /** Maximum entries to consider before token limit (default: 40) */
+    maxTapeEntries?: number;
+    /** Include conversation history in context (default: true) */
+    includeConversationHistory?: boolean;
   };
+  /** Anchor auto-creation settings */
   anchor?: {
-    mode?: "hand" | "threshold" | "manual"; // Auto-anchor strategy (default: "threshold")
-    threshold?: number; // Entries since last anchor before auto-creating (default: 15)
+    /** Auto-anchor mode: "hand" (manual only), "threshold" (auto), or "manual" (default: "threshold") */
+    mode?: "hand" | "threshold" | "manual";
+    /** Entries since last anchor before auto-creating new anchor (default: 15) */
+    threshold?: number;
   };
 }
 

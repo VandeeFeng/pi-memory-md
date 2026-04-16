@@ -1,128 +1,153 @@
-import { randomUUID } from "node:crypto";
-import { MemoryTapeStore } from "./tape-store.js";
-import type { TapeConfig, TapeEntry, TapeEntryKind } from "./tape-types.js";
+import type { SessionEntry } from "@mariozechner/pi-coding-agent";
+import { type AnchorEntry, AnchorIndex } from "./anchor-index.js";
+import { getEntriesAfterTimestamp, getSessionFilePath, parseSessionFile } from "./session-reader.js";
 
 export class MemoryTapeService {
-  private currentTurn = 0;
+  private readonly anchorIndex: AnchorIndex;
+  private readonly sessionId: string;
+  private readonly cwd: string;
+  private sessionManager: { getLeafId: () => string | null; getSessionId: () => string } | null = null;
 
-  constructor(
-    private store: MemoryTapeStore,
-    private alwaysInclude: Set<string>,
-    private sessionId?: string,
-  ) {}
-
-  static create(memoryDir: string, config?: TapeConfig, workspace?: string, sessionId?: string): MemoryTapeService {
-    const store = new MemoryTapeStore(memoryDir, config?.tapePath, workspace, sessionId);
-    const alwaysInclude = new Set(config?.context?.alwaysInclude ?? []);
-    return new MemoryTapeService(store, alwaysInclude, sessionId);
+  constructor(localPath: string, projectName: string, sessionId: string, cwd: string) {
+    this.sessionId = sessionId;
+    this.cwd = cwd;
+    this.anchorIndex = new AnchorIndex(localPath, projectName);
   }
 
-  private record(kind: TapeEntryKind, payload: Record<string, unknown>, turn?: number): string {
-    const entry: TapeEntry = {
-      id: randomUUID(),
-      kind,
-      timestamp: new Date().toISOString(),
-      turn,
-      payload,
-    };
-    this.store.append(entry);
-    return entry.id;
+  static create(localPath: string, projectName: string, sessionId: string, cwd: string): MemoryTapeService {
+    return new MemoryTapeService(localPath, projectName, sessionId, cwd);
+  }
+
+  setSessionManager(sm: { getLeafId: () => string | null; getSessionId: () => string }): void {
+    this.sessionManager = sm;
   }
 
   recordSessionStart(): string {
-    this.currentTurn = 0;
-    return this.record("session/start", { sessionId: this.sessionId ?? "unknown", name: "INIT" });
-  }
-
-  startNewTurn(): void {
-    this.currentTurn++;
-  }
-
-  recordUserMessage(content: string): string {
-    return this.record("message/user", { content }, this.currentTurn);
-  }
-
-  recordAssistantMessage(content: string): string {
-    return this.record("message/assistant", { content }, this.currentTurn);
-  }
-
-  recordToolCall(tool: string, args: Record<string, unknown>): string {
-    return this.record("tool_call", { tool, args }, this.currentTurn);
-  }
-
-  recordToolResult(tool: string, result: unknown): string {
-    return this.record("tool_result", { tool, result }, this.currentTurn);
+    return this.createAnchor("session/start");
   }
 
   createAnchor(name: string, state?: Record<string, unknown>): string {
-    return this.record("anchor", { anchorId: randomUUID(), name, state: state ?? null });
+    const sessionEntryId = this.sessionManager?.getLeafId() ?? crypto.randomUUID();
+    const entryId = crypto.randomUUID();
+
+    const anchorEntry: AnchorEntry = {
+      name,
+      sessionId: this.sessionId,
+      sessionEntryId,
+      timestamp: new Date().toISOString(),
+      state: state ?? undefined,
+    };
+
+    this.anchorIndex.append(anchorEntry);
+    return entryId;
   }
 
-  recordMemoryRead(path: string): void {
-    this.record("memory/read", { path });
+  /**
+   * Query entries from pi session file
+   */
+  query(options: {
+    query?: string;
+    types?: SessionEntry["type"][];
+    limit?: number;
+    since?: string;
+    sinceAnchor?: string;
+    lastAnchor?: boolean;
+    betweenAnchors?: { start: string; end: string };
+    betweenDates?: { start: string; end: string };
+  }): SessionEntry[] {
+    const { betweenAnchors, betweenDates, types, lastAnchor, limit, query, since, sinceAnchor } = options;
+
+    let startTime: string | null = null;
+    let endTime: string | null = null;
+
+    if (betweenAnchors) {
+      const startAnchor = this.anchorIndex.findByName(betweenAnchors.start);
+      const endAnchor = this.anchorIndex.findByName(betweenAnchors.end);
+      if (startAnchor && endAnchor) {
+        startTime = startAnchor.timestamp;
+        endTime = endAnchor.timestamp;
+      }
+    } else if (lastAnchor) {
+      const anchor = this.anchorIndex.getLastAnchor(this.sessionId);
+      if (anchor) startTime = anchor.timestamp;
+    } else if (sinceAnchor) {
+      const anchor = this.anchorIndex.findByName(sinceAnchor);
+      if (anchor) startTime = anchor.timestamp;
+    }
+
+    if (betweenDates) {
+      startTime = betweenDates.start;
+      endTime = betweenDates.end;
+    }
+
+    const sessionFile = getSessionFilePath(this.cwd, this.sessionId);
+    if (!sessionFile) return [];
+
+    const parsed = parseSessionFile(sessionFile);
+    if (!parsed) return [];
+
+    let entries = parsed.entries;
+
+    // Filter by time range
+    if (startTime) entries = getEntriesAfterTimestamp(entries, startTime);
+    if (endTime) entries = entries.filter((e) => new Date(e.timestamp).getTime() <= new Date(endTime!).getTime());
+    if (since) entries = getEntriesAfterTimestamp(entries, since);
+    if (types?.length) entries = entries.filter((e) => types.includes(e.type));
+    if (query) {
+      const needle = query.toLowerCase();
+      entries = entries.filter((e) => JSON.stringify(e).toLowerCase().includes(needle));
+    }
+    if (limit) entries = entries.slice(-limit);
+
+    return entries;
   }
 
-  recordMemoryWrite(path: string, frontmatter: Record<string, unknown>): void {
-    this.record("memory/write", { path, frontmatter });
+  findAnchorByName(name: string): AnchorEntry | null {
+    return this.anchorIndex.findByName(name);
   }
 
-  recordMemorySearch(query: string, searchIn: string, count: number): void {
-    this.record("memory/search", { query, searchIn, count });
+  getLastAnchor(): AnchorEntry | null {
+    return this.anchorIndex.getLastAnchor(this.sessionId);
   }
 
-  recordMemorySync(action: string, result: Record<string, unknown>): void {
-    this.record("memory/sync", { action, result });
-  }
-
-  recordMemoryInit(force: boolean): void {
-    this.record("memory/init", { force });
-  }
-
-  query(options: Parameters<MemoryTapeStore["query"]>[0]): TapeEntry[] {
-    return this.store.query(options);
-  }
-
-  findAnchorByName(name: string): TapeEntry | null {
-    return this.store.findAnchorByName(name);
-  }
-
-  getLastAnchor(): TapeEntry | null {
-    return this.store.getLastAnchor();
+  getAnchorIndex(): AnchorIndex {
+    return this.anchorIndex;
   }
 
   getAlwaysInclude(): string[] {
-    return Array.from(this.alwaysInclude);
+    return [];
   }
 
   getInfo(): {
     totalEntries: number;
     anchorCount: number;
-    lastAnchor: TapeEntry | null;
+    lastAnchor: AnchorEntry | null;
     entriesSinceLastAnchor: number;
-    memoryReads: number;
-    memoryWrites: number;
   } {
-    const entries = this.query({});
-    const anchors = entries.filter((e) => e.kind === "anchor" || e.kind === "session/start");
-    const lastAnchor = anchors.at(-1) ?? null;
-    const lastAnchorIdx = lastAnchor ? entries.indexOf(lastAnchor) : -1;
+    const allAnchors = this.anchorIndex.findBySession(this.sessionId);
+    const lastAnchor = allAnchors[allAnchors.length - 1] ?? null;
+
+    let entriesSinceLastAnchor = 0;
+    if (lastAnchor) {
+      const entries = this.query({ sinceAnchor: lastAnchor.name });
+      entriesSinceLastAnchor = entries.length;
+    }
 
     return {
-      totalEntries: entries.length,
-      anchorCount: anchors.length,
+      totalEntries: this.query({}).length,
+      anchorCount: allAnchors.length,
       lastAnchor,
-      entriesSinceLastAnchor: lastAnchorIdx >= 0 ? entries.length - lastAnchorIdx - 1 : entries.length,
-      memoryReads: entries.filter((e) => e.kind === "memory/read").length,
-      memoryWrites: entries.filter((e) => e.kind === "memory/write").length,
+      entriesSinceLastAnchor,
     };
   }
 
   getTapeFileCount(): number {
-    return this.store.getTapeFileCount();
+    return 1;
   }
 
   clear(): void {
-    this.store.clear();
-    this.currentTurn = 0;
+    this.anchorIndex.clear();
   }
 }
+
+export type { AnchorEntry };
