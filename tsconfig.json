@@ -12,6 +12,6 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["*.ts"],
+  "include": ["*.ts", "tape/**/*.ts"],
   "exclude": ["node_modules", "dist", "skills"]
 }

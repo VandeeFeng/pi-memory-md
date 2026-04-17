@@ -74,7 +74,7 @@ The LLM can use these tools to interact with memory:
 | `memory_read` | `{path: string}` | Read a memory file |
 | `memory_write` | `{path, content, description, tags?}` | Create/update memory file |
 | `memory_list` | `{directory?: string}` | List all memory files |
-| `memory_search` | `{query, searchIn}` | Search by content/tags/description |
+| `memory_search` | `{query?, grep?, rg?}` | Search by tags/description and custom grep/ripgrep patterns |
 | `memory_check` | `{}` | Check current project memory folder structure |
 
 ## Memory File Format

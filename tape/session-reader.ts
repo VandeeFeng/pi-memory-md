@@ -15,15 +15,20 @@ export function getSessionDir(cwd: string): string {
   return path.join(getSessionsDir(), encodeSessionPath(cwd));
 }
 
-export function getSessionFilePath(cwd: string, sessionId: string): string | null {
+export function getSessionFilePaths(cwd: string): string[] {
   const sessionDir = getSessionDir(cwd);
-  if (!fs.existsSync(sessionDir)) return null;
+  if (!fs.existsSync(sessionDir)) return [];
 
-  const files = fs.readdirSync(sessionDir).filter((file) => file.endsWith(".jsonl"));
+  return fs
+    .readdirSync(sessionDir)
+    .filter((file) => file.endsWith(".jsonl"))
+    .map((file) => path.join(sessionDir, file));
+}
 
-  for (const file of files) {
-    const fullPath = path.join(sessionDir, file);
+export function getSessionFilePath(cwd: string, sessionId: string): string | null {
+  const files = getSessionFilePaths(cwd);
 
+  for (const fullPath of files) {
     try {
       const content = fs.readFileSync(fullPath, "utf-8");
       const firstLine = content.split("\n", 1)[0];

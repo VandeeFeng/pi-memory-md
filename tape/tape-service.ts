@@ -1,6 +1,12 @@
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import { type AnchorEntry, AnchorIndex } from "./anchor-index.js";
-import { getEntriesAfterTimestamp, getSessionFilePath, parseSessionFile } from "./session-reader.js";
+import {
+  getEntriesAfterTimestamp,
+  getSessionFilePath,
+  getSessionFilePaths,
+  parseSessionFile,
+} from "./session-reader.js";
+import type { TapeQueryOptions } from "./tape-types.js";
 
 export class MemoryTapeService {
   private readonly anchorIndex: AnchorIndex;
@@ -42,34 +48,63 @@ export class MemoryTapeService {
     return entryId;
   }
 
-  query(options: {
-    query?: string;
-    types?: SessionEntry["type"][];
-    limit?: number;
-    since?: string;
-    sinceAnchor?: string;
-    lastAnchor?: boolean;
-    betweenAnchors?: { start: string; end: string };
-    betweenDates?: { start: string; end: string };
-  }): SessionEntry[] {
-    const { betweenAnchors, betweenDates, types, lastAnchor, limit, query, since, sinceAnchor } = options;
+  private resolveAnchor(name: string, anchorScope: "current-session" | "project"): AnchorEntry | null {
+    if (anchorScope === "current-session") {
+      return this.anchorIndex.findByNameInSession(name, this.sessionId) ?? this.anchorIndex.findByName(name);
+    }
+
+    return this.anchorIndex.findByName(name);
+  }
+
+  private loadEntries(scope: "session" | "project"): SessionEntry[] {
+    if (scope === "session") {
+      const sessionFile = getSessionFilePath(this.cwd, this.sessionId);
+      if (!sessionFile) return [];
+      const parsed = parseSessionFile(sessionFile);
+      return parsed?.entries ?? [];
+    }
+
+    const entries: SessionEntry[] = [];
+    for (const sessionFile of getSessionFilePaths(this.cwd)) {
+      const parsed = parseSessionFile(sessionFile);
+      if (!parsed) continue;
+      entries.push(...parsed.entries);
+    }
+
+    return entries.sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+  }
+
+  query(options: TapeQueryOptions & { since?: string }): SessionEntry[] {
+    const {
+      betweenAnchors,
+      betweenDates,
+      types,
+      lastAnchor,
+      limit,
+      query,
+      since,
+      sinceAnchor,
+      scope = "project",
+      anchorScope = "current-session",
+    } = options;
 
     let startTime: string | null = null;
     let endTime: string | null = null;
 
     if (betweenAnchors) {
-      const startAnchor = this.anchorIndex.findByName(betweenAnchors.start);
-      const endAnchor = this.anchorIndex.findByName(betweenAnchors.end);
+      const startAnchor = this.resolveAnchor(betweenAnchors.start, anchorScope);
+      const endAnchor = this.resolveAnchor(betweenAnchors.end, anchorScope);
 
       if (startAnchor && endAnchor) {
         startTime = startAnchor.timestamp;
         endTime = endAnchor.timestamp;
       }
     } else if (lastAnchor) {
-      const anchor = this.anchorIndex.getLastAnchor(this.sessionId);
+      const anchor =
+        anchorScope === "project" ? this.anchorIndex.getLastAnchor() : this.anchorIndex.getLastAnchor(this.sessionId);
       if (anchor) startTime = anchor.timestamp;
     } else if (sinceAnchor) {
-      const anchor = this.anchorIndex.findByName(sinceAnchor);
+      const anchor = this.resolveAnchor(sinceAnchor, anchorScope);
       if (anchor) startTime = anchor.timestamp;
     }
 
@@ -78,13 +113,7 @@ export class MemoryTapeService {
       endTime = betweenDates.end;
     }
 
-    const sessionFile = getSessionFilePath(this.cwd, this.sessionId);
-    if (!sessionFile) return [];
-
-    const parsed = parseSessionFile(sessionFile);
-    if (!parsed) return [];
-
-    let entries = parsed.entries;
+    let entries = this.loadEntries(scope);
 
     if (startTime) {
       entries = getEntriesAfterTimestamp(entries, startTime);
@@ -115,11 +144,15 @@ export class MemoryTapeService {
     return entries;
   }
 
-  findAnchorByName(name: string): AnchorEntry | null {
-    return this.anchorIndex.findByName(name);
+  findAnchorByName(name: string, anchorScope: "current-session" | "project" = "current-session"): AnchorEntry | null {
+    return this.resolveAnchor(name, anchorScope);
   }
 
-  getLastAnchor(): AnchorEntry | null {
+  getLastAnchor(anchorScope: "current-session" | "project" = "current-session"): AnchorEntry | null {
+    if (anchorScope === "project") {
+      return this.anchorIndex.getLastAnchor();
+    }
+
     return this.anchorIndex.getLastAnchor(this.sessionId);
   }
 
@@ -142,20 +175,24 @@ export class MemoryTapeService {
 
     let entriesSinceLastAnchor = 0;
     if (lastAnchor) {
-      const entries = this.query({ sinceAnchor: lastAnchor.name });
+      const entries = this.query({ sinceAnchor: lastAnchor.name, scope: "session", anchorScope: "current-session" });
       entriesSinceLastAnchor = entries.length;
     }
 
     return {
-      totalEntries: this.query({}).length,
+      totalEntries: this.query({ scope: "session" }).length,
       anchorCount: allAnchors.length,
       lastAnchor,
       entriesSinceLastAnchor,
     };
   }
 
+  getSessionId(): string {
+    return this.sessionId;
+  }
+
   getTapeFileCount(): number {
-    return 1;
+    return getSessionFilePaths(this.cwd).length;
   }
 
   clear(): void {

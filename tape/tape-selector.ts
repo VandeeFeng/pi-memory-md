@@ -81,7 +81,9 @@ export class ConversationSelector {
   ) {}
 
   selectFromAnchor(anchorId?: string): SessionEntry[] {
-    const entries = this.tapeService.query({ sinceAnchor: anchorId }).slice(-this.maxEntries);
+    const entries = this.tapeService
+      .query({ sinceAnchor: anchorId, scope: "session", anchorScope: "current-session" })
+      .slice(-this.maxEntries);
     return this.filterByTokenBudget(entries);
   }
 
@@ -94,7 +96,8 @@ export class ConversationSelector {
     let totalTokens = 0;
     const filtered: SessionEntry[] = [];
 
-    for (const entry of entries) {
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const entry = entries[index];
       const tokens = Math.ceil(JSON.stringify(entry).length / CHARS_PER_TOKEN);
       if (totalTokens + tokens > this.maxTokens) break;
 
@@ -102,7 +105,7 @@ export class ConversationSelector {
       filtered.push(entry);
     }
 
-    return filtered;
+    return filtered.reverse();
   }
 }
 
@@ -121,10 +124,14 @@ export class MemoryFileSelector {
   }
 
   private selectSmart(limit: number): string[] {
-    const anchor = this.tapeService.getLastAnchor();
-    if (!anchor) return this.scanMemoryDirectory(limit);
+    const anchor = this.tapeService.getLastAnchor("project");
 
-    const entries = this.tapeService.query({ sinceAnchor: anchor.name });
+    const entries = this.tapeService.query({
+      ...(anchor ? { since: anchor.timestamp } : {}),
+      scope: "project",
+      anchorScope: "project",
+    });
+
     const pathStats = this.analyzePathAccess(entries);
     if (pathStats.size === 0) return this.scanMemoryDirectory(limit);
 

@@ -5,6 +5,8 @@ import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import {
+  createDefaultFiles,
+  ensureDirectoryStructure,
   getCurrentDate,
   getMemoryDir,
   gitExec,
@@ -25,6 +27,17 @@ export type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
 
 function renderText(text: string): Text {
   return new Text(text, 0, 0);
+}
+
+function resolvePathWithin(baseDir: string, relPath: string): string | null {
+  const normalizedBaseDir = path.resolve(baseDir);
+  const resolvedPath = path.resolve(normalizedBaseDir, relPath);
+
+  if (resolvedPath === normalizedBaseDir || resolvedPath.startsWith(`${normalizedBaseDir}${path.sep}`)) {
+    return resolvedPath;
+  }
+
+  return null;
 }
 
 function formatValue(value: unknown): string {
@@ -156,7 +169,7 @@ export function registerMemorySync(
       const coreUserDir = path.join(memoryDir, "core", "user");
 
       if (action === "status") {
-        const initialized = isRepoInitialized.value && fs.existsSync(coreUserDir);
+        const initialized = fs.existsSync(coreUserDir) && fs.existsSync(path.join(localPath, ".git"));
         if (!initialized) {
           return {
             content: [{ type: "text", text: "Memory repository not initialized. Use memory_init to set up." }],
@@ -255,9 +268,17 @@ export function registerMemoryRead(pi: ExtensionAPI, settings: MemoryMdSettings)
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { path: relPath } = params as { path: string };
-      const fullPath = path.join(getMemoryDir(settings, ctx.cwd), relPath);
-      const memory = readMemoryFile(fullPath);
+      const memoryDir = getMemoryDir(settings, ctx.cwd);
+      const fullPath = resolvePathWithin(memoryDir, relPath);
 
+      if (!fullPath) {
+        return {
+          content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
+          details: { error: true },
+        };
+      }
+
+      const memory = readMemoryFile(fullPath);
       if (!memory) {
         return {
           content: [{ type: "text", text: `Failed to read memory file: ${relPath}` }],
@@ -298,12 +319,22 @@ export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings
         description,
         tags,
       } = params as { path: string; content: string; description: string; tags?: string[] };
-      const fullPath = path.join(getMemoryDir(settings, ctx.cwd), relPath);
+      const memoryDir = getMemoryDir(settings, ctx.cwd);
+      const fullPath = resolvePathWithin(memoryDir, relPath);
+
+      if (!fullPath) {
+        return {
+          content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
+          details: { error: true },
+        };
+      }
+
       const existing = readMemoryFile(fullPath);
 
       const frontmatter: MemoryFrontmatter = {
         ...existing?.frontmatter,
         description,
+        created: existing?.frontmatter.created || getCurrentDate(),
         updated: getCurrentDate(),
         ...(tags && { tags }),
       };
@@ -338,7 +369,16 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { directory } = params as { directory?: string };
       const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const files = listMemoryFiles(directory ? path.join(memoryDir, directory) : memoryDir);
+      const listDir = directory ? resolvePathWithin(memoryDir, directory) : memoryDir;
+
+      if (!listDir) {
+        return {
+          content: [{ type: "text", text: `Invalid memory directory: ${directory}` }],
+          details: { files: [], count: 0, error: true },
+        };
+      }
+
+      const files = listMemoryFiles(listDir);
       const relPaths = files.map((f) => path.relative(memoryDir, f));
       return {
         content: [
@@ -392,24 +432,26 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
       const escapedQuery = query ? query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : null;
       const searchLabel = query ?? grep ?? rg ?? "search";
 
-      const runTool = async (tool: string, args: string[]): Promise<string[]> => {
+      async function runTool(tool: string, args: string[]): Promise<string[]> {
         const { stdout } = await pi.exec(tool, args).catch(() => ({ stdout: "" }));
+        const results: string[] = [];
 
-        return (stdout || "")
-          .trim()
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => {
-            const separatorIndex = line.indexOf(":");
-            if (separatorIndex === -1) {
-              return line;
-            }
+        for (const line of (stdout || "").trim().split("\n")) {
+          if (!line) continue;
 
-            const matchedFilePath = line.slice(0, separatorIndex);
-            matchedFiles.add(matchedFilePath);
-            return `${path.relative(memoryDir, matchedFilePath)}: ${line.slice(separatorIndex + 1).trim()}`;
-          });
-      };
+          const separatorIndex = line.indexOf(":");
+          if (separatorIndex === -1) {
+            results.push(line);
+            continue;
+          }
+
+          const matchedFilePath = line.slice(0, separatorIndex);
+          matchedFiles.add(matchedFilePath);
+          results.push(`${path.relative(memoryDir, matchedFilePath)}: ${line.slice(separatorIndex + 1).trim()}`);
+        }
+
+        return results;
+      }
 
       if (escapedQuery) {
         const tagResults = await runTool("grep", ["-rn", "--include=*.md", "-E", `^\\s*-\\s*${escapedQuery}`, coreDir]);
@@ -485,25 +527,37 @@ export function registerMemoryInit(
       force: Type.Optional(Type.Boolean({ description: "Reinitialize even if already set up" })),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { force = false } = params as { force?: boolean };
-      if (isRepoInitialized.value && !force) {
+      const memoryDir = getMemoryDir(settings, ctx.cwd);
+      const alreadyInitialized = fs.existsSync(path.join(memoryDir, "core", "user"));
+
+      if (alreadyInitialized && !force) {
         return {
           content: [{ type: "text", text: "Memory repository already initialized. Use force: true to reinitialize." }],
           details: { initialized: true },
         };
       }
+
       const result = await syncRepository(pi, settings, isRepoInitialized);
+      if (!result.success) {
+        return {
+          content: [{ type: "text", text: `Initialization failed: ${result.message}` }],
+          details: { success: false },
+        };
+      }
+
+      ensureDirectoryStructure(memoryDir);
+      createDefaultFiles(memoryDir);
+
       return {
         content: [
           {
             type: "text",
-            text: result.success
-              ? `Memory repository initialized:\n${result.message}\n\nCreated directory structure:\n${["core/user", "core/project", "reference"].map((d) => `  - ${d}`).join("\n")}`
-              : `Initialization failed: ${result.message}`,
+            text: `Memory repository initialized:\n${result.message}\n\nCreated directory structure:\n${["core/user", "core/project", "reference"].map((d) => `  - ${d}`).join("\n")}`,
           },
         ],
-        details: { success: result.success },
+        details: { success: true },
       };
     },
 

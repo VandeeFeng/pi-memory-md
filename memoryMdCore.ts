@@ -20,7 +20,7 @@ const TIMEOUT_MESSAGE =
  * Settings
  */
 
-let localPath: string;
+let localPath = DEFAULT_LOCAL_PATH;
 
 export function getLocalPath(): string {
   return localPath;
@@ -38,9 +38,7 @@ function expandPath(p: string): string {
 }
 
 export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
-  if (!localPath) {
-    localPath = settings.localPath || DEFAULT_LOCAL_PATH;
-  }
+  localPath = expandPath(settings.localPath || DEFAULT_LOCAL_PATH);
   return path.join(localPath, path.basename(cwd));
 }
 

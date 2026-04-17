@@ -63,6 +63,15 @@ export class AnchorIndex {
     return entries[entries.length - 1];
   }
 
+  findByNameInSession(name: string, sessionId: string): AnchorEntry | null {
+    const entries = this.index.get(name) ?? [];
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const entry = entries[index];
+      if (entry.sessionId === sessionId) return entry;
+    }
+    return null;
+  }
+
   findAllByName(name: string): AnchorEntry[] {
     return this.index.get(name) ?? [];
   }

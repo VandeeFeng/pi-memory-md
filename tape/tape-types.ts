@@ -23,6 +23,8 @@ export type TapeContextStrategy = "recent-only" | "smart";
  * - `sinceAnchor` / `lastAnchor`: Filter entries after a specific anchor
  * - `betweenAnchors`: Get entries between two anchors
  * - `betweenDates`: Get entries within date range (ISO format)
+ * - `scope`: Entry source scope (`session` or `project`)
+ * - `anchorScope`: Anchor resolution scope (`current-session` or `project`)
  */
 export interface TapeQueryOptions {
   /** Text search in entry content (case-insensitive) */
@@ -39,6 +41,10 @@ export interface TapeQueryOptions {
   betweenAnchors?: { start: string; end: string };
   /** Get entries within date range (ISO format) */
   betweenDates?: { start: string; end: string };
+  /** Entry source scope (default: project) */
+  scope?: "session" | "project";
+  /** Anchor resolution scope (default: current-session) */
+  anchorScope?: "current-session" | "project";
 }
 
 export type ContextStrategy = TapeContextStrategy;

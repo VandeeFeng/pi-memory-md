@@ -21,7 +21,7 @@ import { registerAllMemoryTools } from "./tools.js";
  */
 
 export default function memoryMdExtension(pi: ExtensionAPI): void {
-  let settings: MemoryMdSettings = loadSettings();
+  const settings: MemoryMdSettings = loadSettings();
   const repoInitialized = { value: false };
   let syncPromise: ReturnType<typeof syncRepository> | null = null;
   let cachedMemoryContext: string | null = null;
@@ -30,11 +30,15 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
   let contextSelector: MemoryFileSelector | null = null;
   let tapeToolsRegistered = false;
 
+  function withMemoryTitle(context: string): string {
+    return context.trimStart().startsWith("# Project Memory") ? context : `# Project Memory\n\n${context}`;
+  }
+
   function initMemoryContext(
     ctx: ExtensionContext,
     options: { showNotification: boolean; autoSync: boolean },
   ): boolean {
-    settings = loadSettings();
+    Object.assign(settings, loadSettings());
 
     if (!settings.enabled) return false;
 
@@ -62,7 +66,34 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
     return true;
   }
 
+  pi.on("tool_result", (_toolEvent, toolCtx) => {
+    if (!tapeService) return;
+
+    const info = tapeService.getInfo();
+    const anchorConfig = settings.tape?.anchor ?? { mode: "threshold", threshold: 25 };
+
+    if (anchorConfig.mode === "threshold" && info.entriesSinceLastAnchor >= (anchorConfig.threshold ?? 25)) {
+      const now = new Date();
+      const timestamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+        String(now.getHours()).padStart(2, "0"),
+        String(now.getMinutes()).padStart(2, "0"),
+        String(now.getSeconds()).padStart(2, "0"),
+      ].join("");
+
+      tapeService.createAnchor(`auto/threshold-${timestamp}`);
+      toolCtx.ui.notify(
+        `Auto-created anchor: ${info.entriesSinceLastAnchor} entries since last anchor (${info.anchorCount} anchors total)`,
+        "info",
+      );
+    }
+  });
+
   pi.on("session_start", async (event, ctx) => {
+    Object.assign(settings, loadSettings());
+
     if (settings.tape?.enabled) {
       const memoryDir = getMemoryDir(settings, ctx.cwd);
       const projectName = path.basename(ctx.cwd);
@@ -76,31 +107,9 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
         registerAllTapeTools(pi, tapeService);
         tapeToolsRegistered = true;
       }
-
-      pi.on("tool_result", (_toolEvent, _toolCtx) => {
-        if (!tapeService) return;
-
-        const info = tapeService.getInfo();
-        const anchorConfig = settings.tape?.anchor ?? { mode: "threshold", threshold: 25 };
-
-        if (anchorConfig.mode === "threshold" && info.entriesSinceLastAnchor >= (anchorConfig.threshold ?? 25)) {
-          const now = new Date();
-          const timestamp = [
-            now.getFullYear(),
-            String(now.getMonth() + 1).padStart(2, "0"),
-            String(now.getDate()).padStart(2, "0"),
-            String(now.getHours()).padStart(2, "0"),
-            String(now.getMinutes()).padStart(2, "0"),
-            String(now.getSeconds()).padStart(2, "0"),
-          ].join("");
-
-          tapeService.createAnchor(`auto/threshold-${timestamp}`);
-          ctx.ui.notify(
-            `Auto-created anchor: ${info.entriesSinceLastAnchor} entries since last anchor (${info.anchorCount} anchors total)`,
-            "info",
-          );
-        }
-      });
+    } else {
+      tapeService = null;
+      contextSelector = null;
     }
 
     if (event.reason === "new" || event.reason === "fork") {
@@ -148,12 +157,12 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
         return {
           message: {
             customType: "pi-memory-md",
-            content: `# Project Memory\n\n${cachedMemoryContext}`,
+            content: withMemoryTitle(cachedMemoryContext),
             display: false,
           },
         };
       }
-      return { systemPrompt: `${event.systemPrompt}\n\n# Project Memory\n\n${cachedMemoryContext}` };
+      return { systemPrompt: `${event.systemPrompt}\n\n${withMemoryTitle(cachedMemoryContext)}` };
     }
 
     return undefined;
@@ -229,7 +238,7 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
       if (mode === "message-append") {
         pi.sendMessage({
           customType: "pi-memory-md-refresh",
-          content: `# Project Memory (Refreshed)\n\n${memoryContext}`,
+          content: withMemoryTitle(memoryContext),
           display: false,
         });
         ctx.ui.notify(`Memory refreshed: ${fileCount} files injected (${mode})`, "info");

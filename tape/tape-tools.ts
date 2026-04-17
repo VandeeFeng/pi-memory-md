@@ -84,14 +84,15 @@ export function registerTapeHandoff(pi: ExtensionAPI, tapeService: MemoryTapeSer
 
     async execute(_toolCallId, params) {
       const { name, summary, state } = params as { name: string; summary?: string; state?: Record<string, unknown> };
-      const anchorId = tapeService.createAnchor(name);
+      const anchorState = { ...(state ?? {}), ...(summary ? { summary } : {}) };
+      const anchorId = tapeService.createAnchor(name, Object.keys(anchorState).length > 0 ? anchorState : undefined);
 
       return {
         content: [{ type: "text", text: `Anchor created: ${name}` }],
         details: {
           anchorId,
           name,
-          state: { ...state, ...(summary && { summary }), timestamp: new Date().toISOString() },
+          state: { ...anchorState, timestamp: new Date().toISOString() },
         },
       };
     },
@@ -138,7 +139,7 @@ export function registerTapeAnchors(pi: ExtensionAPI, tapeService: MemoryTapeSer
       const allAnchors = anchorIndex.getAllAnchors().slice(-limit);
 
       const anchorsWithContext = allAnchors.map((anchor) => {
-        const entries = tapeService.query({ sinceAnchor: anchor.name });
+        const entries = tapeService.query({ sinceAnchor: anchor.name, scope: "project", anchorScope: "project" });
         return {
           id: anchor.sessionEntryId,
           name: anchor.name,
@@ -273,6 +274,8 @@ export function registerTapeInfo(pi: ExtensionAPI, tapeService: MemoryTapeServic
 }
 
 const SearchKindsUnion = Type.Union([Type.Literal("entry"), Type.Literal("anchor"), Type.Literal("all")]);
+const QueryScopeUnion = Type.Union([Type.Literal("session"), Type.Literal("project")]);
+const AnchorScopeUnion = Type.Union([Type.Literal("current-session"), Type.Literal("project")]);
 
 export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
   pi.registerTool({
@@ -299,6 +302,15 @@ export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeServ
       betweenDates: Type.Optional(
         Type.Object({ start: Type.String(), end: Type.String() }, { description: "Between dates (ISO)" }),
       ),
+      scope: Type.Optional(
+        Type.Unsafe({ ...QueryScopeUnion, description: "Entry scope: 'session' or 'project' (default: project)" }),
+      ),
+      anchorScope: Type.Optional(
+        Type.Unsafe({
+          ...AnchorScopeUnion,
+          description: "Anchor resolution: 'current-session' (default) or 'project'",
+        }),
+      ),
       query: Type.Optional(Type.String({ description: "Text search in entry/anchor content" })),
     }),
 
@@ -311,6 +323,8 @@ export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeServ
         lastAnchor,
         betweenAnchors,
         betweenDates,
+        scope = "project",
+        anchorScope = "current-session",
         query,
       } = params as {
         kinds?: string[];
@@ -320,6 +334,8 @@ export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeServ
         lastAnchor?: boolean;
         betweenAnchors?: { start: string; end: string };
         betweenDates?: { start: string; end: string };
+        scope?: "session" | "project";
+        anchorScope?: "current-session" | "project";
         query?: string;
       };
 
@@ -328,14 +344,20 @@ export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeServ
 
       if (kinds.includes("anchor") || kinds.includes("all")) {
         const anchorIndex = tapeService.getAnchorIndex();
-        const since = sinceAnchor ? anchorIndex.findByName(sinceAnchor)?.timestamp : undefined;
+        const since = sinceAnchor ? tapeService.findAnchorByName(sinceAnchor, anchorScope)?.timestamp : undefined;
         const until = betweenDates?.end;
 
-        const anchors = anchorIndex.search({ query, limit, since, until });
+        const anchors = anchorIndex.search({
+          query,
+          limit,
+          since,
+          until,
+          sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+        });
 
         if (anchors.length > 0) {
           parts.push(`${anchors.length} anchors`);
-          lines.push("...");
+          lines.push("Anchors:");
           for (const anchor of anchors.slice(-5)) {
             const stateStr = anchor.state ? ` ${JSON.stringify(anchor.state)}` : "";
             lines.push(`  ${anchor.name} (${new Date(anchor.timestamp).toLocaleString()})${stateStr}`);
@@ -352,6 +374,8 @@ export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeServ
           lastAnchor,
           betweenAnchors,
           betweenDates,
+          scope,
+          anchorScope,
           query,
         });
 
@@ -405,6 +429,8 @@ export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeServic
       ),
       query: Type.Optional(Type.String({ description: "Text search" })),
       types: Type.Optional(Type.Array(EntryTypeUnion)),
+      scope: Type.Optional(QueryScopeUnion),
+      anchorScope: Type.Optional(AnchorScopeUnion),
       limit: Type.Optional(Type.Integer({ description: "Max entries (default: 20)", minimum: 1, maximum: 100 })),
     }),
 
@@ -415,6 +441,8 @@ export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeServic
         betweenDates,
         types,
         lastAnchor = false,
+        scope = "project",
+        anchorScope = "current-session",
         limit = 20,
         query,
       } = params as {
@@ -423,11 +451,13 @@ export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeServic
         betweenDates?: { start: string; end: string };
         types?: SessionEntry["type"][];
         lastAnchor?: boolean;
+        scope?: "session" | "project";
+        anchorScope?: "current-session" | "project";
         limit?: number;
         query?: string;
       };
 
-      const queryOptions: Parameters<typeof tapeService.query>[0] = { types, limit, query };
+      const queryOptions: Parameters<typeof tapeService.query>[0] = { types, limit, scope, anchorScope, query };
       if (betweenAnchors) queryOptions.betweenAnchors = betweenAnchors;
       else if (betweenDates) queryOptions.betweenDates = betweenDates;
       else if (afterAnchor) queryOptions.sinceAnchor = afterAnchor;
