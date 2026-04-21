@@ -1,6 +1,6 @@
 {
   "name": "pi-memory-md",
-  "version": "0.1.27",
+  "version": "0.1.29",
   "description": "Letta-like memory management for pi using structured markdown files in a GitHub repository",
   "type": "module",
   "license": "MIT",
@@ -39,11 +39,14 @@
       "./skills/memory-init/SKILL.md",
       "./skills/memory-management/SKILL.md",
       "./skills/memory-sync/SKILL.md",
-      "./skills/memory-search/SKILL.md"
+      "./skills/memory-search/SKILL.md",
+      "./skills/tape-mode/SKILL.md"
     ]
   },
   "files": [
+    "hooks.ts",
     "index.ts",
+    "memoryGit.ts",
     "memoryMdCore.ts",
     "tools.ts",
     "types.ts",

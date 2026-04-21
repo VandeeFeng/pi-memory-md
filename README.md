@@ -114,8 +114,9 @@ Markdown content...
     "enabled": true,
     "repoUrl": "git@github.com:username/repo.git", // Or HTTPS format
     "injection": "message-append",
-    "autoSync": {
-      "onSessionStart": true
+    "hooks": {
+      "sessionStart": ["pull"],
+      "sessionEnd": ["push"]
     }
   }
 }
@@ -127,8 +128,30 @@ Markdown content...
 | `repoUrl` | Required | GitHub repository URL |
 | `localPath` | `~/.pi/memory-md` | Local clone path |
 | `injection` | `"message-append"` | Memory injection mode: `"message-append"`, `"system-prompt"` |
-| `autoSync.onSessionStart` | `true` | Git pull on session start |
+| `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts |
+| `hooks.sessionEnd` | `[]` | Actions to run when a session ends |
 | `tape.enabled` | `false` | Enable tape mode for dynamic context selection |
+
+When settings change, run `/reload` to apply them.
+
+### Hooks
+
+- `sessionStart: ["pull"]`: pull latest memory before the first prompt.
+- `sessionEnd: ["push"]`: commit and push memory when the session ends.
+
+Legacy config is still supported:
+
+```json
+{
+  "autoSync": {
+    "onSessionStart": true
+  }
+}
+```
+
+But it is recommended to migrate to the new `hooks` config.
+
+More trigger actions can be added later, even custom hooks.
 
 ### Memory Injection Modes
 
@@ -196,7 +219,9 @@ The LLM automatically:
 ## Tape Mode (Dynamic Context Injection)
 
 > **Experimental**: This mode is under active development. APIs and behavior may change.
-> Tape mode is not yet published to npm. Install via GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
+
+> For the latest, install via GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
+
 > **Note**: This mode may consume more tokens. Adjust parameters based on your model's context window and your API quota.
 
 ### Tape vs Injection Modes
@@ -209,9 +234,7 @@ The LLM automatically:
 In both cases, tape:
 - Injects memory files **once per session** (not on every turn)
 - Tracks all operations in an immutable tape (JSONL format): messages, tool calls, memory operations (by default)
-- **Anchor-based context**: Selects entries after the last anchor, then applies token/entry limits
-  - `maxTapeTokens` (default: 1000): Max tokens for context
-  - `maxTapeEntries` (default: 40): Max entries to consider before token limit
+- **Anchor-based context**: Selects relevant memory files based on recent usage and configured strategy
 - Creates checkpoints with `tape_handoff` to mark phase transitions
 - **Auto-anchor**: Automatically creates anchors when context grows too large
   - `anchor.mode: "threshold"` (default): Creates anchor when entries exceed `anchor.threshold` (default: 15)
@@ -231,25 +254,14 @@ In both cases, tape:
         // "recent-only": only recently accessed files
         "strategy": "smart",
 
-        // Max files to inject into LLM context (tape records all operations)
+        // Max files to inject into LLM context
         "fileLimit": 10,
 
         // Files to always include in context (optional, defaults to empty)
         "alwaysInclude": [
           "core/user/identity.md",
           "core/user/prefer.md"
-        ],
-
-        // Token budget for tape conversation history (default: 1000)
-        // Controls how much recent conversation context to include
-        "maxTapeTokens": 1000,
-
-        // Maximum entries to consider before token limit (default: 40)
-        "maxTapeEntries": 40,
-
-        // Include conversation history in context (default: true)
-        // Set to false to disable history and use memory files only
-        "includeConversationHistory": false
+        ]
       },
       "anchor": {
         // Auto-anchor configuration (default: { mode: "threshold", threshold: 15 })

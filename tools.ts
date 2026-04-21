@@ -4,15 +4,14 @@ import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { gitExec, pushRepository, syncRepository } from "./memoryGit.js";
 import {
   createDefaultFiles,
   ensureDirectoryStructure,
   getCurrentDate,
   getMemoryDir,
-  gitExec,
   listMemoryFiles,
   readMemoryFile,
-  syncRepository,
   writeMemoryFile,
 } from "./memoryMdCore.js";
 import type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
@@ -199,50 +198,10 @@ export function registerMemorySync(
       }
 
       if (action === "push") {
-        const statusResult = await gitExec(pi, localPath, ["status", "--porcelain"]);
-        const hasChanges = statusResult.stdout.trim().length > 0;
-
-        if (hasChanges) {
-          await gitExec(pi, localPath, ["add", "."]);
-          const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-          const commitResult = await gitExec(pi, localPath, ["commit", "-m", `Update memory - ${timestamp}`]);
-          if (!commitResult.success) {
-            return {
-              content: [{ type: "text", text: commitResult.stdout || "Commit failed" }],
-              details: { success: false },
-            };
-          }
-        }
-
-        const result = await gitExec(pi, localPath, ["push"]);
-        if (result.timeout) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Unable to connect to GitHub repository, connection timeout (10s). Please check your network connection or try again later.",
-              },
-            ],
-            details: { success: false, timeout: true },
-          };
-        }
-
-        if (result.success) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: hasChanges
-                  ? "Committed and pushed changes to repository"
-                  : "No changes to commit, repository up to date",
-              },
-            ],
-            details: { success: true, committed: hasChanges },
-          };
-        }
+        const result = await pushRepository(pi, settings);
         return {
-          content: [{ type: "text", text: result.stdout || "Push failed" }],
-          details: { success: false },
+          content: [{ type: "text", text: result.message }],
+          details: { success: result.success, committed: result.updated ?? false },
         };
       }
 

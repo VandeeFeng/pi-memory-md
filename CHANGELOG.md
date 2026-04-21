@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.29] - 2026-04-21
+
+### Warning
+
+- Old `autoSync.onSessionStart` is still supported and normalized into the new hooks config, but migration to `hooks` is recommended
+
+### Features
+
+- **Hooks-based session actions**: Replaced the old `autoSync` model with `hooks.sessionStart` and `hooks.sessionEnd`, allowing multiple actions per trigger and future custom hook actions
+
+### Fix
+
+- **Settings reload semantics**: Aligned `pi-memory-md` settings behavior with native pi runtime semantics. Settings are now loaded on extension initialization and applied on runtime reload.
+
+### Improvements
+
+- **Partial memory reads**: Added `offset` and `limit` support to `memory_read` for more targeted file reads
+
 ## [0.1.27] - 2026-04-17
 
 ### Features

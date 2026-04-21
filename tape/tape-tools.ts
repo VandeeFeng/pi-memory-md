@@ -6,6 +6,8 @@ import { extractMessageContent } from "./tape-selector.js";
 import type { MemoryTapeService } from "./tape-service.js";
 import type { RenderState } from "./tape-types.js";
 
+export type TapeServiceGetter = () => MemoryTapeService | null;
+
 function renderText(text: string): Text {
   return new Text(text, 0, 0);
 }
@@ -69,7 +71,14 @@ const EntryTypeUnion = Type.Union([
   Type.Literal("compaction"),
 ]);
 
-export function registerTapeHandoff(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
+function getTapeUnavailableResult() {
+  return {
+    content: [{ type: "text" as const, text: "Tape is not enabled for the current settings." }],
+    details: {} as any,
+  };
+}
+
+export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
     name: "tape_handoff",
     label: "Tape Handoff",
@@ -83,6 +92,9 @@ export function registerTapeHandoff(pi: ExtensionAPI, tapeService: MemoryTapeSer
     }),
 
     async execute(_toolCallId, params) {
+      const tapeService = getTapeService();
+      if (!tapeService) return getTapeUnavailableResult();
+
       const { name, summary, state } = params as { name: string; summary?: string; state?: Record<string, unknown> };
       const anchorState = { ...(state ?? {}), ...(summary ? { summary } : {}) };
       const anchorId = tapeService.createAnchor(name, Object.keys(anchorState).length > 0 ? anchorState : undefined);
@@ -114,7 +126,7 @@ export function registerTapeHandoff(pi: ExtensionAPI, tapeService: MemoryTapeSer
   });
 }
 
-export function registerTapeAnchors(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
+export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
     name: "tape_anchors",
     label: "Tape Anchors",
@@ -133,6 +145,9 @@ export function registerTapeAnchors(pi: ExtensionAPI, tapeService: MemoryTapeSer
     }),
 
     async execute(_toolCallId, params) {
+      const tapeService = getTapeService();
+      if (!tapeService) return getTapeUnavailableResult();
+
       const { limit = 20, contextLines = 1 } = params as { limit?: number; contextLines?: number };
 
       const anchorIndex = tapeService.getAnchorIndex();
@@ -216,7 +231,7 @@ export function registerTapeAnchors(pi: ExtensionAPI, tapeService: MemoryTapeSer
   });
 }
 
-export function registerTapeInfo(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
+export function registerTapeInfo(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
     name: "tape_info",
     label: "Tape Info",
@@ -224,6 +239,9 @@ export function registerTapeInfo(pi: ExtensionAPI, tapeService: MemoryTapeServic
     parameters: Type.Object({}),
 
     async execute(_toolCallId) {
+      const tapeService = getTapeService();
+      if (!tapeService) return getTapeUnavailableResult();
+
       const info = tapeService.getInfo();
       const lastAnchorName = info.lastAnchor?.name ?? "none";
       const tapeFileCount = tapeService.getTapeFileCount();
@@ -277,7 +295,7 @@ const SearchKindsUnion = Type.Union([Type.Literal("entry"), Type.Literal("anchor
 const QueryScopeUnion = Type.Union([Type.Literal("session"), Type.Literal("project")]);
 const AnchorScopeUnion = Type.Union([Type.Literal("current-session"), Type.Literal("project")]);
 
-export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
+export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
     name: "tape_search",
     label: "Tape Search",
@@ -315,6 +333,9 @@ export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeServ
     }),
 
     async execute(_toolCallId, params) {
+      const tapeService = getTapeService();
+      if (!tapeService) return getTapeUnavailableResult();
+
       const {
         kinds = ["all"],
         types,
@@ -413,7 +434,7 @@ export function registerTapeSearch(pi: ExtensionAPI, tapeService: MemoryTapeServ
   });
 }
 
-export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
+export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
     name: "tape_read",
     label: "Tape Read",
@@ -435,6 +456,9 @@ export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeServic
     }),
 
     async execute(_toolCallId, params) {
+      const tapeService = getTapeService();
+      if (!tapeService) return getTapeUnavailableResult();
+
       const {
         afterAnchor,
         betweenAnchors,
@@ -457,7 +481,7 @@ export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeServic
         query?: string;
       };
 
-      const queryOptions: Parameters<typeof tapeService.query>[0] = { types, limit, scope, anchorScope, query };
+      const queryOptions: Parameters<MemoryTapeService["query"]>[0] = { types, limit, scope, anchorScope, query };
       if (betweenAnchors) queryOptions.betweenAnchors = betweenAnchors;
       else if (betweenDates) queryOptions.betweenDates = betweenDates;
       else if (afterAnchor) queryOptions.sinceAnchor = afterAnchor;
@@ -488,7 +512,7 @@ export function registerTapeRead(pi: ExtensionAPI, tapeService: MemoryTapeServic
   });
 }
 
-export function registerTapeReset(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
+export function registerTapeReset(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
     name: "tape_reset",
     label: "Tape Reset",
@@ -498,6 +522,9 @@ export function registerTapeReset(pi: ExtensionAPI, tapeService: MemoryTapeServi
     }),
 
     async execute(_toolCallId, params) {
+      const tapeService = getTapeService();
+      if (!tapeService) return getTapeUnavailableResult();
+
       const { archive = false } = params as { archive?: boolean };
       tapeService.clear();
       tapeService.recordSessionStart();
@@ -519,11 +546,11 @@ export function registerTapeReset(pi: ExtensionAPI, tapeService: MemoryTapeServi
   });
 }
 
-export function registerAllTapeTools(pi: ExtensionAPI, tapeService: MemoryTapeService): void {
-  registerTapeHandoff(pi, tapeService);
-  registerTapeAnchors(pi, tapeService);
-  registerTapeInfo(pi, tapeService);
-  registerTapeSearch(pi, tapeService);
-  registerTapeRead(pi, tapeService);
-  registerTapeReset(pi, tapeService);
+export function registerAllTapeTools(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
+  registerTapeHandoff(pi, getTapeService);
+  registerTapeAnchors(pi, getTapeService);
+  registerTapeInfo(pi, getTapeService);
+  registerTapeSearch(pi, getTapeService);
+  registerTapeRead(pi, getTapeService);
+  registerTapeReset(pi, getTapeService);
 }

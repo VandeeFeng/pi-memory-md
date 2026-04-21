@@ -38,8 +38,9 @@ Add to your settings file (global: `~/.pi/agent/settings.json`, project: `.pi/se
     "enabled": true,
     "repoUrl": "git@github.com:username/repo-name.git",
     "localPath": "~/.pi/memory-md",
-    "autoSync": {
-      "onSessionStart": true
+    "hooks": {
+      "sessionStart": ["pull"],
+      "sessionEnd": []
     }
   }
 }
@@ -52,7 +53,8 @@ Add to your settings file (global: `~/.pi/agent/settings.json`, project: `.pi/se
 | `enabled` | Enable/disable extension | `true` |
 | `repoUrl` | GitHub repository URL | Required |
 | `localPath` | Local clone location (supports `~`) | `~/.pi/memory-md` |
-| `autoSync.onSessionStart` | Auto-pull on session start | `true` |
+| `hooks.sessionStart` | Actions run at session start | `["pull"]` |
+| `hooks.sessionEnd` | Actions run at session end | `[]` |
 
 ## Step 4: Initialize Repository
 
@@ -184,9 +186,9 @@ settings['pi-memory-md'] = {
   enabled: true,
   repoUrl: '$REPO_URL',
   localPath: path.join(require('os').homedir(), '.pi', 'memory-md'),
-  autoSync: {
-    onSessionStart: true,
-    onMessageCreate: false
+  hooks: {
+    sessionStart: ["pull"],
+    sessionEnd: []
   }
 };
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));

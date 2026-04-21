@@ -1,6 +1,6 @@
 ---
-name: pi-memory-md-tape-mode
-description: Tape mode for pi-memory-md - anchor-based conversation history and context management using pi session as data source. This SKILL provides tape provides architecture, design philosophy, and comprehensive usage guide.
+name: tape-mode
+description: This SKILL provides tape provides architecture, design philosophy, and comprehensive usage guide. Use when tape mode is enabled and the user needs tape anchors, tape search, or tape context workflows.
 ---
 
 # Tape Mode

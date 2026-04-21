@@ -18,18 +18,17 @@ export interface MemoryFile {
   content: string;
 }
 
+export type HookTrigger = "sessionStart" | "sessionEnd";
+export type BuiltinHookAction = "pull" | "push";
+export type HookAction = BuiltinHookAction | (string & {});
+export type HookConfig = Partial<Record<HookTrigger, HookAction[]>>;
+
 export interface MemoryMdSettings {
   enabled?: boolean;
   repoUrl?: string;
   localPath?: string;
-  autoSync?: {
-    onSessionStart?: boolean;
-  };
+  hooks?: HookConfig;
   injection?: "system-prompt" | "message-append";
-  systemPrompt?: {
-    maxTokens?: number;
-    includeProjects?: string[];
-  };
   tape?: {
     enabled?: boolean;
     context?: {

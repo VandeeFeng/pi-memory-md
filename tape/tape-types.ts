@@ -73,12 +73,6 @@ export interface TapeConfig {
     fileLimit?: number;
     /** Files to always include in context (default: []) */
     alwaysInclude?: string[];
-    /** Maximum tokens for tape context (default: 1000) */
-    maxTapeTokens?: number;
-    /** Maximum entries to consider before token limit (default: 40) */
-    maxTapeEntries?: number;
-    /** Include conversation history in context (default: true) */
-    includeConversationHistory?: boolean;
   };
   /** Anchor auto-creation settings */
   anchor?: {

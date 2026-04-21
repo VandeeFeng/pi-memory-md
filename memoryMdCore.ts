@@ -1,166 +1,116 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import matter from "gray-matter";
-import type { GitResult, MemoryFile, MemoryFrontmatter, MemoryMdSettings, ParsedFrontmatter } from "./types.js";
+import { DEFAULT_HOOKS, normalizeHooks } from "./hooks.js";
+import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, ParsedFrontmatter } from "./types.js";
 
 export * from "./types.js";
-
-/**
- * Constants
- */
-
-const DEFAULT_LOCAL_PATH = path.join(os.homedir(), ".pi", "memory-md");
-const TIMEOUT_MS = 10000;
-const TIMEOUT_MESSAGE =
-  "Unable to connect to GitHub repository, connection timeout (10s). Please check your network connection or try again later.";
-
-/**
- * Settings
- */
-
-let localPath = DEFAULT_LOCAL_PATH;
-
-export function getLocalPath(): string {
-  return localPath;
-}
 
 export function getCurrentDate(): string {
   return new Date().toISOString().split("T")[0];
 }
 
-function expandPath(p: string): string {
-  if (p.startsWith("~")) {
-    return path.join(os.homedir(), p.slice(1));
+/**
+ * Settings
+ */
+
+export const DEFAULT_LOCAL_PATH = path.join(os.homedir(), ".pi", "memory-md");
+
+export const DEFAULT_SETTINGS: MemoryMdSettings = {
+  enabled: true,
+  repoUrl: "",
+  localPath: DEFAULT_LOCAL_PATH,
+  hooks: DEFAULT_HOOKS,
+  injection: "message-append",
+  tape: {
+    enabled: false,
+    context: {
+      strategy: "smart",
+      fileLimit: 10,
+    },
+  },
+};
+
+export function expandPath(filePath: string): string {
+  if (filePath.startsWith("~")) {
+    return path.join(os.homedir(), filePath.slice(1));
   }
-  return p;
+  return filePath;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function deepMergeSettings<T>(base: T, overrides: Partial<T>): T {
+  const result = { ...base } as Record<string, unknown>;
+
+  for (const [key, overrideValue] of Object.entries(overrides)) {
+    if (overrideValue === undefined) {
+      continue;
+    }
+
+    const baseValue = result[key];
+    result[key] =
+      isPlainObject(baseValue) && isPlainObject(overrideValue)
+        ? deepMergeSettings(baseValue, overrideValue)
+        : overrideValue;
+  }
+
+  return result as T;
+}
+
+function readSettingsFile(filePath: string): Record<string, unknown> {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  try {
+    const content = fs.readFileSync(filePath, "utf-8");
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch (error) {
+    console.warn(`Failed to load settings from ${filePath}:`, error);
+    return {};
+  }
+}
+
+function normalizeSettings(
+  rawSettings: MemoryMdSettings & {
+    hooks?: MemoryMdSettings["hooks"];
+    autoSync?: { onSessionStart?: boolean };
+  },
+): MemoryMdSettings {
+  const loadedSettings = deepMergeSettings(DEFAULT_SETTINGS, rawSettings);
+  loadedSettings.hooks = normalizeHooks(rawSettings.hooks ?? rawSettings.autoSync ?? loadedSettings.hooks);
+
+  if (loadedSettings.localPath) {
+    loadedSettings.localPath = expandPath(loadedSettings.localPath);
+  }
+
+  return loadedSettings;
+}
+
+export function loadSettings(cwd = process.cwd()): MemoryMdSettings {
+  const globalSettingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+  const projectSettingsPath = path.join(cwd, ".pi", "settings.json");
+
+  const globalSettings = readSettingsFile(globalSettingsPath);
+  const projectSettings = readSettingsFile(projectSettingsPath);
+  const rawSettings = deepMergeSettings(
+    (globalSettings["pi-memory-md"] ?? {}) as Record<string, unknown> as MemoryMdSettings,
+    (projectSettings["pi-memory-md"] ?? {}) as Record<string, unknown> as Partial<MemoryMdSettings>,
+  ) as MemoryMdSettings & {
+    hooks?: MemoryMdSettings["hooks"];
+    autoSync?: { onSessionStart?: boolean };
+  };
+
+  return normalizeSettings(rawSettings);
 }
 
 export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
-  localPath = expandPath(settings.localPath || DEFAULT_LOCAL_PATH);
+  const localPath = settings.localPath || DEFAULT_LOCAL_PATH;
   return path.join(localPath, path.basename(cwd));
-}
-
-function getRepoName(settings: MemoryMdSettings): string {
-  if (!settings.repoUrl) return "memory-md";
-  const match = settings.repoUrl.match(/\/([^/]+?)(\.git)?$/);
-  return match ? match[1] : "memory-md";
-}
-
-export function loadSettings(): MemoryMdSettings {
-  const DEFAULT_SETTINGS: MemoryMdSettings = {
-    enabled: true,
-    repoUrl: "",
-    localPath: DEFAULT_LOCAL_PATH,
-    autoSync: { onSessionStart: true },
-    injection: "message-append",
-    systemPrompt: {
-      maxTokens: 10000,
-      includeProjects: ["current"],
-    },
-    tape: {
-      enabled: false,
-      context: {
-        strategy: "smart",
-        fileLimit: 10,
-      },
-    },
-  };
-
-  const globalSettings = path.join(os.homedir(), ".pi", "agent", "settings.json");
-  if (!fs.existsSync(globalSettings)) {
-    return DEFAULT_SETTINGS;
-  }
-
-  try {
-    const content = fs.readFileSync(globalSettings, "utf-8");
-    const parsed = JSON.parse(content);
-    const loadedSettings = { ...DEFAULT_SETTINGS, ...(parsed["pi-memory-md"] as MemoryMdSettings) };
-
-    if (loadedSettings.localPath) {
-      loadedSettings.localPath = expandPath(loadedSettings.localPath);
-    }
-
-    return loadedSettings;
-  } catch (error) {
-    console.warn("Failed to load memory settings:", error);
-    return DEFAULT_SETTINGS;
-  }
-}
-
-/**
- * Git operations
- */
-
-export async function gitExec(
-  pi: ExtensionAPI,
-  cwd: string,
-  args: string[],
-  timeoutMs = TIMEOUT_MS,
-): Promise<GitResult> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const result = await pi.exec("git", args, { cwd, signal: controller.signal });
-    clearTimeout(timeoutId);
-    return { stdout: result.stdout || "", success: true };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    const err = error as { name?: string; code?: string; message?: string };
-    const isTimeout = err?.name === "AbortError" || err?.code === "ABORT_ERR";
-    if (isTimeout) return { stdout: "", success: false, timeout: true };
-    return { stdout: err?.message || String(error), success: false };
-  }
-}
-
-export async function syncRepository(
-  pi: ExtensionAPI,
-  settings: MemoryMdSettings,
-  isRepoInitialized: { value: boolean },
-): Promise<{ success: boolean; message: string; updated?: boolean }> {
-  const { localPath, repoUrl } = settings;
-
-  if (!repoUrl || !localPath) {
-    return { success: false, message: "GitHub repo URL or local path not configured" };
-  }
-
-  const repoName = getRepoName(settings);
-
-  if (fs.existsSync(localPath)) {
-    const gitDir = path.join(localPath, ".git");
-    if (!fs.existsSync(gitDir)) {
-      return { success: false, message: `Directory exists but is not a git repo: ${localPath}` };
-    }
-
-    const pullResult = await gitExec(pi, localPath, ["pull", "--rebase", "--autostash"]);
-    if (pullResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
-    if (!pullResult.success) return { success: false, message: pullResult.stdout || "Pull failed" };
-
-    isRepoInitialized.value = true;
-    const updated = pullResult.stdout.includes("Updating") || pullResult.stdout.includes("Fast-forward");
-
-    return {
-      success: true,
-      message: updated ? `Pulled latest changes from [${repoName}]` : `[${repoName}] is already latest`,
-      updated,
-    };
-  }
-
-  fs.mkdirSync(localPath, { recursive: true });
-
-  const memoryDirName = path.basename(localPath);
-  const parentDir = path.dirname(localPath);
-  const cloneResult = await gitExec(pi, parentDir, ["clone", repoUrl, memoryDirName]);
-
-  if (cloneResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
-  if (cloneResult.success) {
-    isRepoInitialized.value = true;
-    return { success: true, message: `Cloned [${repoName}] successfully`, updated: true };
-  }
-
-  return { success: false, message: cloneResult.stdout || "Clone failed" };
 }
 
 /**

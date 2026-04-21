@@ -1,20 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { getHookActions, runHookTrigger } from "./hooks.js";
+import { gitExec, pushRepository, syncRepository } from "./memoryGit.js";
 import {
   buildMemoryContext,
   createDefaultFiles,
   ensureDirectoryStructure,
   getMemoryDir,
-  gitExec,
   loadSettings,
-  type MemoryMdSettings,
-  syncRepository,
 } from "./memoryMdCore.js";
 import { MemoryFileSelector } from "./tape/tape-selector.js";
 import { MemoryTapeService } from "./tape/tape-service.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
+import type { HookAction, MemoryMdSettings } from "./types.js";
 
 /**
  * Main extension initialization.
@@ -23,10 +23,11 @@ import { registerAllMemoryTools } from "./tools.js";
 export default function memoryMdExtension(pi: ExtensionAPI): void {
   const settings: MemoryMdSettings = loadSettings();
   const repoInitialized = { value: false };
-  let syncPromise: ReturnType<typeof syncRepository> | null = null;
+  let hookPromise: ReturnType<typeof runHookTrigger> | null = null;
   let cachedMemoryContext: string | null = null;
   let memoryInjected = false;
   let tapeService: MemoryTapeService | null = null;
+  let tapeRuntimeKey: string | null = null;
   let contextSelector: MemoryFileSelector | null = null;
   let tapeToolsRegistered = false;
 
@@ -34,12 +35,52 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
     return context.trimStart().startsWith("# Project Memory") ? context : `# Project Memory\n\n${context}`;
   }
 
+  function ensureTapeRuntime(ctx: ExtensionContext, options: { recordSessionStart: boolean }): void {
+    if (!settings.tape?.enabled || !settings.localPath) {
+      tapeService = null;
+      tapeRuntimeKey = null;
+      contextSelector = null;
+      return;
+    }
+
+    const memoryDir = getMemoryDir(settings, ctx.cwd);
+    const projectName = path.basename(ctx.cwd);
+    const sessionId = ctx.sessionManager.getSessionId();
+    const runtimeKey = [settings.localPath, projectName, sessionId].join("::");
+
+    if (!tapeService || tapeRuntimeKey !== runtimeKey) {
+      tapeService = MemoryTapeService.create(settings.localPath, projectName, sessionId, ctx.cwd);
+      tapeService.setSessionManager(ctx.sessionManager);
+      contextSelector = new MemoryFileSelector(tapeService, memoryDir);
+      tapeRuntimeKey = runtimeKey;
+
+      if (options.recordSessionStart) {
+        tapeService.recordSessionStart();
+      }
+
+      return;
+    }
+
+    if (!contextSelector) {
+      contextSelector = new MemoryFileSelector(tapeService, memoryDir);
+    }
+  }
+
+  async function runHookAction(action: HookAction) {
+    switch (action) {
+      case "pull":
+        return syncRepository(pi, settings, repoInitialized);
+      case "push":
+        return pushRepository(pi, settings);
+      default:
+        return { success: false, message: `Unsupported hook action: ${action}` };
+    }
+  }
+
   function initMemoryContext(
     ctx: ExtensionContext,
-    options: { showNotification: boolean; autoSync: boolean },
+    options: { showNotification: boolean; runSessionStartHooks: boolean },
   ): boolean {
-    Object.assign(settings, loadSettings());
-
     if (!settings.enabled) return false;
 
     const memoryDir = getMemoryDir(settings, ctx.cwd);
@@ -52,12 +93,14 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
       return false;
     }
 
-    if (options.autoSync && settings.autoSync?.onSessionStart && settings.localPath) {
-      syncPromise = syncRepository(pi, settings, repoInitialized).then((syncResult) => {
+    if (options.runSessionStartHooks && settings.localPath && getHookActions(settings, "sessionStart").length > 0) {
+      hookPromise = runHookTrigger(settings, "sessionStart", runHookAction).then((results) => {
         if (settings.repoUrl) {
-          ctx.ui.notify(syncResult.message, syncResult.success ? "info" : "error");
+          for (const { action, result } of results) {
+            ctx.ui.notify(`${result.message} (${action} on session start)`, result.success ? "info" : "error");
+          }
         }
-        return syncResult;
+        return results;
       });
     }
 
@@ -67,6 +110,8 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
   }
 
   pi.on("tool_result", (_toolEvent, toolCtx) => {
+    ensureTapeRuntime(toolCtx, { recordSessionStart: false });
+
     if (!tapeService) return;
 
     const info = tapeService.getInfo();
@@ -92,38 +137,31 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (event, ctx) => {
-    Object.assign(settings, loadSettings());
+    ensureTapeRuntime(ctx, { recordSessionStart: true });
 
-    if (settings.tape?.enabled) {
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const projectName = path.basename(ctx.cwd);
-      const sessionId = ctx.sessionManager.getSessionId();
-      tapeService = MemoryTapeService.create(settings.localPath!, projectName, sessionId, ctx.cwd);
-      tapeService.setSessionManager(ctx.sessionManager);
-      contextSelector = new MemoryFileSelector(tapeService, memoryDir);
-      tapeService.recordSessionStart();
-
-      if (!tapeToolsRegistered) {
-        registerAllTapeTools(pi, tapeService);
-        tapeToolsRegistered = true;
-      }
-    } else {
-      tapeService = null;
-      contextSelector = null;
+    if (!tapeToolsRegistered) {
+      registerAllTapeTools(pi, () => tapeService);
+      tapeToolsRegistered = true;
     }
 
     if (event.reason === "new" || event.reason === "fork") {
-      syncPromise = null;
-      initMemoryContext(ctx, { showNotification: true, autoSync: false });
+      hookPromise = null;
+      initMemoryContext(ctx, { showNotification: true, runSessionStartHooks: false });
     } else {
-      initMemoryContext(ctx, { showNotification: true, autoSync: true });
+      initMemoryContext(ctx, { showNotification: true, runSessionStartHooks: true });
     }
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    if (syncPromise) {
-      await syncPromise;
-      syncPromise = null;
+    ensureTapeRuntime(ctx, { recordSessionStart: false });
+
+    if (hookPromise) {
+      await hookPromise;
+      hookPromise = null;
+    }
+
+    if (!settings.tape?.enabled) {
+      cachedMemoryContext = settings.enabled ? buildMemoryContext(settings, ctx.cwd) : null;
     }
 
     const mode = settings.injection || "message-append";
@@ -166,6 +204,26 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
     }
 
     return undefined;
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    if (getHookActions(settings, "sessionEnd").length === 0 || !settings.localPath) {
+      return;
+    }
+
+    const memoryDir = getMemoryDir(settings, ctx.cwd);
+    const coreDir = path.join(memoryDir, "core");
+
+    if (!fs.existsSync(coreDir)) {
+      return;
+    }
+
+    const results = await runHookTrigger(settings, "sessionEnd", runHookAction);
+    if (settings.repoUrl) {
+      for (const { action, result } of results) {
+        ctx.ui.notify(`${result.message} (${action} on session end)`, result.success ? "info" : "error");
+      }
+    }
   });
 
   registerAllMemoryTools(pi, settings, repoInitialized);
