@@ -141,7 +141,15 @@ export class MemoryFileSelector {
   buildContextFromFiles(filePaths: string[]): string {
     if (filePaths.length === 0) return "";
 
-    const lines = ["# Project Memory", "", "Available memory files (use memory_read to view full content):", ""];
+    const lines = [
+      "# Project Memory",
+      "",
+      `Memory directory: ${this.memoryDir}`,
+      "Paths below are relative to that directory.",
+      "",
+      "Available memory files (use memory_read to view full content):",
+      "",
+    ];
 
     for (const relPath of filePaths) {
       const { description, tags } = this.extractFrontmatter(relPath);

@@ -298,6 +298,9 @@ export function buildMemoryContext(settings: MemoryMdSettings, cwd: string): str
   const lines: string[] = [
     "# Project Memory",
     "",
+    `Memory directory: ${memoryDir}`,
+    "Paths below are relative to that directory.",
+    "",
     "Available memory files (use memory_read to view full content):",
     "",
   ];

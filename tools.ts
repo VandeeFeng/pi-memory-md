@@ -264,10 +264,12 @@ export function registerMemoryRead(pi: ExtensionAPI, settings: MemoryMdSettings)
     description: "Read a memory file by path",
     parameters: Type.Object({
       path: Type.String({ description: "Relative path to memory file (e.g., 'core/user/identity.md')" }),
+      offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)" })),
+      limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { path: relPath } = params as { path: string };
+      const { path: relPath, offset, limit } = params as { path: string; offset?: number; limit?: number };
       const memoryDir = getMemoryDir(settings, ctx.cwd);
       const fullPath = resolvePathWithin(memoryDir, relPath);
 
@@ -287,9 +289,14 @@ export function registerMemoryRead(pi: ExtensionAPI, settings: MemoryMdSettings)
       }
 
       const { description = "No description", tags = [] } = memory.frontmatter;
+      const lines = memory.content.split("\n");
+      const startLine = offset ? Math.max(0, offset - 1) : 0;
+      const endLine = limit ? startLine + Math.max(0, limit) : lines.length;
+      const selectedContent = lines.slice(startLine, endLine).join("\n");
+
       return {
         content: [
-          { type: "text", text: `# ${description}\n\nTags: ${tags.join(", ") || "none"}\n\n${memory.content}` },
+          { type: "text", text: `# ${description}\n\nTags: ${tags.join(", ") || "none"}\n\n${selectedContent}` },
         ],
         details: { frontmatter: memory.frontmatter },
       };
