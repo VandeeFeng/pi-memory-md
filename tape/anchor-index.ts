@@ -90,6 +90,20 @@ export class AnchorIndex {
     return result.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   }
 
+  findBySessionEntryId(sessionEntryId: string, sessionId?: string): AnchorEntry[] {
+    const result: AnchorEntry[] = [];
+
+    for (const entries of this.index.values()) {
+      for (const entry of entries) {
+        if (entry.sessionEntryId !== sessionEntryId) continue;
+        if (sessionId && entry.sessionId !== sessionId) continue;
+        result.push(entry);
+      }
+    }
+
+    return result.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  }
+
   getLastAnchor(sessionId?: string): AnchorEntry | null {
     if (sessionId) {
       const sessionAnchors = this.findBySession(sessionId);

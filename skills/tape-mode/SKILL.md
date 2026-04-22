@@ -17,6 +17,8 @@ Tape mode is inspired by:
 
 Tape mode records all interactions from the pi session and provides on-demand, anchor-based context retrieval. Anchors act as named checkpoints that segment the conversation history, enabling efficient selective retrieval without consuming tokens on stale context.
 
+For pi TUI compatibility, anchors are also mirrored into `/tree` as inline labels on the anchored session nodes when there is a concrete session entry to attach to.
+
 ### Architecture Overview
 
 ```
@@ -81,6 +83,7 @@ interface AnchorEntry {
 - `append(entry)` - Add new anchor to index
 - `findByName(name)` - Find anchor by name
 - `findBySession(sessionId)` - Get anchors for session
+- `findBySessionEntryId(sessionEntryId, sessionId?)` - Get anchors attached to a specific session node
 - `getLastAnchor(sessionId)` - Get most recent anchor
 - `search({ query, since, until })` - Search anchors
 
@@ -91,8 +94,8 @@ Main service combining session reading and anchor management:
 ```typescript
 class MemoryTapeService {
   // Anchor operations
-  createAnchor(name: string, state?: Record<string, unknown>): string
-  recordSessionStart(): string  // Creates "session/start" anchor
+  createAnchor(name: string, state?: Record<string, unknown>): AnchorEntry
+  recordSessionStart(): AnchorEntry  // Creates "session/start" anchor
   findAnchorByName(name: string): AnchorEntry | null
   getLastAnchor(): AnchorEntry | null
   
@@ -345,7 +348,8 @@ Your conversation history is recorded in tape with anchors (checkpoints).
       },
       "anchor": {
         "mode": "threshold",
-        "threshold": 25
+        "threshold": 25,
+        "labelPrefix": "⚓ "
       }
     }
   }
@@ -372,6 +376,8 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 | `threshold` | Auto-creates anchor after N entries |
 | `hand` | Only manual `tape_handoff` |
 | `manual` | Same as `hand` |
+
+`settings.tape.anchor.labelPrefix` customizes how mirrored anchor labels appear in pi `/tree` (default: `⚓ `).
 
 ## Usage Patterns
 

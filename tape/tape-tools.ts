@@ -97,14 +97,14 @@ export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServic
 
       const { name, summary, state } = params as { name: string; summary?: string; state?: Record<string, unknown> };
       const anchorState = { ...(state ?? {}), ...(summary ? { summary } : {}) };
-      const anchorId = tapeService.createAnchor(name, Object.keys(anchorState).length > 0 ? anchorState : undefined);
+      const anchor = tapeService.createAnchor(name, Object.keys(anchorState).length > 0 ? anchorState : undefined);
 
       return {
         content: [{ type: "text", text: `Anchor created: ${name}` }],
         details: {
-          anchorId,
+          anchorId: anchor.sessionEntryId,
           name,
-          state: { ...anchorState, timestamp: new Date().toISOString() },
+          state: { ...anchorState, timestamp: anchor.timestamp },
         },
       };
     },

@@ -50,7 +50,7 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
 
     if (!tapeService || tapeRuntimeKey !== runtimeKey) {
       tapeService = MemoryTapeService.create(settings.localPath, projectName, sessionId, ctx.cwd);
-      tapeService.setSessionManager(ctx.sessionManager);
+      tapeService.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
       contextSelector = new MemoryFileSelector(tapeService, memoryDir);
       tapeRuntimeKey = runtimeKey;
 
@@ -60,6 +60,8 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
 
       return;
     }
+
+    tapeService.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
 
     if (!contextSelector) {
       contextSelector = new MemoryFileSelector(tapeService, memoryDir);
@@ -115,9 +117,10 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
     if (!tapeService) return;
 
     const info = tapeService.getInfo();
-    const anchorConfig = settings.tape?.anchor ?? { mode: "threshold", threshold: 25 };
+    const anchorMode = settings.tape?.anchor?.mode ?? "threshold";
+    const anchorThreshold = settings.tape?.anchor?.threshold ?? 25;
 
-    if (anchorConfig.mode === "threshold" && info.entriesSinceLastAnchor >= (anchorConfig.threshold ?? 25)) {
+    if (anchorMode === "threshold" && info.entriesSinceLastAnchor >= anchorThreshold) {
       const now = new Date();
       const timestamp = [
         now.getFullYear(),

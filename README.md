@@ -236,6 +236,7 @@ In both cases, tape:
 - Tracks all operations in an immutable tape (JSONL format): messages, tool calls, memory operations (by default)
 - **Anchor-based context**: Selects relevant memory files based on recent usage and configured strategy
 - Creates checkpoints with `tape_handoff` to mark phase transitions
+- Mirrors anchor names into pi `/tree` labels for the anchored session nodes
 - **Auto-anchor**: Automatically creates anchors when context grows too large
   - `anchor.mode: "threshold"` (default): Creates anchor when entries exceed `anchor.threshold` (default: 15)
   - `anchor.mode: "hand"`: Manual only, use `tape_handoff` tool
@@ -264,12 +265,14 @@ In both cases, tape:
         ]
       },
       "anchor": {
-        // Auto-anchor configuration (default: { mode: "threshold", threshold: 15 })
+        // Auto-anchor configuration (default: { mode: "threshold", threshold: 25 })
         // - mode: "hand" - Manual only, create anchors via tape_handoff tool
         // - mode: "threshold" - Create anchor when entries exceed threshold
         // - threshold: Number of entries since last anchor before auto-creating
+        // - labelPrefix: Prefix mirrored into pi /tree labels for anchor nodes
         "mode": "threshold",
-        "threshold": 15
+        "threshold": 25,
+        "labelPrefix": "⚓ "
      },
 
       // Custom tape storage path (optional)

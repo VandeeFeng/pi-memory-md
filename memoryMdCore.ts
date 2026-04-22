@@ -29,6 +29,11 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
       strategy: "smart",
       fileLimit: 10,
     },
+    anchor: {
+      mode: "threshold",
+      threshold: 25,
+      labelPrefix: "⚓ ",
+    },
   },
 };
 

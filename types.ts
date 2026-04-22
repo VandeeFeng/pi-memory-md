@@ -39,6 +39,7 @@ export interface MemoryMdSettings {
     anchor?: {
       mode?: "hand" | "threshold" | "manual";
       threshold?: number;
+      labelPrefix?: string;
     };
     tapePath?: string;
   };

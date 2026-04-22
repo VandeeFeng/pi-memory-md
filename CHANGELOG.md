@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fix
+
+- **Auto-anchor defaults restored**: Threshold-based auto anchors work when users do not explicitly set `settings.tape.anchor.mode`; the default mode is now correctly treated as `"threshold"`
+
+### Improvements
+
+- **Tape `/tree` compatibility**: Mirror tape anchors into pi `/tree` labels so anchored nodes are visible directly in the tree navigator
+- **Configurable anchor tree prefix**: Added `settings.tape.anchor.labelPrefix` to customize the mirrored `/tree` anchor label prefix
+
 ## [0.1.29] - 2026-04-21
 
 ### Warning
