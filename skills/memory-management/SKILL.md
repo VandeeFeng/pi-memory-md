@@ -13,7 +13,7 @@ Inspired by Letta memory filesystem:
 
 - **File-based memory**: Each memory is a `.md` file with YAML frontmatter
 - **Git-backed**: Full version control and cross-device sync
-- **Auto-injection**: Files in `core/` are automatically injected to context
+- **Auto-injection**: Files in `core/` are automatically injected into context based on the active injection mode
 - **Organized by purpose**: Fixed structure for core info, flexible for everything else
 
 ## Directory Structure
@@ -23,7 +23,7 @@ Inspired by Letta memory filesystem:
 ```
 {localPath}/
 └── {project-name}/                  # Project memory root
-    ├── core/                        # Auto-injected to context every session
+    ├── core/                        # Auto-injected into context (selection may be tape-aware)
     │   ├── user/                    # 【FIXED】User information
     │   │   ├── identity.md          # Who the user is
     │   │   └── prefer.md            # User habits and code style preferences
@@ -46,7 +46,7 @@ Inspired by Letta memory filesystem:
 
 ### 【FIXED】core/user/ and core/project/
 
-These are **pre-defined** and **auto-injected** into every session:
+These are **pre-defined** and **auto-injected** as core context:
 
 **core/user/** - User information (2 fixed files)
 - `identity.md` - Who the user is (name, role, background)
@@ -60,7 +60,7 @@ These are **pre-defined** and **auto-injected** into every session:
 - `changelog.md` - Development history
 
 **Why fixed?**
-- Always in context, no need to remember to load
+- Always part of the memory injection flow, no need to remember to load
 - Core identity that defines every interaction
 - Project context needed for all decisions
 

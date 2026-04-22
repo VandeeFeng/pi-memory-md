@@ -41,11 +41,7 @@ export async function gitExec(
   }
 }
 
-export async function syncRepository(
-  pi: ExtensionAPI,
-  settings: MemoryMdSettings,
-  isRepoInitialized: { value: boolean },
-): Promise<SyncResult> {
+export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSettings): Promise<SyncResult> {
   const localPath = settings.localPath ?? DEFAULT_LOCAL_PATH;
   const { repoUrl } = settings;
 
@@ -65,7 +61,6 @@ export async function syncRepository(
     if (pullResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
     if (!pullResult.success) return { success: false, message: pullResult.stdout || "Pull failed" };
 
-    isRepoInitialized.value = true;
     const updated = pullResult.stdout.includes("Updating") || pullResult.stdout.includes("Fast-forward");
 
     return {
@@ -83,7 +78,6 @@ export async function syncRepository(
 
   if (cloneResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
   if (cloneResult.success) {
-    isRepoInitialized.value = true;
     return { success: true, message: `Cloned [${repoName}] successfully`, updated: true };
   }
 

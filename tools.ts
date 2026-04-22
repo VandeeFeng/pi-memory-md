@@ -4,16 +4,17 @@ import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { gitExec, pushRepository, syncRepository } from "./memoryGit.js";
 import {
-  createDefaultFiles,
-  ensureDirectoryStructure,
   getCurrentDate,
+  getMemoryCoreDir,
   getMemoryDir,
+  initializeMemoryDirectory,
+  isMemoryInitialized,
   listMemoryFiles,
   readMemoryFile,
   writeMemoryFile,
-} from "./memoryMdCore.js";
+} from "./memory-core.js";
+import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
 
 // Re-export types for convenience
@@ -146,11 +147,7 @@ function renderCountResult(
   return renderText(theme.fg("toolOutput", text));
 }
 
-export function registerMemorySync(
-  pi: ExtensionAPI,
-  settings: MemoryMdSettings,
-  isRepoInitialized: { value: boolean },
-): void {
+export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   pi.registerTool({
     name: "memory_sync",
     label: "Memory Sync",
@@ -165,10 +162,8 @@ export function registerMemorySync(
       const { action } = params as { action: "pull" | "push" | "status" };
       const localPath = settings.localPath!;
       const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const coreUserDir = path.join(memoryDir, "core", "user");
-
       if (action === "status") {
-        const initialized = fs.existsSync(coreUserDir) && fs.existsSync(path.join(localPath, ".git"));
+        const initialized = isMemoryInitialized(memoryDir) && fs.existsSync(path.join(localPath, ".git"));
         if (!initialized) {
           return {
             content: [{ type: "text", text: "Memory repository not initialized. Use memory_init to set up." }],
@@ -190,7 +185,7 @@ export function registerMemorySync(
       }
 
       if (action === "pull") {
-        const result = await syncRepository(pi, settings, isRepoInitialized);
+        const result = await syncRepository(pi, settings);
         return {
           content: [{ type: "text", text: result.message }],
           details: { success: result.success },
@@ -377,7 +372,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         rg?: string;
       };
       const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const coreDir = path.join(memoryDir, "core");
+      const coreDir = getMemoryCoreDir(memoryDir);
       const sections: string[] = [];
       const matchedFiles = new Set<string>();
 
@@ -480,11 +475,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
   });
 }
 
-export function registerMemoryInit(
-  pi: ExtensionAPI,
-  settings: MemoryMdSettings,
-  isRepoInitialized: { value: boolean },
-): void {
+export function registerMemoryInit(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   pi.registerTool({
     name: "memory_init",
     label: "Memory Init",
@@ -496,7 +487,7 @@ export function registerMemoryInit(
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { force = false } = params as { force?: boolean };
       const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const alreadyInitialized = fs.existsSync(path.join(memoryDir, "core", "user"));
+      const alreadyInitialized = isMemoryInitialized(memoryDir);
 
       if (alreadyInitialized && !force) {
         return {
@@ -505,7 +496,7 @@ export function registerMemoryInit(
         };
       }
 
-      const result = await syncRepository(pi, settings, isRepoInitialized);
+      const result = await syncRepository(pi, settings);
       if (!result.success) {
         return {
           content: [{ type: "text", text: `Initialization failed: ${result.message}` }],
@@ -513,8 +504,7 @@ export function registerMemoryInit(
         };
       }
 
-      ensureDirectoryStructure(memoryDir);
-      createDefaultFiles(memoryDir);
+      initializeMemoryDirectory(memoryDir);
 
       return {
         content: [
@@ -600,16 +590,12 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
   });
 }
 
-export function registerAllMemoryTools(
-  pi: ExtensionAPI,
-  settings: MemoryMdSettings,
-  isRepoInitialized: { value: boolean },
-): void {
-  registerMemorySync(pi, settings, isRepoInitialized);
+export function registerAllMemoryTools(pi: ExtensionAPI, settings: MemoryMdSettings): void {
+  registerMemorySync(pi, settings);
   registerMemoryRead(pi, settings);
   registerMemoryWrite(pi, settings);
   registerMemoryList(pi, settings);
   registerMemorySearch(pi, settings);
-  registerMemoryInit(pi, settings, isRepoInitialized);
+  registerMemoryInit(pi, settings);
   registerMemoryCheck(pi, settings);
 }

@@ -46,8 +46,8 @@
   "files": [
     "hooks.ts",
     "index.ts",
-    "memoryGit.ts",
-    "memoryMdCore.ts",
+    "memory-git.ts",
+    "memory-core.ts",
     "tools.ts",
     "types.ts",
     "tape",

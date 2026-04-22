@@ -2,125 +2,138 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getHookActions, runHookTrigger } from "./hooks.js";
-import { gitExec, pushRepository, syncRepository } from "./memoryGit.js";
 import {
   buildMemoryContext,
-  createDefaultFiles,
-  ensureDirectoryStructure,
+  countMemoryContextFiles,
   expandPath,
+  formatMemoryContext,
+  getMemoryCoreDir,
   getMemoryDir,
+  initializeMemoryDirectory,
+  isMemoryInitialized,
   loadSettings,
-} from "./memoryMdCore.js";
+} from "./memory-core.js";
+import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import { MemoryFileSelector } from "./tape/tape-selector.js";
 import { MemoryTapeService } from "./tape/tape-service.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
 
-/**
- * Main extension initialization.
- */
+type ExtensionState = {
+  tapeToolsRegistered: boolean;
+  sessionStartHookPromise: ReturnType<typeof runHookTrigger> | null;
+  initialMemoryContext: string | null;
+  hasInjectedInitialContext: boolean;
+  activeTapeRuntime: {
+    service: MemoryTapeService;
+    selector: MemoryFileSelector;
+    cacheKey: string;
+  } | null;
+};
 
-export default function memoryMdExtension(pi: ExtensionAPI): void {
-  const settings: MemoryMdSettings = loadSettings();
-  const repoInitialized = { value: false };
-  let hookPromise: ReturnType<typeof runHookTrigger> | null = null;
-  let cachedMemoryContext: string | null = null;
-  let memoryInjected = false;
-  let tapeService: MemoryTapeService | null = null;
-  let tapeRuntimeKey: string | null = null;
-  let contextSelector: MemoryFileSelector | null = null;
-  let tapeToolsRegistered = false;
+function createExtensionState(): ExtensionState {
+  return {
+    tapeToolsRegistered: false,
+    sessionStartHookPromise: null,
+    initialMemoryContext: null,
+    hasInjectedInitialContext: false,
+    activeTapeRuntime: null,
+  };
+}
 
-  function withMemoryTitle(context: string): string {
-    return context.trimStart().startsWith("# Project Memory") ? context : `# Project Memory\n\n${context}`;
+function ensureTapeRuntime(
+  settings: MemoryMdSettings,
+  state: ExtensionState,
+  ctx: ExtensionContext,
+  options: { recordSessionStart: boolean; sessionStartReason?: "startup" | "reload" | "new" | "resume" | "fork" },
+): void {
+  if (!settings.tape?.enabled || !settings.localPath) {
+    state.activeTapeRuntime = null;
+    return;
   }
 
-  function ensureTapeRuntime(ctx: ExtensionContext, options: { recordSessionStart: boolean }): void {
-    if (!settings.tape?.enabled || !settings.localPath) {
-      tapeService = null;
-      tapeRuntimeKey = null;
-      contextSelector = null;
-      return;
+  const memoryDir = getMemoryDir(settings, ctx.cwd);
+  const projectName = path.basename(ctx.cwd);
+  const sessionId = ctx.sessionManager.getSessionId();
+  const tapeBasePath = settings.tape?.tapePath
+    ? expandPath(settings.tape.tapePath)
+    : path.join(settings.localPath, "TAPE");
+  const runtimeKey = [tapeBasePath, projectName, sessionId].join("::");
+
+  if (!state.activeTapeRuntime || state.activeTapeRuntime.cacheKey !== runtimeKey) {
+    const service = MemoryTapeService.create(tapeBasePath, projectName, sessionId, ctx.cwd);
+    service.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
+
+    state.activeTapeRuntime = {
+      service,
+      selector: new MemoryFileSelector(service, memoryDir),
+      cacheKey: runtimeKey,
+    };
+
+    if (options.recordSessionStart) {
+      service.recordSessionStart(options.sessionStartReason);
     }
 
-    const memoryDir = getMemoryDir(settings, ctx.cwd);
-    const projectName = path.basename(ctx.cwd);
-    const sessionId = ctx.sessionManager.getSessionId();
-    const tapeBasePath = settings.tape?.tapePath
-      ? expandPath(settings.tape.tapePath)
-      : path.join(settings.localPath, "TAPE");
-    const runtimeKey = [tapeBasePath, projectName, sessionId].join("::");
-
-    if (!tapeService || tapeRuntimeKey !== runtimeKey) {
-      tapeService = MemoryTapeService.create(tapeBasePath, projectName, sessionId, ctx.cwd);
-      tapeService.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
-      contextSelector = new MemoryFileSelector(tapeService, memoryDir);
-      tapeRuntimeKey = runtimeKey;
-
-      if (options.recordSessionStart) {
-        tapeService.recordSessionStart();
-      }
-
-      return;
-    }
-
-    tapeService.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
-
-    if (!contextSelector) {
-      contextSelector = new MemoryFileSelector(tapeService, memoryDir);
-    }
+    return;
   }
 
-  async function runHookAction(action: HookAction) {
-    switch (action) {
-      case "pull":
-        return syncRepository(pi, settings, repoInitialized);
-      case "push":
-        return pushRepository(pi, settings);
-      default:
-        return { success: false, message: `Unsupported hook action: ${action}` };
+  state.activeTapeRuntime.service.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
+}
+
+async function runHookAction(pi: ExtensionAPI, settings: MemoryMdSettings, action: HookAction) {
+  switch (action) {
+    case "pull":
+      return syncRepository(pi, settings);
+    case "push":
+      return pushRepository(pi, settings);
+    default:
+      return { success: false, message: `Unsupported hook action: ${action}` };
+  }
+}
+
+function initMemoryContext(
+  pi: ExtensionAPI,
+  settings: MemoryMdSettings,
+  state: ExtensionState,
+  ctx: ExtensionContext,
+  options: { showNotification: boolean; runSessionStartHooks: boolean },
+): boolean {
+  if (!settings.enabled) return false;
+
+  const memoryDir = getMemoryDir(settings, ctx.cwd);
+  if (!fs.existsSync(getMemoryCoreDir(memoryDir))) {
+    if (options.showNotification) {
+      ctx.ui.notify("Memory-md not initialized. Use /memory-init to set up project memory.", "info");
     }
+    return false;
   }
 
-  function initMemoryContext(
-    ctx: ExtensionContext,
-    options: { showNotification: boolean; runSessionStartHooks: boolean },
-  ): boolean {
-    if (!settings.enabled) return false;
-
-    const memoryDir = getMemoryDir(settings, ctx.cwd);
-    const coreDir = path.join(memoryDir, "core");
-
-    if (!fs.existsSync(coreDir)) {
-      if (options.showNotification) {
-        ctx.ui.notify("Memory-md not initialized. Use /memory-init to set up project memory.", "info");
-      }
-      return false;
-    }
-
-    if (options.runSessionStartHooks && settings.localPath && getHookActions(settings, "sessionStart").length > 0) {
-      hookPromise = runHookTrigger(settings, "sessionStart", runHookAction).then((results) => {
-        if (settings.repoUrl) {
-          for (const { action, result } of results) {
-            ctx.ui.notify(`${result.message} (${action} on session start)`, result.success ? "info" : "error");
-          }
+  if (options.runSessionStartHooks && settings.localPath && getHookActions(settings, "sessionStart").length > 0) {
+    state.sessionStartHookPromise = runHookTrigger(settings, "sessionStart", (action) =>
+      runHookAction(pi, settings, action),
+    ).then((results) => {
+      if (settings.repoUrl) {
+        for (const { action, result } of results) {
+          ctx.ui.notify(`${result.message} (${action} on session start)`, result.success ? "info" : "error");
         }
-        return results;
-      });
-    }
-
-    cachedMemoryContext = buildMemoryContext(settings, ctx.cwd);
-    memoryInjected = false;
-    return true;
+      }
+      return results;
+    });
   }
 
+  state.initialMemoryContext = buildMemoryContext(settings, ctx.cwd);
+  state.hasInjectedInitialContext = false;
+  return true;
+}
+
+function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
   pi.on("tool_result", (_toolEvent, toolCtx) => {
-    ensureTapeRuntime(toolCtx, { recordSessionStart: false });
+    ensureTapeRuntime(settings, state, toolCtx, { recordSessionStart: false });
 
-    if (!tapeService) return;
+    if (!state.activeTapeRuntime) return;
 
-    const info = tapeService.getInfo();
+    const info = state.activeTapeRuntime.service.getInfo();
     const anchorMode = settings.tape?.anchor?.mode ?? "threshold";
     const anchorThreshold = settings.tape?.anchor?.threshold ?? 25;
 
@@ -135,7 +148,7 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
         String(now.getSeconds()).padStart(2, "0"),
       ].join("");
 
-      tapeService.createAnchor(`auto/threshold-${timestamp}`);
+      state.activeTapeRuntime.service.createAnchor(`auto/threshold-${timestamp}`);
       toolCtx.ui.notify(
         `Anchor auto-created: ${info.anchorCount} anchors total [threshold=${anchorThreshold}]`,
         "info",
@@ -144,70 +157,70 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (event, ctx) => {
-    ensureTapeRuntime(ctx, { recordSessionStart: true });
+    ensureTapeRuntime(settings, state, ctx, { recordSessionStart: true, sessionStartReason: event.reason });
 
-    if (!tapeToolsRegistered) {
-      registerAllTapeTools(pi, () => tapeService);
-      tapeToolsRegistered = true;
+    if (!state.tapeToolsRegistered) {
+      registerAllTapeTools(pi, () => state.activeTapeRuntime?.service ?? null);
+      state.tapeToolsRegistered = true;
     }
 
     if (event.reason === "new" || event.reason === "fork") {
-      hookPromise = null;
-      initMemoryContext(ctx, { showNotification: true, runSessionStartHooks: false });
-    } else {
-      initMemoryContext(ctx, { showNotification: true, runSessionStartHooks: true });
+      state.sessionStartHookPromise = null;
+      initMemoryContext(pi, settings, state, ctx, { showNotification: true, runSessionStartHooks: false });
+      return;
     }
+
+    initMemoryContext(pi, settings, state, ctx, { showNotification: true, runSessionStartHooks: true });
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    ensureTapeRuntime(ctx, { recordSessionStart: false });
+    ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
 
-    if (hookPromise) {
-      await hookPromise;
-      hookPromise = null;
+    if (state.sessionStartHookPromise) {
+      await state.sessionStartHookPromise;
+      state.sessionStartHookPromise = null;
     }
 
     if (!settings.tape?.enabled) {
-      cachedMemoryContext = settings.enabled ? buildMemoryContext(settings, ctx.cwd) : null;
+      state.initialMemoryContext = settings.enabled ? buildMemoryContext(settings, ctx.cwd) : null;
     }
 
     const mode = settings.injection || "message-append";
     const tapeEnabled = settings.tape?.enabled;
 
-    if (tapeEnabled && tapeService && contextSelector && !memoryInjected) {
+    if (tapeEnabled && state.activeTapeRuntime && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
       const { fileLimit = 10, alwaysInclude = [], strategy = "smart" } = settings.tape?.context ?? {};
-
-      const memoryFiles = contextSelector.selectFilesForContext(strategy, fileLimit);
-      const memoryContext = contextSelector.buildContextFromFiles([...alwaysInclude, ...memoryFiles]);
+      const memoryFiles = state.activeTapeRuntime.selector.selectFilesForContext(strategy, fileLimit);
+      const memoryContext = state.activeTapeRuntime.selector.buildContextFromFiles([...alwaysInclude, ...memoryFiles]);
       const tapeHint = `\n\n---\n💡 Tape Context Management:\nYour conversation history is recorded in tape with anchors (checkpoints).\n- Use tape_info to check current tape status\n- Use tape_search to query historical entries by kind or content\n- Use tape_anchors to list all anchor checkpoints\n- Use tape_handoff to create a new anchor/checkpoint when starting a new task\n`;
       const fileCount = memoryFiles.length + alwaysInclude.length;
 
-      memoryInjected = true;
-
       if (mode === "system-prompt") {
-        ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (overrides system prompt)`, "info");
-        return { systemPrompt: memoryContext + tapeHint };
+        ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (system-prompt)`, "info");
+        return { systemPrompt: `${event.systemPrompt}\n\n${memoryContext + tapeHint}` };
       }
 
+      state.hasInjectedInitialContext = true;
       ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (message-append)`, "info");
       return { message: { customType: "pi-memory-md-tape", content: memoryContext + tapeHint, display: false } };
     }
 
-    if (cachedMemoryContext && !memoryInjected) {
-      memoryInjected = true;
-      const fileCount = cachedMemoryContext.split("\n").filter((line) => line.startsWith("-")).length;
+    if (state.initialMemoryContext && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
+      const fileCount = countMemoryContextFiles(state.initialMemoryContext);
       ctx.ui.notify(`Memory injected: ${fileCount} files (${mode})`, "info");
 
       if (mode === "message-append") {
+        state.hasInjectedInitialContext = true;
         return {
           message: {
             customType: "pi-memory-md",
-            content: withMemoryTitle(cachedMemoryContext),
+            content: formatMemoryContext(state.initialMemoryContext),
             display: false,
           },
         };
       }
-      return { systemPrompt: `${event.systemPrompt}\n\n${withMemoryTitle(cachedMemoryContext)}` };
+
+      return { systemPrompt: `${event.systemPrompt}\n\n${formatMemoryContext(state.initialMemoryContext)}` };
     }
 
     return undefined;
@@ -219,30 +232,28 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
     }
 
     const memoryDir = getMemoryDir(settings, ctx.cwd);
-    const coreDir = path.join(memoryDir, "core");
 
-    if (!fs.existsSync(coreDir)) {
+    if (!fs.existsSync(getMemoryCoreDir(memoryDir))) {
       return;
     }
 
-    const results = await runHookTrigger(settings, "sessionEnd", runHookAction);
+    const results = await runHookTrigger(settings, "sessionEnd", (action) => runHookAction(pi, settings, action));
+
     if (settings.repoUrl) {
       for (const { action, result } of results) {
         ctx.ui.notify(`${result.message} (${action} on session end)`, result.success ? "info" : "error");
       }
     }
   });
+}
 
-  registerAllMemoryTools(pi, settings, repoInitialized);
-
+function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
   pi.registerCommand("memory-status", {
     description: "Show memory repository status",
     handler: async (_args, ctx) => {
       const projectName = path.basename(ctx.cwd);
       const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const coreUserDir = path.join(memoryDir, "core", "user");
-
-      if (!fs.existsSync(coreUserDir)) {
+      if (!isMemoryInitialized(memoryDir)) {
         ctx.ui.notify(`Memory: ${projectName} | Not initialized | Use /memory-init to set up`, "info");
         return;
       }
@@ -261,26 +272,25 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
     description: "Initialize memory repository",
     handler: async (_args, ctx) => {
       const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const alreadyInitialized = fs.existsSync(path.join(memoryDir, "core", "user"));
-
-      const result = await syncRepository(pi, settings, repoInitialized);
+      const alreadyInitialized = isMemoryInitialized(memoryDir);
+      const result = await syncRepository(pi, settings);
 
       if (!result.success) {
         ctx.ui.notify(`Initialization failed: ${result.message}`, "error");
         return;
       }
 
-      ensureDirectoryStructure(memoryDir);
-      createDefaultFiles(memoryDir);
+      initializeMemoryDirectory(memoryDir);
 
       if (alreadyInitialized) {
         ctx.ui.notify(`Memory already exists: ${result.message}`, "info");
-      } else {
-        ctx.ui.notify(
-          `Memory initialized: ${result.message}\n\nCreated:\n  - core/user\n  - core/project\n  - reference`,
-          "info",
-        );
+        return;
       }
+
+      ctx.ui.notify(
+        `Memory initialized: ${result.message}\n\nCreated:\n  - core/user\n  - core/project\n  - reference`,
+        "info",
+      );
     },
   });
 
@@ -294,22 +304,23 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      cachedMemoryContext = memoryContext;
-      memoryInjected = false;
+      state.initialMemoryContext = memoryContext;
+      state.hasInjectedInitialContext = false;
 
       const mode = settings.injection || "message-append";
-      const fileCount = memoryContext.split("\n").filter((line) => line.startsWith("-")).length;
+      const fileCount = countMemoryContextFiles(memoryContext);
 
       if (mode === "message-append") {
         pi.sendMessage({
           customType: "pi-memory-md-refresh",
-          content: withMemoryTitle(memoryContext),
+          content: formatMemoryContext(memoryContext),
           display: false,
         });
         ctx.ui.notify(`Memory refreshed: ${fileCount} files injected (${mode})`, "info");
-      } else {
-        ctx.ui.notify(`Memory cache refreshed: ${fileCount} files (will be injected on next prompt)`, "info");
+        return;
       }
+
+      ctx.ui.notify(`Memory cache refreshed: ${fileCount} files (will be injected on next prompt)`, "info");
     },
   });
 
@@ -330,7 +341,9 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
         treeOutput = execSync(`tree -L 3 -I "node_modules" "${memoryDir}"`, { encoding: "utf-8" });
       } catch {
         try {
-          treeOutput = execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*"`, { encoding: "utf-8" });
+          treeOutput = execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*"`, {
+            encoding: "utf-8",
+          });
         } catch {
           treeOutput = "Unable to generate directory tree.";
         }
@@ -339,4 +352,13 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
       ctx.ui.notify(treeOutput.trim(), "info");
     },
   });
+}
+
+export default function memoryMdExtension(pi: ExtensionAPI): void {
+  const settings = loadSettings();
+  const state = createExtensionState();
+
+  registerLifecycleHandlers(pi, settings, state);
+  registerAllMemoryTools(pi, settings);
+  registerMemoryCommands(pi, settings, state);
 }

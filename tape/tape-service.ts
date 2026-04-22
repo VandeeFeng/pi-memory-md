@@ -102,8 +102,10 @@ export class MemoryTapeService {
     this.syncSessionTreeLabels();
   }
 
-  recordSessionStart(): AnchorEntry {
-    return this.createAnchor("session/start");
+  recordSessionStart(reason: "startup" | "reload" | "new" | "resume" | "fork" = "startup"): AnchorEntry {
+    const anchorName =
+      reason === "resume" ? "session/resume" : reason === "reload" ? "session/reload" : "session/start";
+    return this.createAnchor(anchorName);
   }
 
   createAnchor(name: string, state?: Record<string, unknown>): AnchorEntry {
@@ -248,26 +250,13 @@ export class MemoryTapeService {
     maps.labelTimestampsById.delete(entryId);
   }
 
-  private getAnchorLabelTargetEntryIds(): string[] {
-    if (!this.sessionManager) return [];
-
-    const targetEntryIds = new Set<string>();
-    for (const anchor of this.anchorIndex.findBySession(this.sessionId)) {
-      const targetEntryId = this.resolveTreeLabelTarget(anchor.sessionEntryId);
-      if (targetEntryId) {
-        targetEntryIds.add(targetEntryId);
-      }
-    }
-
-    return [...targetEntryIds];
-  }
-
   private clearAnchorTreeLabels(labelPrefix = this.anchorLabelPrefix): void {
     if (!this.sessionManager) return;
 
-    for (const entryId of this.getAnchorLabelTargetEntryIds()) {
-      const label = this.sessionManager.getLabel(entryId);
-      this.setTreeLabel(entryId, stripAnchorLabel(labelPrefix, label));
+    for (const entry of this.sessionManager.getEntries()) {
+      const label = this.sessionManager.getLabel(entry.id);
+      if (!label?.includes(labelPrefix)) continue;
+      this.setTreeLabel(entry.id, stripAnchorLabel(labelPrefix, label));
     }
   }
 

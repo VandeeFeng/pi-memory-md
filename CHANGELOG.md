@@ -10,6 +10,8 @@ More stable chassis, longer mileage.
 
 There’s still a lot of logic problems in the code I need to tidy up before next step.
 
+After more than half a month of daily use and iteration, tape-mode is much more stable now.
+
 ### Features
 
 - **Tape `/tree` compatibility**: Mirror tape anchors into pi `/tree` labels so anchored nodes are visible directly in the tree navigator. Customize the `/tree` anchor label prefix in setting with `"labelPrefix": "⚓ "`.
@@ -17,10 +19,15 @@ There’s still a lot of logic problems in the code I need to tidy up before nex
 ### Changes
 
 - **Configurable anchor path**: Now `settings.tape.tapePath` customize where anchor index files are stored. Defaults to `{localPath}/TAPE`. The dumb `anchor-index` folder was removed.
+- **Tape runtime consolidation**: Collapsed separate tape service / selector / runtime key fields into a single `activeTapeRuntime` object.
+- **Session lifecycle anchors**: Tape now records `/resume` as `session/resume` and reloads as `session/reload` instead of flattening them into `session/start`.
 
 ### Fix
 
 - **Auto-anchor defaults restored**: Threshold-based auto anchors work when users do not explicitly set `settings.tape.anchor.mode`; the default mode is now correctly treated as `"threshold"`.
+- **Runtime state simplification**: Removed the unused repo initialization ref and reshaped `index.ts` state around the current extension behavior: tape tool registration, session-start hook coordination, initial memory injection, and active tape runtime.
+- **Tape + system-prompt alignment**: Tape mode now follows the same append semantics as normal `system-prompt` mode by appending to `event.systemPrompt` instead of replacing it.
+- **Tree label resync cleanup**: Tape `/tree` label syncing now clears all anchor-prefixed labels in the current session tree before rebuilding, preventing stale auto-anchor labels from appearing on multiple entries.
 
 ## [0.1.29] - 2026-04-21
 

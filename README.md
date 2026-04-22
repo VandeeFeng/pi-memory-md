@@ -45,7 +45,7 @@ Session Start
     ↓
 3. Build index (descriptions + tags only - NOT full content)
     ↓
-4. Append index to conversation via prompt append (or system prompt)
+4. Inject memory index via `message-append` or `system-prompt`
     ↓
 5. LLM reads full file content via tools when needed
 ```
@@ -155,7 +155,9 @@ More trigger actions can be added later, even custom hooks.
 
 ### Memory Injection Modes
 
-The extension supports two modes for injecting memory into the conversation:
+The extension supports two base modes for injecting memory into the conversation.
+When tape mode is disabled, behavior is exactly as described below.
+When tape mode is enabled, the same delivery mode still applies, but tape changes how memory files are selected.
 
 #### 1. Message Append (Default)
 
@@ -226,21 +228,29 @@ The LLM automatically:
 
 ### Tape vs Injection Modes
 
-**Tape** is an independent feature that can be enabled alongside either injection mode:
+**Tape** is an independent feature that can be enabled alongside either injection mode.
+It does not change the delivery mechanism; it changes **which memory files** are selected.
 
-- **With `injection: "message-append"`**: Tape still injects memory as a custom message (same as normal, but with smart file selection)
-- **With `injection: "system-prompt"`**: Tape **overrides** the system prompt with its own context (provides full control over what the model sees)
+#### Behavior matrix
 
-In both cases, tape:
-- Injects memory files **once per session** (not on every turn)
+| Tape | Injection mode | Behavior |
+|------|----------------|----------|
+| Disabled | `message-append` | Sends memory once as a hidden custom message on the first agent turn |
+| Disabled | `system-prompt` | Rebuilds memory and appends it to the system prompt on every agent turn |
+| Enabled | `message-append` | Sends tape-selected memory once as a hidden custom message on the first agent turn |
+| Enabled | `system-prompt` | Rebuilds tape-selected memory and appends it to the system prompt on every agent turn |
+
+With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan.
+
+Tape also:
 - Tracks all operations in an immutable tape (JSONL format): messages, tool calls, memory operations (by default)
 - **Anchor-based context**: Selects relevant memory files based on recent usage and configured strategy
 - Creates checkpoints with `tape_handoff` to mark phase transitions
-- Mirrors anchor names into pi `/tree` labels for the anchored session nodes
+- Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale auto-anchor duplicates
 - **Auto-anchor**: Automatically creates anchors when context grows too large
   - `anchor.mode: "threshold"` (default): Creates anchor when entries exceed `anchor.threshold` (default: 15)
   - `anchor.mode: "hand"`: Manual only, use `tape_handoff` tool
-- **Pros**: Token-efficient, automatic context management with checkpoint management
+- **Pros**: Better context selection with checkpoint management
 - **Cons**: Slightly more complex configuration
 
 ```json
@@ -293,7 +303,9 @@ Each line in the tape is a JSON record:
 
 Anchors are checkpoints that mark important transitions in your conversation. They enable efficient context reconstruction:
 
-- **`session/start`**: Beginning of a session (auto-created on tape reset)
+- **`session/start`**: New/startup/fork session boundary
+- **`session/resume`**: Session resumed via `/resume`
+- **`session/reload`**: Session reloaded via `/reload`
 - **`task/begin`**: Starting a new task
 - **`task/complete`**: Task completed
 - **`context/switch`**: Context switching point
@@ -317,7 +329,7 @@ more details: https://tape.systems/
 | `tape_info` | `{}` | Get tape statistics and information |
 | `tape_search` | `{query?, kinds?, limit?, sinceAnchor?}` | Search tape entries by text or kind |
 | `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, query?, kinds?, limit?}` | Read tape entries as formatted messages |
-| `tape_reset` | `{archive?: boolean}` | Reset the tape with new session/start anchor |
+| `tape_reset` | `{archive?: boolean}` | Reset the tape with a new `session/start` anchor |
 
 > **Note**: Tape tools are automatically registered when `tape` is set to `true`. They provide anchor-based context management inspired by [bub](https://bub.build)'s tape mechanism.
 

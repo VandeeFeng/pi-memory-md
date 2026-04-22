@@ -11,10 +11,6 @@ export function getCurrentDate(): string {
   return new Date().toISOString().split("T")[0];
 }
 
-/**
- * Settings
- */
-
 export const DEFAULT_LOCAL_PATH = path.join(os.homedir(), ".pi", "memory-md");
 
 export const DEFAULT_SETTINGS: MemoryMdSettings = {
@@ -41,6 +37,7 @@ export function expandPath(filePath: string): string {
   if (filePath.startsWith("~")) {
     return path.join(os.homedir(), filePath.slice(1));
   }
+
   return filePath;
 }
 
@@ -57,10 +54,12 @@ function deepMergeSettings<T>(base: T, overrides: Partial<T>): T {
     }
 
     const baseValue = result[key];
-    result[key] =
-      isPlainObject(baseValue) && isPlainObject(overrideValue)
-        ? deepMergeSettings(baseValue, overrideValue)
-        : overrideValue;
+    if (isPlainObject(baseValue) && isPlainObject(overrideValue)) {
+      result[key] = deepMergeSettings(baseValue, overrideValue);
+      continue;
+    }
+
+    result[key] = overrideValue;
   }
 
   return result as T;
@@ -99,13 +98,11 @@ function normalizeSettings(
 export function loadSettings(cwd = process.cwd()): MemoryMdSettings {
   const globalSettingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
   const projectSettingsPath = path.join(cwd, ".pi", "settings.json");
-
   const globalSettings = readSettingsFile(globalSettingsPath);
   const projectSettings = readSettingsFile(projectSettingsPath);
-  const rawSettings = deepMergeSettings(
-    (globalSettings["pi-memory-md"] ?? {}) as Record<string, unknown> as MemoryMdSettings,
-    (projectSettings["pi-memory-md"] ?? {}) as Record<string, unknown> as Partial<MemoryMdSettings>,
-  ) as MemoryMdSettings & {
+  const globalMemorySettings = (globalSettings["pi-memory-md"] ?? {}) as MemoryMdSettings;
+  const projectMemorySettings = (projectSettings["pi-memory-md"] ?? {}) as Partial<MemoryMdSettings>;
+  const rawSettings = deepMergeSettings(globalMemorySettings, projectMemorySettings) as MemoryMdSettings & {
     hooks?: MemoryMdSettings["hooks"];
     autoSync?: { onSessionStart?: boolean };
   };
@@ -118,9 +115,17 @@ export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
   return path.join(localPath, path.basename(cwd));
 }
 
-/**
- * File operations
- */
+export function getMemoryCoreDir(memoryDir: string): string {
+  return path.join(memoryDir, "core");
+}
+
+export function getMemoryUserDir(memoryDir: string): string {
+  return path.join(getMemoryCoreDir(memoryDir), "user");
+}
+
+export function isMemoryInitialized(memoryDir: string): boolean {
+  return fs.existsSync(getMemoryUserDir(memoryDir));
+}
 
 function validateFrontmatter(data: ParsedFrontmatter): { valid: boolean; error?: string } {
   if (!data) {
@@ -148,6 +153,7 @@ export function readMemoryFile(filePath: string): MemoryFile | null {
   try {
     const content = fs.readFileSync(filePath, "utf-8");
     const parsed = matter(content);
+
     if (!parsed.data || Object.keys(parsed.data).length === 0 || !validateFrontmatter(parsed.data).valid) {
       return {
         path: filePath,
@@ -171,14 +177,19 @@ export function listMemoryFiles(memoryDir: string): string[] {
   const files: string[] = [];
 
   function walkDir(dir: string) {
-    if (!fs.existsSync(dir)) return;
+    if (!fs.existsSync(dir)) {
+      return;
+    }
 
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walkDir(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+        continue;
+      }
+
+      if (entry.isFile() && entry.name.endsWith(".md")) {
         files.push(fullPath);
       }
     }
@@ -189,20 +200,14 @@ export function listMemoryFiles(memoryDir: string): string[] {
 }
 
 export function writeMemoryFile(filePath: string, content: string, frontmatter: MemoryFrontmatter): void {
-  const fileDir = path.dirname(filePath);
-  fs.mkdirSync(fileDir, { recursive: true });
-  const frontmatterStr = matter.stringify(content, frontmatter);
-  fs.writeFileSync(filePath, frontmatterStr);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, matter.stringify(content, frontmatter));
 }
 
-/**
- * Memory context
- */
-
-function ensureDirectoryStructure(memoryDir: string): void {
+export function ensureDirectoryStructure(memoryDir: string): void {
   const dirs = [
-    path.join(memoryDir, "core", "user"),
-    path.join(memoryDir, "core", "project"),
+    getMemoryUserDir(memoryDir),
+    path.join(getMemoryCoreDir(memoryDir), "project"),
     path.join(memoryDir, "reference"),
   ];
 
@@ -211,8 +216,8 @@ function ensureDirectoryStructure(memoryDir: string): void {
   }
 }
 
-function createDefaultFiles(memoryDir: string): void {
-  const identityFile = path.join(memoryDir, "core", "user", "identity.md");
+export function createDefaultFiles(memoryDir: string): void {
+  const identityFile = path.join(getMemoryUserDir(memoryDir), "identity.md");
   if (!fs.existsSync(identityFile)) {
     writeMemoryFile(identityFile, "# User Identity\n\nCustomize this file with your information.", {
       description: "User identity and background",
@@ -221,7 +226,7 @@ function createDefaultFiles(memoryDir: string): void {
     });
   }
 
-  const preferFile = path.join(memoryDir, "core", "user", "prefer.md");
+  const preferFile = path.join(getMemoryUserDir(memoryDir), "prefer.md");
   if (!fs.existsSync(preferFile)) {
     writeMemoryFile(
       preferFile,
@@ -235,11 +240,22 @@ function createDefaultFiles(memoryDir: string): void {
   }
 }
 
-export { createDefaultFiles, ensureDirectoryStructure };
+export function initializeMemoryDirectory(memoryDir: string): void {
+  ensureDirectoryStructure(memoryDir);
+  createDefaultFiles(memoryDir);
+}
+
+export function formatMemoryContext(context: string): string {
+  return context.trimStart().startsWith("# Project Memory") ? context : `# Project Memory\n\n${context}`;
+}
+
+export function countMemoryContextFiles(context: string): number {
+  return context.split("\n").filter((line) => line.startsWith("-")).length;
+}
 
 export function buildMemoryContext(settings: MemoryMdSettings, cwd: string): string {
   const memoryDir = getMemoryDir(settings, cwd);
-  const coreDir = path.join(memoryDir, "core");
+  const coreDir = getMemoryCoreDir(memoryDir);
 
   if (!fs.existsSync(coreDir)) {
     return "";
@@ -262,15 +278,16 @@ export function buildMemoryContext(settings: MemoryMdSettings, cwd: string): str
 
   for (const filePath of files) {
     const memory = readMemoryFile(filePath);
-    if (memory) {
-      const relPath = path.relative(memoryDir, filePath);
-      const { description, tags } = memory.frontmatter;
-      const tagStr = tags?.join(", ") || "none";
-      lines.push(`- ${relPath}`);
-      lines.push(`  Description: ${description}`);
-      lines.push(`  Tags: ${tagStr}`);
-      lines.push("");
+    if (!memory) {
+      continue;
     }
+
+    const relPath = path.relative(memoryDir, filePath);
+    const { description, tags } = memory.frontmatter;
+    lines.push(`- ${relPath}`);
+    lines.push(`  Description: ${description}`);
+    lines.push(`  Tags: ${tags?.join(", ") || "none"}`);
+    lines.push("");
   }
 
   return lines.join("\n");

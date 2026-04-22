@@ -17,7 +17,7 @@ Tape mode is inspired by:
 
 Tape mode records all interactions from the pi session and provides on-demand, anchor-based context retrieval. Anchors act as named checkpoints that segment the conversation history, enabling efficient selective retrieval without consuming tokens on stale context.
 
-For pi TUI compatibility, anchors are also mirrored into `/tree` as inline labels on the anchored session nodes when there is a concrete session entry to attach to.
+For pi TUI compatibility, anchors are also mirrored into `/tree` as inline labels on the anchored session nodes when there is a concrete session entry to attach to. During resync, tape clears existing anchor-prefixed labels in the current session tree before rebuilding them so stale auto-anchor labels do not remain on old nodes.
 
 ### Architecture Overview
 
@@ -71,7 +71,7 @@ Local index of anchor checkpoints:
 // Storage: {localPath}/TAPE/anchor-index/{projectName}__anchors.jsonl
 // localPath comes from settings ("localPath" field), default: ~/.pi/memory-md/
 interface AnchorEntry {
-  name: string;           // Anchor name (e.g., "session/start", "task/begin")
+  name: string;           // Anchor name (e.g., "session/start", "session/resume", "task/begin")
   sessionId: string;      // Session ID
   sessionEntryId: string; // Related session entry ID
   timestamp: string;      // ISO timestamp
@@ -95,7 +95,7 @@ Main service combining session reading and anchor management:
 class MemoryTapeService {
   // Anchor operations
   createAnchor(name: string, state?: Record<string, unknown>): AnchorEntry
-  recordSessionStart(): AnchorEntry  // Creates "session/start" anchor
+  recordSessionStart(): AnchorEntry  // Creates session/start, session/resume, or session/reload based on session_start reason
   findAnchorByName(name: string): AnchorEntry | null
   getLastAnchor(): AnchorEntry | null
   
@@ -253,41 +253,50 @@ tape_reset(archive?: boolean)  // Archive flag (not implemented)
 
 ---
 
-## Session Startup Flow
+## Runtime Flow
+
+Tape mode has two different phases: session setup and per-turn context injection.
 
 ```
 session_start event
        ↓
 ┌──────────────────────────────────────┐
-│ Create MemoryTapeService             │
-│ - Read from pi session file          │
-│ - Initialize anchor index            │
+│ Create / refresh active tape runtime │
+│ - Initialize MemoryTapeService       │
+│ - Configure session tree labels      │
 └──────────────────────────────────────┘
        ↓
 ┌──────────────────────────────────────┐
-│ Register Tape Tools (once)            │
+│ Register Tape Tools (once)           │
 │ - tape_handoff, tape_anchors, etc.   │
 └──────────────────────────────────────┘
        ↓
 ┌──────────────────────────────────────┐
-│ Create "session/start" anchor        │
+│ Create session lifecycle anchor      │
 └──────────────────────────────────────┘
        ↓
 ┌──────────────────────────────────────┐
-│ Register tool_result listener         │
+│ tool_result listener stays active    │
 │ - Auto-anchor on threshold           │
 └──────────────────────────────────────┘
-       ↓
+```
+
+```
 before_agent_start event
        ↓
-┌──────────────────────────────────────┐
-│ Inject Memory Context                │
-│ - Select memory files (smart/recent) │
-│ - Build context with tape hint       │
-│ - Inject via system-prompt or        │
-│   message-append                     │
-└──────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ Build injection payload for this turn        │
+│ - Select memory files (smart/recent)         │
+│ - Build memory index + tape hint             │
+│ - Deliver via system-prompt or               │
+│   message-append                             │
+└──────────────────────────────────────────────┘
 ```
+
+**Important:** `before_agent_start` runs per agent turn, not just once at session startup.
+- `message-append`: injects once on the first agent turn
+- `system-prompt`: rebuilds and appends on every agent turn
+- In pi, appending means returning `systemPrompt: event.systemPrompt + "..."`; returning a bare string would replace the prompt for that turn
 
 ## Auto-Anchor Mechanism
 
@@ -306,20 +315,30 @@ pi.on("tool_result", () => {
 
 ## Memory Context Injection
 
-Tape mode injects memory files at session startup:
+Tape mode changes **which memory files are selected**, not the delivery mechanism itself.
+The injected content is a memory index/summary plus the tape hint.
 
 ```typescript
 // settings.tape.context
 {
   strategy: "smart",           // "smart" or "recent-only"
-  fileLimit: 10,               // Max memory files
-  alwaysInclude: [],           // Always include these files
+  fileLimit: 10,                // Max memory files
+  alwaysInclude: [],            // Always include these files
 }
 
 // Injection adds:
 - Memory file list with descriptions/tags
 - Tape hint with tool usage instructions
 ```
+
+### Delivery behavior
+
+| Injection mode | Tape behavior |
+|----------------|---------------|
+| `message-append` | Injects tape-selected memory once as a hidden custom message on the first agent turn |
+| `system-prompt` | Rebuilds tape-selected memory and appends it to the current system prompt on every agent turn |
+
+This means tape affects **selection**, while the injection mode controls **delivery frequency and location**.
 
 **Tape Hint:**
 ```
@@ -341,10 +360,7 @@ Your conversation history is recorded in tape with anchors (checkpoints).
       "context": {
         "strategy": "smart",
         "fileLimit": 10,
-        "alwaysInclude": [],
-        "maxTapeTokens": 1000,
-        "maxTapeEntries": 40,
-        "includeConversationHistory": true
+        "alwaysInclude": []
       },
       "anchor": {
         "mode": "threshold",
@@ -507,6 +523,9 @@ tape_read({})
 1. `settings.tape.enabled === true`
 2. Memory repository initialized: `memory_check`
 3. `core/` directory exists
+4. Delivery mode behavior matches expectations:
+   - `message-append` injects once on the first agent turn
+   - `system-prompt` appends on every agent turn
 
 ## File Structure
 
