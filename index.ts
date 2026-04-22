@@ -7,6 +7,7 @@ import {
   buildMemoryContext,
   createDefaultFiles,
   ensureDirectoryStructure,
+  expandPath,
   getMemoryDir,
   loadSettings,
 } from "./memoryMdCore.js";
@@ -46,10 +47,13 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
     const memoryDir = getMemoryDir(settings, ctx.cwd);
     const projectName = path.basename(ctx.cwd);
     const sessionId = ctx.sessionManager.getSessionId();
-    const runtimeKey = [settings.localPath, projectName, sessionId].join("::");
+    const tapeBasePath = settings.tape?.tapePath
+      ? expandPath(settings.tape.tapePath)
+      : path.join(settings.localPath, "TAPE");
+    const runtimeKey = [tapeBasePath, projectName, sessionId].join("::");
 
     if (!tapeService || tapeRuntimeKey !== runtimeKey) {
-      tapeService = MemoryTapeService.create(settings.localPath, projectName, sessionId, ctx.cwd);
+      tapeService = MemoryTapeService.create(tapeBasePath, projectName, sessionId, ctx.cwd);
       tapeService.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
       contextSelector = new MemoryFileSelector(tapeService, memoryDir);
       tapeRuntimeKey = runtimeKey;
@@ -133,7 +137,7 @@ export default function memoryMdExtension(pi: ExtensionAPI): void {
 
       tapeService.createAnchor(`auto/threshold-${timestamp}`);
       toolCtx.ui.notify(
-        `Auto-created anchor: ${info.entriesSinceLastAnchor} entries since last anchor (${info.anchorCount} anchors total)`,
+        `Anchor auto-created: ${info.anchorCount} anchors total [threshold=${anchorThreshold}]`,
         "info",
       );
     }

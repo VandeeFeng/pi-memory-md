@@ -58,12 +58,14 @@ export interface ContextSelection {
  * Tape configuration options
  *
  * @description
- * - `tapePath`: Custom path for tape storage (default: ~/.pi/memory-md/TAPE)
+ * - `tapePath`: Custom tape path (default: {localPath}/TAPE: ~/.pi/memory-md/TAPE)
  * - `context`: Memory file selection strategy
  * - `anchor`: Auto-anchor behavior settings
  */
 export interface TapeConfig {
-  /** Custom tape storage path (optional) */
+  /** Enable tape mode */
+  enabled?: boolean;
+  /** Custom anchor index path (optional, default: {localPath}/TAPE) */
   tapePath?: string;
   /** Memory file selection configuration */
   context?: {
@@ -80,6 +82,8 @@ export interface TapeConfig {
     mode?: "hand" | "threshold" | "manual";
     /** Entries since last anchor before auto-creating new anchor (default: 15) */
     threshold?: number;
+    /** Prefix mirrored into pi /tree labels for anchor nodes */
+    labelPrefix?: string;
   };
 }
 

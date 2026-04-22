@@ -14,9 +14,10 @@ export class AnchorIndex {
   private readonly indexPath: string;
   private index: Map<string, AnchorEntry[]> = new Map();
 
-  constructor(localPath: string, projectName: string) {
-    this.anchorDir = path.join(localPath, "TAPE", "anchor-index");
-    this.indexPath = path.join(this.anchorDir, `${projectName}__anchors.jsonl`);
+  constructor(tapeBasePath: string, projectName: string) {
+    const anchorDir = tapeBasePath;
+    this.anchorDir = anchorDir;
+    this.indexPath = path.join(anchorDir, `${projectName}__anchors.jsonl`);
     this.ensureDir();
     this.loadIndex();
   }

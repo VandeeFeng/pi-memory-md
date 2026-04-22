@@ -2,24 +2,35 @@
 
 ## [Unreleased]
 
+I'am sorry for so many default settings changes like the tapePath in tape-mode these days. But all these default settings remain customizable.
+
+The reason is I’m thinking hard about the base logic in pi-memory-md, both the code side and the design side.
+
+More stable chassis, longer mileage.
+
+There’s still a lot of logic problems in the code I need to tidy up before next step.
+
+### Features
+
+- **Tape `/tree` compatibility**: Mirror tape anchors into pi `/tree` labels so anchored nodes are visible directly in the tree navigator. Customize the `/tree` anchor label prefix in setting with `"labelPrefix": "⚓ "`.
+
+### Changes
+
+- **Configurable anchor path**: Now `settings.tape.tapePath` customize where anchor index files are stored. Defaults to `{localPath}/TAPE`. The dumb `anchor-index` folder was removed.
+
 ### Fix
 
-- **Auto-anchor defaults restored**: Threshold-based auto anchors work when users do not explicitly set `settings.tape.anchor.mode`; the default mode is now correctly treated as `"threshold"`
-
-### Improvements
-
-- **Tape `/tree` compatibility**: Mirror tape anchors into pi `/tree` labels so anchored nodes are visible directly in the tree navigator
-- **Configurable anchor tree prefix**: Added `settings.tape.anchor.labelPrefix` to customize the mirrored `/tree` anchor label prefix
+- **Auto-anchor defaults restored**: Threshold-based auto anchors work when users do not explicitly set `settings.tape.anchor.mode`; the default mode is now correctly treated as `"threshold"`.
 
 ## [0.1.29] - 2026-04-21
 
 ### Warning
 
-- Old `autoSync.onSessionStart` is still supported and normalized into the new hooks config, but migration to `hooks` is recommended
+- Old `autoSync.onSessionStart` is still supported and normalized into the new hooks config, but migration to `hooks` is recommended.
 
 ### Features
 
-- **Hooks-based session actions**: Replaced the old `autoSync` model with `hooks.sessionStart` and `hooks.sessionEnd`, allowing multiple actions per trigger and future custom hook actions
+- **Hooks-based session actions**: Replaced the old `autoSync` model with `hooks.sessionStart` and `hooks.sessionEnd`, allowing multiple actions per trigger and future custom hook actions.
 
 ### Fix
 

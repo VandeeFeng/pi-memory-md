@@ -1,4 +1,5 @@
 import type { GrayMatterFile } from "gray-matter";
+import type { TapeConfig } from "./tape/tape-types.js";
 
 /**
  * Type definitions for memory files, settings, and git operations.
@@ -29,20 +30,7 @@ export interface MemoryMdSettings {
   localPath?: string;
   hooks?: HookConfig;
   injection?: "system-prompt" | "message-append";
-  tape?: {
-    enabled?: boolean;
-    context?: {
-      strategy?: "smart" | "recent-only";
-      fileLimit?: number;
-      alwaysInclude?: string[];
-    };
-    anchor?: {
-      mode?: "hand" | "threshold" | "manual";
-      threshold?: number;
-      labelPrefix?: string;
-    };
-    tapePath?: string;
-  };
+  tape?: TapeConfig;
 }
 
 export interface GitResult {

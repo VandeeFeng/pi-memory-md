@@ -1,11 +1,11 @@
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
-import { type AnchorEntry, AnchorIndex } from "./anchor-index.js";
+import { type AnchorEntry, AnchorIndex } from "./tape-anchor-index.js";
 import {
   getEntriesAfterTimestamp,
   getSessionFilePath,
   getSessionFilePaths,
   parseSessionFile,
-} from "./session-reader.js";
+} from "./tape-session-reader.js";
 import type { TapeQueryOptions } from "./tape-types.js";
 
 const DEFAULT_ANCHOR_LABEL_PREFIX = "⚓ ";
@@ -80,14 +80,14 @@ export class MemoryTapeService {
   private sessionManager: TapeSessionManager | null = null;
   private anchorLabelPrefix = DEFAULT_ANCHOR_LABEL_PREFIX;
 
-  constructor(localPath: string, projectName: string, sessionId: string, cwd: string) {
+  constructor(tapeBasePath: string, projectName: string, sessionId: string, cwd: string) {
     this.sessionId = sessionId;
     this.cwd = cwd;
-    this.anchorIndex = new AnchorIndex(localPath, projectName);
+    this.anchorIndex = new AnchorIndex(tapeBasePath, projectName);
   }
 
-  static create(localPath: string, projectName: string, sessionId: string, cwd: string): MemoryTapeService {
-    return new MemoryTapeService(localPath, projectName, sessionId, cwd);
+  static create(tapeBasePath: string, projectName: string, sessionId: string, cwd: string): MemoryTapeService {
+    return new MemoryTapeService(tapeBasePath, projectName, sessionId, cwd);
   }
 
   configureSessionTree(sm: TapeSessionManager, prefix?: string): void {

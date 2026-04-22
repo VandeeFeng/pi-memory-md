@@ -275,8 +275,9 @@ In both cases, tape:
         "labelPrefix": "⚓ "
      },
 
-      // Custom tape storage path (optional)
-      // If not set, uses: {localPath}/TAPE or ~/.pi/memory-md/TAPE
+      // Custom tape path (optional)
+      // If not set, default is {localPath}/TAPE: ~/.pi/memory-md/TAPE
+      // Anchor index files (.jsonl) will be stored directly under this path
       "tapePath": "/custom/path/to/tape"
     }
   }
