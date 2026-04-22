@@ -15,13 +15,16 @@ After more than half a month of daily use and iteration, tape-mode is much more 
 ### Features
 
 - **Tape `/tree` compatibility**: Mirror tape anchors into pi `/tree` labels so anchored nodes are visible directly in the tree navigator. Customize the `/tree` anchor label prefix in setting with `"labelPrefix": "⚓ "`.
-- **Anchor deletion tool**: Added `tape_anchor_delete` so tape anchors can be removed by id, with `/tree` mirrored labels resynced after deletion.
+- **Anchor deletion tool**: Added `tape_delete` so tape anchors can be removed by id, with `/tree` mirrored labels resynced after deletion.
 
 ### Changes
 
 - **Configurable anchor path**: Now `settings.tape.tapePath` customize where anchor index files are stored. Defaults to `{localPath}/TAPE`. The dumb `anchor-index` folder was removed.
 - **Tape runtime consolidation**: Collapsed separate tape service / selector / runtime key fields into a single `activeTapeRuntime` object.
-- **Session lifecycle anchors**: Tape now records `/resume` as `session/resume` and reloads as `session/reload` instead of flattening them into `session/start`.
+- **Session lifecycle anchors**: Tape now uses `session/new` for new-session entry points and `session/resume` for continued-session entry points instead of flattening everything into `session/start`.
+- **Git sync noise reduction**: Session-start pull and session-end push now skip redundant syncs, and successful no-op syncs no longer notify the user.
+
+  This was really annoying!
 
 ### Fix
 

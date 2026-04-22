@@ -115,7 +115,8 @@ function initMemoryContext(
     ).then((results) => {
       if (settings.repoUrl) {
         for (const { action, result } of results) {
-          ctx.ui.notify(`${result.message} (${action} on session start)`, result.success ? "info" : "error");
+          if (result.success && !result.updated) continue;
+          ctx.ui.notify(`${result.message} (start/${action})`, result.success ? "info" : "error");
         }
       }
       return results;
@@ -192,7 +193,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       const { fileLimit = 10, alwaysInclude = [], strategy = "smart" } = settings.tape?.context ?? {};
       const memoryFiles = state.activeTapeRuntime.selector.selectFilesForContext(strategy, fileLimit);
       const memoryContext = state.activeTapeRuntime.selector.buildContextFromFiles([...alwaysInclude, ...memoryFiles]);
-      const tapeHint = `\n\n---\n💡 Tape Context Management:\nYour conversation history is recorded in tape with anchors (checkpoints).\n- Use tape_info to check current tape status\n- Use tape_search to query historical entries by kind or content\n- Use tape_anchors to list all anchor checkpoints\n- Use tape_handoff to create a new anchor/checkpoint when starting a new task\n`;
+      const tapeHint = `\n\n---\n💡 Tape Context Management:\nYour conversation history is recorded in tape with anchors (checkpoints).\n- Use tape_info to check current tape status\n- Use tape_search to query historical entries by kind or content\n- Use tape_list to list all anchor checkpoints\n- Use tape_handoff to create a new anchor/checkpoint when starting a new task\n`;
       const fileCount = memoryFiles.length + alwaysInclude.length;
 
       if (mode === "system-prompt") {
@@ -241,7 +242,8 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
 
     if (settings.repoUrl) {
       for (const { action, result } of results) {
-        ctx.ui.notify(`${result.message} (${action} on session end)`, result.success ? "info" : "error");
+        if (result.success && !result.updated) continue;
+        ctx.ui.notify(`${result.message} (end/${action})`, result.success ? "info" : "error");
       }
     }
   });

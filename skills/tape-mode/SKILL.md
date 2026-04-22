@@ -71,7 +71,7 @@ Local store of anchor checkpoints:
 // Storage: {localPath}/TAPE/{projectName}__anchors.jsonl
 // localPath comes from settings ("localPath" field), default: ~/.pi/memory-md/
 interface TapeAnchor {
-  name: string;           // Anchor name (e.g., "session/start", "session/resume", "task/begin")
+  name: string;           // Anchor name (e.g., "session/new", "session/resume", "task/begin")
   sessionId: string;      // Session ID
   sessionEntryId: string; // Related session entry ID
   timestamp: string;      // ISO timestamp
@@ -95,7 +95,7 @@ Main service combining session reading and anchor management:
 class TapeService {
   // Anchor operations
   createAnchor(name: string, state?: Record<string, unknown>): TapeAnchor
-  recordSessionStart(): TapeAnchor  // Creates session/start, session/resume, or session/reload based on session_start reason
+  recordSessionStart(): TapeAnchor  // Creates session/new or session/resume based on session_start reason
   findAnchorByName(name: string): TapeAnchor | null
   getLastAnchor(): TapeAnchor | null
   
@@ -156,10 +156,10 @@ tape_handoff(
 
 ---
 
-### tape_anchors - List All Anchors
+### tape_list - List All Anchors
 
 ```typescript
-tape_anchors(
+tape_list(
   limit?: number,          // Max anchors (default: 20, max: 100)
   contextLines?: number    // Context lines before/after (default: 1)
 )
@@ -169,11 +169,11 @@ tape_anchors(
 
 ---
 
-### tape_anchor_delete - Delete Anchor Checkpoint
+### tape_delete - Delete Anchor Checkpoint
 
 ```typescript
-tape_anchor_delete(
-  id: string   // Anchor id from tape_anchors
+tape_delete(
+  id: string   // Anchor id from tape_list
 )
 ```
 
@@ -263,7 +263,7 @@ tape_search({ kinds: ["entry"], types: ["custom"], query: "memory" })
 tape_reset(archive?: boolean)  // Archive flag (not implemented)
 ```
 
-**Warning:** Clears anchor store and creates new `session/start` anchor.
+**Warning:** Clears anchor store and creates a fresh session lifecycle anchor.
 
 ---
 
@@ -282,7 +282,7 @@ session_start event
        ↓
 ┌──────────────────────────────────────┐
 │ Register Tape Tools (once)           │
-│ - tape_handoff, tape_anchors, etc.   │
+│ - tape_handoff, tape_list, etc.      │
 └──────────────────────────────────────┘
        ↓
 ┌──────────────────────────────────────┐
@@ -360,7 +360,7 @@ This means tape affects **selection**, while the injection mode controls **deliv
 Your conversation history is recorded in tape with anchors (checkpoints).
 - Use tape_info to check current tape status
 - Use tape_search to query historical entries by kind or content
-- Use tape_anchors to list all anchor checkpoints
+- Use tape_list to list all anchor checkpoints
 - Use tape_handoff to create a new anchor/checkpoint when starting a new task
 ```
 
@@ -507,7 +507,7 @@ tape_read({})
 | Tool | Token Cost | When |
 |------|------------|------|
 | `tape_handoff` | ~5-10 | When called |
-| `tape_anchors` | ~50-200 | When called |
+| `tape_list` | ~50-200 | When called |
 | `tape_info` | ~50-100 | When called |
 | `tape_read` | ~100-2000 | When called |
 | `tape_search` | ~50-500 | When called |
@@ -521,7 +521,7 @@ tape_read({})
 
 **Check:**
 1. Session file exists: `~/.pi/agent/sessions/`
-2. Anchor name exists: `tape_anchors()`
+2. Anchor name exists: `tape_list()`
 3. Try without filters: `tape_read({ limit: 10 })`
 
 ### Issue: Auto-anchor not working

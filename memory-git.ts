@@ -15,6 +15,31 @@ function getRepoName(settings: MemoryMdSettings): string {
   return match ? match[1] : "memory-md";
 }
 
+async function hasUpstreamBranch(pi: ExtensionAPI, cwd: string): Promise<boolean> {
+  const upstreamResult = await gitExec(pi, cwd, ["rev-parse", "--abbrev-ref", "@{u}"]);
+  return upstreamResult.success;
+}
+
+async function isAlreadyAtUpstream(pi: ExtensionAPI, cwd: string): Promise<boolean> {
+  if (!(await hasUpstreamBranch(pi, cwd))) return false;
+
+  const [headResult, trackedResult] = await Promise.all([
+    gitExec(pi, cwd, ["rev-parse", "HEAD"]),
+    gitExec(pi, cwd, ["rev-parse", "@{u}"]),
+  ]);
+
+  return headResult.success && trackedResult.success && headResult.stdout.trim() === trackedResult.stdout.trim();
+}
+
+async function hasCommitsToPush(pi: ExtensionAPI, cwd: string): Promise<boolean> {
+  if (!(await hasUpstreamBranch(pi, cwd))) return true;
+
+  const aheadResult = await gitExec(pi, cwd, ["rev-list", "--count", "@{u}..HEAD"]);
+  if (!aheadResult.success) return true;
+
+  return Number(aheadResult.stdout.trim() || "0") > 0;
+}
+
 export async function gitExec(
   pi: ExtensionAPI,
   cwd: string,
@@ -55,6 +80,10 @@ export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSetting
     const gitDir = path.join(localPath, ".git");
     if (!fs.existsSync(gitDir)) {
       return { success: false, message: `Directory exists but is not a git repo: ${localPath}` };
+    }
+
+    if (await isAlreadyAtUpstream(pi, localPath)) {
+      return { success: true, message: `[${repoName}] is already latest`, updated: false };
     }
 
     const pullResult = await gitExec(pi, localPath, ["pull", "--rebase", "--autostash"]);
@@ -115,6 +144,10 @@ export async function pushRepository(pi: ExtensionAPI, settings: MemoryMdSetting
     if (!commitResult.success) {
       return { success: false, message: commitResult.stdout || "Commit failed" };
     }
+  }
+
+  if (!hasChanges && !(await hasCommitsToPush(pi, localPath))) {
+    return { success: true, message: `[${repoName}] already up to date`, updated: false };
   }
 
   const pushResult = await gitExec(pi, localPath, ["push"]);

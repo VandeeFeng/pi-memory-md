@@ -303,9 +303,8 @@ Each line in the tape is a JSON record:
 
 Anchors are checkpoints that mark important transitions in your conversation. They enable efficient context reconstruction:
 
-- **`session/start`**: New/startup/fork session boundary
-- **`session/resume`**: Session resumed via `/resume`
-- **`session/reload`**: Session reloaded via `/reload`
+- **`session/new`**: First anchor of a new session, including startup into an empty session
+- **`session/resume`**: Session continued from an existing context, including `/resume`, `pi -r`, `pi -c`, `/reload`, `/fork`, or startup into an existing session
 - **`task/begin`**: Starting a new task
 - **`task/complete`**: Task completed
 - **`context/switch`**: Context switching point
@@ -316,7 +315,7 @@ Example workflow:
 1. Create anchor: tape_handoff({name: "task/begin", summary: "Working on feature X"})
 2. Work with memory files (reads/writes recorded to tape)
 3. Create anchor: tape_handoff({name: "task/complete", state: {files_modified: [...]}})
-4. Check status: tape_info() or tape_anchors({limit: 10})
+4. Check status: tape_info() or tape_list({limit: 10})
 ```
 more details: https://tape.systems/
 
@@ -325,12 +324,12 @@ more details: https://tape.systems/
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `tape_handoff` | `{name, summary?, state?}` | Create an anchor checkpoint in the tape |
-| `tape_anchors` | `{limit?: number}` | List all anchor checkpoints |
-| `tape_anchor_delete` | `{id}` | Delete an anchor checkpoint by id |
+| `tape_list` | `{limit?: number}` | List all anchor checkpoints |
+| `tape_delete` | `{id}` | Delete an anchor checkpoint by id |
 | `tape_info` | `{}` | Get tape statistics and information |
 | `tape_search` | `{query?, kinds?, limit?, sinceAnchor?}` | Search tape entries by text or kind |
 | `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, query?, kinds?, limit?}` | Read tape entries as formatted messages |
-| `tape_reset` | `{archive?: boolean}` | Reset the tape with a new `session/start` anchor |
+| `tape_reset` | `{archive?: boolean}` | Reset the tape with a new session lifecycle anchor |
 
 > **Note**: Tape tools are automatically registered when `tape` is set to `true`. They provide anchor-based context management inspired by [bub](https://bub.build)'s tape mechanism.
 

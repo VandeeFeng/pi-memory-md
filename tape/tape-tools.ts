@@ -84,7 +84,7 @@ export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServic
     label: "Tape Handoff",
     description: "Create an anchor checkpoint in the tape (marks a phase transition)",
     parameters: Type.Object({
-      name: Type.String({ description: "Anchor name (e.g., 'session/start', 'task/begin', 'handoff')" }),
+      name: Type.String({ description: "Anchor name (e.g., 'task/begin', 'task/complete', 'handoff')" }),
       summary: Type.Optional(Type.String({ description: "Optional summary of this checkpoint" })),
       state: Type.Optional(
         Type.Record(Type.String(), Type.Unknown(), { description: "Optional state to associate with this anchor" }),
@@ -124,8 +124,8 @@ export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServic
 
 export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
-    name: "tape_anchors",
-    label: "Tape Anchors",
+    name: "tape_list",
+    label: "Tape List",
     description: "List all anchor checkpoints in the tape with context",
     parameters: Type.Object({
       limit: Type.Optional(
@@ -184,7 +184,7 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
     },
 
     renderCall(args, theme) {
-      let text = theme.fg("toolTitle", theme.bold("tape_anchors"));
+      let text = theme.fg("toolTitle", theme.bold("tape_list"));
       if (args.limit) text += ` ${theme.fg("muted", `limit=${args.limit}`)}`;
       if (args.contextLines) text += ` ${theme.fg("muted", `context=${args.contextLines}`)}`;
       return renderText(text);
@@ -229,11 +229,11 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
 
 export function registerTapeAnchorDelete(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
-    name: "tape_anchor_delete",
-    label: "Tape Anchor Delete",
+    name: "tape_delete",
+    label: "Tape Delete",
     description: "Delete an anchor checkpoint by id",
     parameters: Type.Object({
-      id: Type.String({ description: "Anchor id to delete (use tape_anchors to list ids)" }),
+      id: Type.String({ description: "Anchor id to delete (use tape_list to list ids)" }),
     }),
 
     async execute(_toolCallId, params) {
@@ -256,7 +256,7 @@ export function registerTapeAnchorDelete(pi: ExtensionAPI, getTapeService: TapeS
     },
 
     renderCall(args, theme) {
-      return renderText(theme.fg("toolTitle", theme.bold("tape_anchor_delete ")) + theme.fg("accent", args.id));
+      return renderText(theme.fg("toolTitle", theme.bold("tape_delete ")) + theme.fg("accent", args.id));
     },
 
     renderResult(result, state: RenderState, theme) {
@@ -558,7 +558,7 @@ export function registerTapeReset(pi: ExtensionAPI, getTapeService: TapeServiceG
   pi.registerTool({
     name: "tape_reset",
     label: "Tape Reset",
-    description: "Clear anchor store (creates new session/start anchor)",
+    description: "Clear anchor store (creates a fresh session lifecycle anchor)",
     parameters: Type.Object({
       archive: Type.Optional(Type.Boolean({ description: "Archive old tape first (not implemented)" })),
     }),

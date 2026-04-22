@@ -103,8 +103,9 @@ export class TapeService {
   }
 
   recordSessionStart(reason: "startup" | "reload" | "new" | "resume" | "fork" = "startup"): TapeAnchor {
+    const hasExistingEntries = (this.sessionManager?.getEntries().length ?? 0) > 0;
     const anchorName =
-      reason === "resume" ? "session/resume" : reason === "reload" ? "session/reload" : "session/start";
+      reason === "new" || (reason === "startup" && !hasExistingEntries) ? "session/new" : "session/resume";
     return this.createAnchor(anchorName);
   }
 
