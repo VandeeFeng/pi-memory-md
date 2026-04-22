@@ -3,10 +3,10 @@ import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { extractMessageContent } from "./tape-selector.js";
-import type { MemoryTapeService } from "./tape-service.js";
+import type { TapeService } from "./tape-service.js";
 import type { RenderState } from "./tape-types.js";
 
-export type TapeServiceGetter = () => MemoryTapeService | null;
+export type TapeServiceGetter = () => TapeService | null;
 
 function renderText(text: string): Text {
   return new Text(text, 0, 0);
@@ -100,9 +100,9 @@ export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServic
       const anchor = tapeService.createAnchor(name, Object.keys(anchorState).length > 0 ? anchorState : undefined);
 
       return {
-        content: [{ type: "text", text: `Anchor created: ${name}` }],
+        content: [{ type: "text", text: JSON.stringify(anchor) }],
         details: {
-          anchorId: anchor.sessionEntryId,
+          anchorId: anchor.id,
           name,
           state: { ...anchorState, timestamp: anchor.timestamp },
         },
@@ -116,12 +116,8 @@ export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServic
     renderResult(result, state: RenderState, theme) {
       if (state.isPartial) return renderText(theme.fg("warning", "Creating anchor..."));
 
-      const name = (result.details as { name?: string })?.name ?? "Anchor created";
-      if (!state.expanded) {
-        return renderText(theme.fg("success", name));
-      }
-
-      return renderText(theme.fg("toolOutput", (result.content[0] as { text?: string })?.text ?? ""));
+      const text = (result.content[0] as { text?: string })?.text ?? "";
+      return renderText(`${theme.fg("success", "Anchor created successfully")}\n${theme.fg("toolOutput", text)}`);
     },
   });
 }
@@ -150,13 +146,13 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
 
       const { limit = 20, contextLines = 1 } = params as { limit?: number; contextLines?: number };
 
-      const anchorIndex = tapeService.getAnchorIndex();
-      const allAnchors = anchorIndex.getAllAnchors().slice(-limit);
+      const anchorStore = tapeService.getAnchorStore();
+      const anchors = anchorStore.getAllAnchors().slice(-limit);
 
-      const anchorsWithContext = allAnchors.map((anchor) => {
+      const anchorsWithContext = anchors.map((anchor) => {
         const entries = tapeService.query({ sinceAnchor: anchor.name, scope: "project", anchorScope: "project" });
         return {
-          id: anchor.sessionEntryId,
+          id: anchor.id,
           name: anchor.name,
           timestamp: anchor.timestamp,
           state: anchor.state ?? {},
@@ -227,6 +223,52 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
 
       if (!state.expanded) return renderText(theme.fg("success", `${details?.count ?? 0} anchor(s)`));
       return renderText(theme.fg("toolOutput", (result.content[0] as { text?: string })?.text ?? ""));
+    },
+  });
+}
+
+export function registerTapeAnchorDelete(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
+  pi.registerTool({
+    name: "tape_anchor_delete",
+    label: "Tape Anchor Delete",
+    description: "Delete an anchor checkpoint by id",
+    parameters: Type.Object({
+      id: Type.String({ description: "Anchor id to delete (use tape_anchors to list ids)" }),
+    }),
+
+    async execute(_toolCallId, params) {
+      const tapeService = getTapeService();
+      if (!tapeService) return getTapeUnavailableResult();
+
+      const { id } = params as { id: string };
+      const removedAnchor = tapeService.deleteAnchor(id);
+      if (!removedAnchor) {
+        return {
+          content: [{ type: "text", text: `Anchor not found: ${id}` }],
+          details: { id, deleted: false },
+        };
+      }
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(removedAnchor) }],
+        details: { id, deleted: true, name: removedAnchor.name },
+      };
+    },
+
+    renderCall(args, theme) {
+      return renderText(theme.fg("toolTitle", theme.bold("tape_anchor_delete ")) + theme.fg("accent", args.id));
+    },
+
+    renderResult(result, state: RenderState, theme) {
+      if (state.isPartial) return renderText(theme.fg("warning", "Deleting anchor..."));
+
+      const details = result.details as { deleted?: boolean } | undefined;
+      const text = (result.content[0] as { text?: string })?.text ?? "";
+      if (!details?.deleted) {
+        return renderText(theme.fg("warning", text || "Not found"));
+      }
+
+      return renderText(`${theme.fg("success", "Anchor deleted successfully")}\n${theme.fg("toolOutput", text)}`);
     },
   });
 }
@@ -364,11 +406,11 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
       const lines: string[] = [];
 
       if (kinds.includes("anchor") || kinds.includes("all")) {
-        const anchorIndex = tapeService.getAnchorIndex();
+        const anchorStore = tapeService.getAnchorStore();
         const since = sinceAnchor ? tapeService.findAnchorByName(sinceAnchor, anchorScope)?.timestamp : undefined;
         const until = betweenDates?.end;
 
-        const anchors = anchorIndex.search({
+        const anchors = anchorStore.search({
           query,
           limit,
           since,
@@ -481,7 +523,7 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
         query?: string;
       };
 
-      const queryOptions: Parameters<MemoryTapeService["query"]>[0] = { types, limit, scope, anchorScope, query };
+      const queryOptions: Parameters<TapeService["query"]>[0] = { types, limit, scope, anchorScope, query };
       if (betweenAnchors) queryOptions.betweenAnchors = betweenAnchors;
       else if (betweenDates) queryOptions.betweenDates = betweenDates;
       else if (afterAnchor) queryOptions.sinceAnchor = afterAnchor;
@@ -516,7 +558,7 @@ export function registerTapeReset(pi: ExtensionAPI, getTapeService: TapeServiceG
   pi.registerTool({
     name: "tape_reset",
     label: "Tape Reset",
-    description: "Clear anchor index (creates new session/start anchor)",
+    description: "Clear anchor store (creates new session/start anchor)",
     parameters: Type.Object({
       archive: Type.Optional(Type.Boolean({ description: "Archive old tape first (not implemented)" })),
     }),
@@ -549,6 +591,7 @@ export function registerTapeReset(pi: ExtensionAPI, getTapeService: TapeServiceG
 export function registerAllTapeTools(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   registerTapeHandoff(pi, getTapeService);
   registerTapeAnchors(pi, getTapeService);
+  registerTapeAnchorDelete(pi, getTapeService);
   registerTapeInfo(pi, getTapeService);
   registerTapeSearch(pi, getTapeService);
   registerTapeRead(pi, getTapeService);

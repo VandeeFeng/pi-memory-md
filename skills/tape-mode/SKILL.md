@@ -32,14 +32,14 @@ For pi TUI compatibility, anchors are also mirrored into `/tree` as inline label
 ┌─────────────────────────────────────────────────────────┐
 │                   Tape Service Layer                     │
 │  - Reads from pi session file (JSONL)                    │
-│  - Maintains anchor index (local JSONL)                  │
-│  - Provides query, search, and context selection          │
+│  - Maintains anchor store (local JSONL)                  │
+│  - Provides query, search, and context selection         │
 └─────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────┐
 │                    Storage Layer                         │
 │  - Session entries: pi session file (read-only)         │
-│  - Anchor index: {localPath}/TAPE/anchor-index/        │
+│  - Anchor store: {localPath}/TAPE/                     │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -63,14 +63,14 @@ getEntriesAfterTimestamp(entries: SessionEntry[], timestamp: string): SessionEnt
 - `model_change` - Model switches
 - `compaction` - Session compactions
 
-### 2. Anchor Index (`tape/anchor-index.ts`)
+### 2. Anchor Store (`tape/tape-anchor.ts`)
 
-Local index of anchor checkpoints:
+Local store of anchor checkpoints:
 
 ```typescript
-// Storage: {localPath}/TAPE/anchor-index/{projectName}__anchors.jsonl
+// Storage: {localPath}/TAPE/{projectName}__anchors.jsonl
 // localPath comes from settings ("localPath" field), default: ~/.pi/memory-md/
-interface AnchorEntry {
+interface TapeAnchor {
   name: string;           // Anchor name (e.g., "session/start", "session/resume", "task/begin")
   sessionId: string;      // Session ID
   sessionEntryId: string; // Related session entry ID
@@ -80,7 +80,7 @@ interface AnchorEntry {
 ```
 
 **Key Methods:**
-- `append(entry)` - Add new anchor to index
+- `append(entry)` - Add new anchor to store
 - `findByName(name)` - Find anchor by name
 - `findBySession(sessionId)` - Get anchors for session
 - `findBySessionEntryId(sessionEntryId, sessionId?)` - Get anchors attached to a specific session node
@@ -92,19 +92,19 @@ interface AnchorEntry {
 Main service combining session reading and anchor management:
 
 ```typescript
-class MemoryTapeService {
+class TapeService {
   // Anchor operations
-  createAnchor(name: string, state?: Record<string, unknown>): AnchorEntry
-  recordSessionStart(): AnchorEntry  // Creates session/start, session/resume, or session/reload based on session_start reason
-  findAnchorByName(name: string): AnchorEntry | null
-  getLastAnchor(): AnchorEntry | null
+  createAnchor(name: string, state?: Record<string, unknown>): TapeAnchor
+  recordSessionStart(): TapeAnchor  // Creates session/start, session/resume, or session/reload based on session_start reason
+  findAnchorByName(name: string): TapeAnchor | null
+  getLastAnchor(): TapeAnchor | null
   
   // Query operations (reads from pi session)
   query(options: TapeQueryOptions): SessionEntry[]
   getInfo(): {
     totalEntries: number;
     anchorCount: number;
-    lastAnchor: AnchorEntry | null;
+    lastAnchor: TapeAnchor | null;
     entriesSinceLastAnchor: number;
   }
 }
@@ -122,7 +122,7 @@ class MemoryTapeService {
 
 ### 5. Tape Tools (`tape/tape-tools.ts`)
 
-Six tools registered with pi extension API:
+Seven tools registered with pi extension API:
 
 ## Tape Tools Reference
 
@@ -166,6 +166,20 @@ tape_anchors(
 ```
 
 **Returns:** Anchor list with timestamps, state, and entry context
+
+---
+
+### tape_anchor_delete - Delete Anchor Checkpoint
+
+```typescript
+tape_anchor_delete(
+  id: string   // Anchor id from tape_anchors
+)
+```
+
+**Use when:**
+- removing a mirrored `/tree` anchor label by deleting the underlying tape anchor
+- cleaning up stale manual or auto anchors
 
 ---
 
@@ -243,13 +257,13 @@ tape_search({ kinds: ["entry"], types: ["custom"], query: "memory" })
 
 ---
 
-### tape_reset - Reset Anchor Index
+### tape_reset - Reset Anchor Store
 
 ```typescript
 tape_reset(archive?: boolean)  // Archive flag (not implemented)
 ```
 
-**Warning:** Clears anchor index and creates new `session/start` anchor.
+**Warning:** Clears anchor store and creates new `session/start` anchor.
 
 ---
 
@@ -262,7 +276,7 @@ session_start event
        ↓
 ┌──────────────────────────────────────┐
 │ Create / refresh active tape runtime │
-│ - Initialize MemoryTapeService       │
+│ - Initialize TapeService             │
 │ - Configure session tree labels      │
 └──────────────────────────────────────┘
        ↓
@@ -532,8 +546,7 @@ tape_read({})
 ```
 {localPath}/                    # From settings ("localPath"), default: ~/.pi/memory-md/
 └── TAPE/
-    └── anchor-index/
-        └── {projectName}__anchors.jsonl
+    └── {projectName}__anchors.jsonl
 
 ~/.pi/agent/sessions/           # pi session storage (read-only)
 └── --{cwd-path}--/

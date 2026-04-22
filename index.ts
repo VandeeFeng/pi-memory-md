@@ -15,7 +15,7 @@ import {
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import { MemoryFileSelector } from "./tape/tape-selector.js";
-import { MemoryTapeService } from "./tape/tape-service.js";
+import { TapeService } from "./tape/tape-service.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
@@ -26,7 +26,7 @@ type ExtensionState = {
   initialMemoryContext: string | null;
   hasInjectedInitialContext: boolean;
   activeTapeRuntime: {
-    service: MemoryTapeService;
+    service: TapeService;
     selector: MemoryFileSelector;
     cacheKey: string;
   } | null;
@@ -62,7 +62,7 @@ function ensureTapeRuntime(
   const runtimeKey = [tapeBasePath, projectName, sessionId].join("::");
 
   if (!state.activeTapeRuntime || state.activeTapeRuntime.cacheKey !== runtimeKey) {
-    const service = MemoryTapeService.create(tapeBasePath, projectName, sessionId, ctx.cwd);
+    const service = TapeService.create(tapeBasePath, projectName, sessionId, ctx.cwd);
     service.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
 
     state.activeTapeRuntime = {

@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export interface AnchorEntry {
+export interface TapeAnchor {
+  id: string;
   name: string;
   sessionId: string;
   sessionEntryId: string;
@@ -9,10 +10,10 @@ export interface AnchorEntry {
   state?: Record<string, unknown>;
 }
 
-export class AnchorIndex {
+export class AnchorStore {
   private readonly anchorDir: string;
   private readonly indexPath: string;
-  private index: Map<string, AnchorEntry[]> = new Map();
+  private index: Map<string, TapeAnchor[]> = new Map();
 
   constructor(tapeBasePath: string, projectName: string) {
     const anchorDir = tapeBasePath;
@@ -36,7 +37,19 @@ export class AnchorIndex {
         if (!line.trim()) continue;
 
         try {
-          const entry: AnchorEntry = JSON.parse(line);
+          const rawEntry = JSON.parse(line) as Partial<TapeAnchor>;
+          if (!rawEntry.name || !rawEntry.sessionId || !rawEntry.sessionEntryId || !rawEntry.timestamp) {
+            continue;
+          }
+
+          const entry: TapeAnchor = {
+            id: rawEntry.id ?? `${rawEntry.sessionEntryId}:${rawEntry.timestamp}:${rawEntry.name}`,
+            name: rawEntry.name,
+            sessionId: rawEntry.sessionId,
+            sessionEntryId: rawEntry.sessionEntryId,
+            timestamp: rawEntry.timestamp,
+            state: rawEntry.state,
+          };
           this.addToMemoryIndex(entry);
         } catch {
           // Skip malformed lines
@@ -47,24 +60,43 @@ export class AnchorIndex {
     }
   }
 
-  private addToMemoryIndex(entry: AnchorEntry): void {
+  private addToMemoryIndex(entry: TapeAnchor): void {
     const existing = this.index.get(entry.name) ?? [];
     existing.push(entry);
     this.index.set(entry.name, existing);
   }
 
-  append(entry: AnchorEntry): void {
+  append(entry: TapeAnchor): void {
     fs.appendFileSync(this.indexPath, `${JSON.stringify(entry)}\n`, "utf-8");
     this.addToMemoryIndex(entry);
   }
 
-  findByName(name: string): AnchorEntry | null {
+  removeById(id: string): TapeAnchor | null {
+    const anchor = this.findById(id);
+    if (!anchor) return null;
+
+    const anchors = this.getAllAnchors().filter((entry) => entry.id !== id);
+    this.rebuildIndex(anchors);
+    return anchor;
+  }
+
+  findById(id: string): TapeAnchor | null {
+    for (const entries of this.index.values()) {
+      for (const entry of entries) {
+        if (entry.id === id) return entry;
+      }
+    }
+
+    return null;
+  }
+
+  findByName(name: string): TapeAnchor | null {
     const entries = this.index.get(name);
     if (!entries || entries.length === 0) return null;
     return entries[entries.length - 1];
   }
 
-  findByNameInSession(name: string, sessionId: string): AnchorEntry | null {
+  findByNameInSession(name: string, sessionId: string): TapeAnchor | null {
     const entries = this.index.get(name) ?? [];
     for (let index = entries.length - 1; index >= 0; index--) {
       const entry = entries[index];
@@ -73,12 +105,12 @@ export class AnchorIndex {
     return null;
   }
 
-  findAllByName(name: string): AnchorEntry[] {
+  findAllByName(name: string): TapeAnchor[] {
     return this.index.get(name) ?? [];
   }
 
-  findBySession(sessionId: string): AnchorEntry[] {
-    const result: AnchorEntry[] = [];
+  findBySession(sessionId: string): TapeAnchor[] {
+    const result: TapeAnchor[] = [];
 
     for (const entries of this.index.values()) {
       for (const entry of entries) {
@@ -91,8 +123,8 @@ export class AnchorIndex {
     return result.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   }
 
-  findBySessionEntryId(sessionEntryId: string, sessionId?: string): AnchorEntry[] {
-    const result: AnchorEntry[] = [];
+  findBySessionEntryId(sessionEntryId: string, sessionId?: string): TapeAnchor[] {
+    const result: TapeAnchor[] = [];
 
     for (const entries of this.index.values()) {
       for (const entry of entries) {
@@ -105,13 +137,13 @@ export class AnchorIndex {
     return result.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   }
 
-  getLastAnchor(sessionId?: string): AnchorEntry | null {
+  getLastAnchor(sessionId?: string): TapeAnchor | null {
     if (sessionId) {
       const sessionAnchors = this.findBySession(sessionId);
       return sessionAnchors[sessionAnchors.length - 1] ?? null;
     }
 
-    let last: AnchorEntry | null = null;
+    let last: TapeAnchor | null = null;
 
     for (const entries of this.index.values()) {
       for (const entry of entries) {
@@ -124,8 +156,8 @@ export class AnchorIndex {
     return last;
   }
 
-  getAllAnchors(): AnchorEntry[] {
-    const result: AnchorEntry[] = [];
+  getAllAnchors(): TapeAnchor[] {
+    const result: TapeAnchor[] = [];
 
     for (const entries of this.index.values()) {
       result.push(...entries);
@@ -140,7 +172,7 @@ export class AnchorIndex {
     limit?: number;
     since?: string;
     until?: string;
-  }): AnchorEntry[] {
+  }): TapeAnchor[] {
     const { query, sessionId, limit = 20, since, until } = options;
     const sinceTime = since ? new Date(since).getTime() : null;
     const untilTime = until ? new Date(until).getTime() : null;
@@ -177,5 +209,23 @@ export class AnchorIndex {
     }
 
     this.index.clear();
+  }
+
+  private rebuildIndex(entries: TapeAnchor[]): void {
+    this.index.clear();
+
+    if (entries.length === 0) {
+      if (fs.existsSync(this.indexPath)) {
+        fs.unlinkSync(this.indexPath);
+      }
+      return;
+    }
+
+    const content = `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+    fs.writeFileSync(this.indexPath, content, "utf-8");
+
+    for (const entry of entries) {
+      this.addToMemoryIndex(entry);
+    }
   }
 }

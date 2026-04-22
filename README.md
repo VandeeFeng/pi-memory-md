@@ -326,6 +326,7 @@ more details: https://tape.systems/
 |------|------------|-------------|
 | `tape_handoff` | `{name, summary?, state?}` | Create an anchor checkpoint in the tape |
 | `tape_anchors` | `{limit?: number}` | List all anchor checkpoints |
+| `tape_anchor_delete` | `{id}` | Delete an anchor checkpoint by id |
 | `tape_info` | `{}` | Get tape statistics and information |
 | `tape_search` | `{query?, kinds?, limit?, sinceAnchor?}` | Search tape entries by text or kind |
 | `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, query?, kinds?, limit?}` | Read tape entries as formatted messages |

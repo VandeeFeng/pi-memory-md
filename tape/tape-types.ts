@@ -1,6 +1,6 @@
 /**
  * Tape layer for pi-memory-md
- * Uses pi session as data source, only maintains anchor index
+ * Uses pi session as data source, only maintains anchor store data
  * Entry types are directly from pi SessionEntry
  *
  * @see https://tape.systems
@@ -65,7 +65,7 @@ export interface ContextSelection {
 export interface TapeConfig {
   /** Enable tape mode */
   enabled?: boolean;
-  /** Custom anchor index path (optional, default: {localPath}/TAPE) */
+  /** Custom anchor store path (optional, default: {localPath}/TAPE) */
   tapePath?: string;
   /** Memory file selection configuration */
   context?: {

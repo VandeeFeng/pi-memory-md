@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { SessionEntry, SessionMessageEntry } from "@mariozechner/pi-coding-agent";
 import matter from "gray-matter";
-import type { MemoryTapeService } from "./tape-service.js";
+import type { TapeService } from "./tape-service.js";
 
 const CHARS_PER_TOKEN = 4;
 
@@ -75,7 +75,7 @@ function formatEntryLine(entry: SessionEntry): string | null {
 
 export class ConversationSelector {
   constructor(
-    private tapeService: MemoryTapeService,
+    private tapeService: TapeService,
     private maxTokens = 1000,
     private maxEntries = 40,
   ) {}
@@ -111,7 +111,7 @@ export class ConversationSelector {
 
 export class MemoryFileSelector {
   constructor(
-    private tapeService: MemoryTapeService,
+    private tapeService: TapeService,
     private memoryDir: string,
   ) {}
 

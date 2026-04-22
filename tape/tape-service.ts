@@ -1,5 +1,5 @@
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
-import { type AnchorEntry, AnchorIndex } from "./tape-anchor-index.js";
+import { AnchorStore, type TapeAnchor } from "./tape-anchor.js";
 import {
   getEntriesAfterTimestamp,
   getSessionFilePath,
@@ -73,8 +73,8 @@ function mergeAnchorLabel(labelPrefix: string, existingLabel: string | undefined
   return `${baseLabel}${getAnchorLabelSeparator(labelPrefix)}${anchorLabel.slice(labelPrefix.length)}`;
 }
 
-export class MemoryTapeService {
-  private readonly anchorIndex: AnchorIndex;
+export class TapeService {
+  private readonly anchorStore: AnchorStore;
   private readonly sessionId: string;
   private readonly cwd: string;
   private sessionManager: TapeSessionManager | null = null;
@@ -83,11 +83,11 @@ export class MemoryTapeService {
   constructor(tapeBasePath: string, projectName: string, sessionId: string, cwd: string) {
     this.sessionId = sessionId;
     this.cwd = cwd;
-    this.anchorIndex = new AnchorIndex(tapeBasePath, projectName);
+    this.anchorStore = new AnchorStore(tapeBasePath, projectName);
   }
 
-  static create(tapeBasePath: string, projectName: string, sessionId: string, cwd: string): MemoryTapeService {
-    return new MemoryTapeService(tapeBasePath, projectName, sessionId, cwd);
+  static create(tapeBasePath: string, projectName: string, sessionId: string, cwd: string): TapeService {
+    return new TapeService(tapeBasePath, projectName, sessionId, cwd);
   }
 
   configureSessionTree(sm: TapeSessionManager, prefix?: string): void {
@@ -102,15 +102,16 @@ export class MemoryTapeService {
     this.syncSessionTreeLabels();
   }
 
-  recordSessionStart(reason: "startup" | "reload" | "new" | "resume" | "fork" = "startup"): AnchorEntry {
+  recordSessionStart(reason: "startup" | "reload" | "new" | "resume" | "fork" = "startup"): TapeAnchor {
     const anchorName =
       reason === "resume" ? "session/resume" : reason === "reload" ? "session/reload" : "session/start";
     return this.createAnchor(anchorName);
   }
 
-  createAnchor(name: string, state?: Record<string, unknown>): AnchorEntry {
+  createAnchor(name: string, state?: Record<string, unknown>): TapeAnchor {
     const sessionEntryId = this.sessionManager?.getLeafId() ?? crypto.randomUUID();
-    const anchorEntry: AnchorEntry = {
+    const anchor: TapeAnchor = {
+      id: crypto.randomUUID(),
       name,
       sessionId: this.sessionId,
       sessionEntryId,
@@ -118,17 +119,17 @@ export class MemoryTapeService {
       state: state ?? undefined,
     };
 
-    this.anchorIndex.append(anchorEntry);
+    this.anchorStore.append(anchor);
     this.syncTreeLabel(sessionEntryId);
-    return anchorEntry;
+    return anchor;
   }
 
-  private resolveAnchor(name: string, anchorScope: "current-session" | "project"): AnchorEntry | null {
+  private resolveAnchor(name: string, anchorScope: "current-session" | "project"): TapeAnchor | null {
     if (anchorScope === "current-session") {
-      return this.anchorIndex.findByNameInSession(name, this.sessionId) ?? this.anchorIndex.findByName(name);
+      return this.anchorStore.findByNameInSession(name, this.sessionId) ?? this.anchorStore.findByName(name);
     }
 
-    return this.anchorIndex.findByName(name);
+    return this.anchorStore.findByName(name);
   }
 
   private loadEntries(scope: "session" | "project"): SessionEntry[] {
@@ -176,7 +177,7 @@ export class MemoryTapeService {
       }
     } else if (lastAnchor) {
       const anchor =
-        anchorScope === "project" ? this.anchorIndex.getLastAnchor() : this.anchorIndex.getLastAnchor(this.sessionId);
+        anchorScope === "project" ? this.anchorStore.getLastAnchor() : this.anchorStore.getLastAnchor(this.sessionId);
       if (anchor) startTime = anchor.timestamp;
     } else if (sinceAnchor) {
       const anchor = this.resolveAnchor(sinceAnchor, anchorScope);
@@ -219,7 +220,7 @@ export class MemoryTapeService {
     return entries;
   }
 
-  private buildAnchorLabel(anchors: AnchorEntry[]): string | null {
+  private buildAnchorLabel(anchors: TapeAnchor[]): string | null {
     if (anchors.length === 0) return null;
 
     const names = [...new Set(anchors.map((anchor) => anchor.name))];
@@ -300,7 +301,7 @@ export class MemoryTapeService {
     const targetEntryId = this.resolveTreeLabelTarget(sessionEntryId);
     if (!targetEntryId) return;
 
-    const anchors = this.anchorIndex.findBySessionEntryId(sessionEntryId, this.sessionId);
+    const anchors = this.anchorStore.findBySessionEntryId(sessionEntryId, this.sessionId);
     const anchorLabel = this.buildAnchorLabel(anchors);
     const existingLabel = this.sessionManager.getLabel(targetEntryId);
     this.setTreeLabel(
@@ -316,25 +317,33 @@ export class MemoryTapeService {
     if (!this.sessionManager) return;
 
     this.clearAnchorTreeLabels();
-    for (const anchor of this.anchorIndex.findBySession(this.sessionId)) {
+    for (const anchor of this.anchorStore.findBySession(this.sessionId)) {
       this.syncTreeLabel(anchor.sessionEntryId);
     }
   }
 
-  findAnchorByName(name: string, anchorScope: "current-session" | "project" = "current-session"): AnchorEntry | null {
+  deleteAnchor(id: string): TapeAnchor | null {
+    const removedAnchor = this.anchorStore.removeById(id);
+    if (!removedAnchor) return null;
+
+    this.syncTreeLabel(removedAnchor.sessionEntryId);
+    return removedAnchor;
+  }
+
+  findAnchorByName(name: string, anchorScope: "current-session" | "project" = "current-session"): TapeAnchor | null {
     return this.resolveAnchor(name, anchorScope);
   }
 
-  getLastAnchor(anchorScope: "current-session" | "project" = "current-session"): AnchorEntry | null {
+  getLastAnchor(anchorScope: "current-session" | "project" = "current-session"): TapeAnchor | null {
     if (anchorScope === "project") {
-      return this.anchorIndex.getLastAnchor();
+      return this.anchorStore.getLastAnchor();
     }
 
-    return this.anchorIndex.getLastAnchor(this.sessionId);
+    return this.anchorStore.getLastAnchor(this.sessionId);
   }
 
-  getAnchorIndex(): AnchorIndex {
-    return this.anchorIndex;
+  getAnchorStore(): AnchorStore {
+    return this.anchorStore;
   }
 
   getAlwaysInclude(): string[] {
@@ -344,11 +353,11 @@ export class MemoryTapeService {
   getInfo(): {
     totalEntries: number;
     anchorCount: number;
-    lastAnchor: AnchorEntry | null;
+    lastAnchor: TapeAnchor | null;
     entriesSinceLastAnchor: number;
   } {
-    const allAnchors = this.anchorIndex.findBySession(this.sessionId);
-    const lastAnchor = allAnchors[allAnchors.length - 1] ?? null;
+    const sessionAnchors = this.anchorStore.findBySession(this.sessionId);
+    const lastAnchor = sessionAnchors[sessionAnchors.length - 1] ?? null;
 
     let entriesSinceLastAnchor = 0;
     if (lastAnchor) {
@@ -358,7 +367,7 @@ export class MemoryTapeService {
 
     return {
       totalEntries: this.query({ scope: "session" }).length,
-      anchorCount: allAnchors.length,
+      anchorCount: sessionAnchors.length,
       lastAnchor,
       entriesSinceLastAnchor,
     };
@@ -374,8 +383,8 @@ export class MemoryTapeService {
 
   clear(): void {
     this.clearAnchorTreeLabels();
-    this.anchorIndex.clear();
+    this.anchorStore.clear();
   }
 }
 
-export type { AnchorEntry };
+export type { TapeAnchor };

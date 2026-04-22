@@ -15,6 +15,7 @@ After more than half a month of daily use and iteration, tape-mode is much more 
 ### Features
 
 - **Tape `/tree` compatibility**: Mirror tape anchors into pi `/tree` labels so anchored nodes are visible directly in the tree navigator. Customize the `/tree` anchor label prefix in setting with `"labelPrefix": "⚓ "`.
+- **Anchor deletion tool**: Added `tape_anchor_delete` so tape anchors can be removed by id, with `/tree` mirrored labels resynced after deletion.
 
 ### Changes
 
@@ -52,7 +53,7 @@ After more than half a month of daily use and iteration, tape-mode is much more 
 ### Features
 
 - **Tape query scoping**: Added `scope` (`session`/`project`) and `anchorScope` (`current-session`/`project`) to `tape_search` and `tape_read`
-- **Cross-session tape reads**: `MemoryTapeService` can now load entries from all sessions of the current project when using `scope: "project"`
+- **Cross-session tape reads**: `TapeService` can now load entries from all sessions of the current project when using `scope: "project"`
 - **Session-aware anchor resolution**: Anchor lookup now prefers current-session matches when requested, then falls back to project scope
 
 ### Fix
