@@ -247,7 +247,8 @@ With tape enabled, the injected content is still a memory index/summary for the 
 Tape also:
 - Tracks all operations in an immutable tape (JSONL format): messages, tool calls, memory operations (by default)
 - **Anchor-based context**: Selects relevant memory files and recently active project files based on recent usage and configured strategy
-- Creates `session/*` lifecycle anchors automatically and `handoff` anchors via `tape_handoff`
+- Creates `session/*` lifecycle anchors automatically and `handoff` anchors via `tape_handoff` or `/memory-anchor`
+- Supports `anchor.mode: "manual"` to hard-block `tape_handoff` unless the tool call uses `trigger: "keyword"` or `trigger: "manual"`
 - Can inject a hidden keyword-triggered handoff instruction before the agent starts when configured keywords match the user's message
 - Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale labels
 - **Pros**: Better context selection with checkpoint management, recent project file awareness, and handoff-aware prioritization
@@ -284,6 +285,10 @@ Tape also:
         ]
       },
       "anchor": {
+        // "auto": LLM may create handoff anchors when it decides they are useful
+        // "manual": tape_handoff is hard-blocked unless trigger="keyword"
+        "mode": "auto",
+
         // Prefix mirrored into pi /tree labels for anchor nodes
         "labelPrefix": "⚓ ",
 
@@ -338,6 +343,7 @@ more details: https://tape.systems/
 | `tape_delete` | `{id}` | Delete an anchor checkpoint by id |
 | `tape_info` | `{}` | Get tape statistics and information |
 | `tape_search` | `{query?, kinds?, limit?, sinceAnchor?, anchorName?, anchorKind?, anchorSummary?, anchorPurpose?, anchorKeywords?}` | Search tape entries by text or kind, with structured anchor-field filters |
+| `/memory-anchor` | `<prompt>` | Ask the LLM to derive and create a handoff anchor with `meta.trigger = "manual"` |
 | `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, query?, kinds?, limit?}` | Read tape entries as formatted messages |
 | `tape_reset` | `{archive?: boolean}` | Reset the tape with a new session lifecycle anchor |
 

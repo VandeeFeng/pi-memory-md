@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
     },
     anchor: {
       labelPrefix: "⚓ ",
+      mode: "auto",
       keywords: {
         global: [],
         project: [],
@@ -99,6 +100,7 @@ function normalizeSettings(
   }
 
   if (loadedSettings.tape?.anchor) {
+    loadedSettings.tape.anchor.mode = loadedSettings.tape.anchor.mode === "manual" ? "manual" : "auto";
     loadedSettings.tape.anchor.keywords = normalizeTapeKeywords(loadedSettings.tape.anchor.keywords);
   }
 

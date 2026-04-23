@@ -2,13 +2,27 @@ import type { ExtensionAPI, SessionEntry, Theme } from "@mariozechner/pi-coding-
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import type { MemoryMdSettings } from "../types.js";
 import { toLocaleDateTime, toLocaleTime } from "../utils.js";
-import type { TapeAnchorMeta } from "./tape-anchor.js";
+import type { TapeAnchorKind, TapeAnchorMeta } from "./tape-anchor.js";
 import { extractMessageContent } from "./tape-selector.js";
 import type { TapeService } from "./tape-service.js";
 import type { RenderState } from "./tape-types.js";
 
 export type TapeServiceGetter = () => TapeService | null;
+type TapeSettingsGetter = () => MemoryMdSettings;
+
+type EntryQueryParams = {
+  types?: SessionEntry["type"][];
+  limit?: number;
+  sinceAnchor?: string;
+  lastAnchor?: boolean;
+  betweenAnchors?: { start: string; end: string };
+  betweenDates?: { start: string; end: string };
+  scope?: "session" | "project";
+  anchorScope?: "current-session" | "project";
+  query?: string;
+};
 
 function renderText(text: string): Text {
   return new Text(text, 0, 0);
@@ -47,8 +61,10 @@ function formatEntrySummary(entry: SessionEntry): string {
   switch (entry.type) {
     case "message": {
       const msg = entry as { message: { role: string; content?: unknown } };
-      const content = extractMessageContent(msg.message.content).substring(0, 50);
-      return `[${time}] ${msg.message.role === "user" ? "User" : "Assistant"}: ${content}...`;
+      const fullContent = extractMessageContent(msg.message.content);
+      const content = fullContent.substring(0, 50);
+      const suffix = fullContent.length > 50 ? "..." : "";
+      return `[${time}] ${msg.message.role === "user" ? "User" : "Assistant"}: ${content}${suffix}`;
     }
     case "custom":
       return `[${time}] Custom: ${(entry as { customType?: string }).customType ?? "unknown"}`;
@@ -63,6 +79,62 @@ function formatEntrySummary(entry: SessionEntry): string {
   }
 }
 
+function getAnchorSearchBounds(
+  tapeService: TapeService,
+  options: {
+    sinceAnchor?: string;
+    lastAnchor?: boolean;
+    betweenAnchors?: { start: string; end: string };
+    betweenDates?: { start: string; end: string };
+    anchorScope?: "current-session" | "project";
+    scope?: "session" | "project";
+  },
+): { since?: string; until?: string; sessionId?: string } {
+  const { sinceAnchor, lastAnchor, betweenAnchors, betweenDates, anchorScope = "current-session", scope } = options;
+
+  if (betweenDates) {
+    return {
+      since: betweenDates.start,
+      until: betweenDates.end,
+      sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+    };
+  }
+
+  if (betweenAnchors) {
+    return {
+      since: tapeService.findAnchorByName(betweenAnchors.start, anchorScope)?.timestamp,
+      until: tapeService.findAnchorByName(betweenAnchors.end, anchorScope)?.timestamp,
+      sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+    };
+  }
+
+  if (lastAnchor) {
+    return {
+      since: tapeService.getLastAnchor(anchorScope)?.timestamp,
+      sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+    };
+  }
+
+  return {
+    since: sinceAnchor ? tapeService.findAnchorByName(sinceAnchor, anchorScope)?.timestamp : undefined,
+    sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+  };
+}
+
+function getAnchorContext(entries: SessionEntry[], anchorTimestamp: string, contextLines: number): string[][] {
+  const anchorTime = new Date(anchorTimestamp).getTime();
+  const anchorIndex = entries.findIndex((entry) => new Date(entry.timestamp).getTime() >= anchorTime);
+
+  if (anchorIndex === -1) {
+    return [entries.slice(-contextLines).map(formatEntrySummary), []];
+  }
+
+  return [
+    entries.slice(Math.max(0, anchorIndex - contextLines), anchorIndex).map(formatEntrySummary),
+    entries.slice(anchorIndex, anchorIndex + contextLines).map(formatEntrySummary),
+  ];
+}
+
 const EntryTypeUnion = Type.Union([
   Type.Literal("message"),
   Type.Literal("custom"),
@@ -71,30 +143,49 @@ const EntryTypeUnion = Type.Union([
   Type.Literal("compaction"),
 ]);
 
-function getTapeUnavailableResult() {
+function buildEntryQueryOptions(options: EntryQueryParams): Parameters<TapeService["query"]>[0] {
+  const { types, limit, scope = "project", anchorScope = "current-session", query } = options;
+  const queryOptions: Parameters<TapeService["query"]>[0] = { types, limit, scope, anchorScope, query };
+
+  if (options.betweenAnchors) queryOptions.betweenAnchors = options.betweenAnchors;
+  else if (options.betweenDates) queryOptions.betweenDates = options.betweenDates;
+  else if (options.sinceAnchor) queryOptions.sinceAnchor = options.sinceAnchor;
+  else if (options.lastAnchor) queryOptions.lastAnchor = true;
+
+  return queryOptions;
+}
+
+function getTapeUnavailableResult(): {
+  content: Array<{ type: "text"; text: string }>;
+  details: Record<string, unknown>;
+} {
   return {
-    content: [{ type: "text" as const, text: "Tape is not enabled for the current settings." }],
-    details: {} as any,
+    content: [{ type: "text", text: "Tape is not enabled for the current settings." }],
+    details: {},
   };
 }
 
 function normalizeHandoffMeta(
   summary: string | undefined,
   purpose: string | undefined,
-  trigger: "direct" | "keyword" | undefined,
+  trigger: "direct" | "keyword" | "manual" | undefined,
   keywords: string[] | undefined,
 ): TapeAnchorMeta | undefined {
   const mergedMeta: Record<string, unknown> = {};
 
   if (summary) mergedMeta.summary = summary;
   if (purpose) mergedMeta.purpose = purpose;
-  mergedMeta.trigger = trigger === "keyword" ? "keyword" : "direct";
+  mergedMeta.trigger = trigger === "keyword" || trigger === "manual" ? trigger : "direct";
   if (keywords?.length) mergedMeta.keywords = [...new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean))];
 
   return Object.keys(mergedMeta).length > 0 ? (mergedMeta as TapeAnchorMeta) : undefined;
 }
 
-export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
+export function registerTapeHandoff(
+  pi: ExtensionAPI,
+  getTapeService: TapeServiceGetter,
+  getSettings: TapeSettingsGetter,
+): void {
   pi.registerTool({
     name: "tape_handoff",
     label: "Tape Handoff",
@@ -104,7 +195,9 @@ export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServic
       summary: Type.Optional(Type.String({ description: "Brief intent summary of current task (under 18 words)" })),
       purpose: Type.Optional(Type.String({ description: "1-2 word label for the anchor's purpose" })),
       trigger: Type.Optional(
-        Type.Union([Type.Literal("direct"), Type.Literal("keyword")], { description: "Anchor trigger source" }),
+        Type.Union([Type.Literal("direct"), Type.Literal("keyword"), Type.Literal("manual")], {
+          description: "Anchor trigger source",
+        }),
       ),
       keywords: Type.Optional(Type.Array(Type.String(), { description: "Matched keywords when trigger is 'keyword'" })),
     }),
@@ -117,11 +210,29 @@ export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServic
         name: string;
         summary?: string;
         purpose?: string;
-        trigger?: "direct" | "keyword";
+        trigger?: "direct" | "keyword" | "manual";
         keywords?: string[];
       };
+      const handoffMode = getSettings().tape?.anchor?.mode ?? "auto";
+
+      if (handoffMode === "manual" && trigger !== "keyword" && trigger !== "manual") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: 'tape_handoff is disabled when tape.anchor.mode="manual" unless trigger="keyword".',
+            },
+          ],
+          details: {
+            disabled: true,
+            handoffMode,
+            allowedTriggers: ["keyword", "manual"],
+          },
+        };
+      }
+
       const mergedMeta = normalizeHandoffMeta(summary, purpose, trigger, keywords);
-      const anchor = tapeService.createAnchor(name, "handoff", mergedMeta, false);
+      const anchor = tapeService.createAnchor(name, "handoff", mergedMeta);
 
       return {
         content: [{ type: "text", text: JSON.stringify(anchor) }],
@@ -140,7 +251,9 @@ export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServic
     renderResult(result, state: RenderState, theme) {
       if (state.isPartial) return renderText(theme.fg("warning", "Creating anchor..."));
 
+      const details = result.details as { disabled?: boolean } | undefined;
       const text = (result.content[0] as { text?: string })?.text ?? "";
+      if (details?.disabled) return renderText(theme.fg("warning", text));
       return renderText(`${theme.fg("success", "Anchor created:")}\n${theme.fg("toolOutput", text)}`);
     },
   });
@@ -172,17 +285,18 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
 
       const anchorStore = tapeService.getAnchorStore();
       const anchors = anchorStore.getAllAnchors().slice(-limit);
+      const projectEntries = tapeService.query({ scope: "project", anchorScope: "project" });
 
       const anchorsWithContext = anchors.map((anchor) => {
-        const entries = tapeService.query({ sinceAnchor: anchor.name, scope: "project", anchorScope: "project" });
+        const [beforeContext, afterContext] = getAnchorContext(projectEntries, anchor.timestamp, contextLines);
         return {
           id: anchor.id,
           name: anchor.name,
           timestamp: anchor.timestamp,
           kind: anchor.kind,
           meta: anchor.meta ?? {},
-          beforeContext: entries.slice(0, contextLines).map(formatEntrySummary),
-          afterContext: entries.slice(contextLines, contextLines * 2).map(formatEntrySummary),
+          beforeContext,
+          afterContext,
         };
       });
 
@@ -439,7 +553,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         anchorScope?: "current-session" | "project";
         query?: string;
         anchorName?: string;
-        anchorKind?: "session" | "handoff";
+        anchorKind?: TapeAnchorKind;
         anchorSummary?: string;
         anchorPurpose?: string;
         anchorKeywords?: string[];
@@ -447,18 +561,26 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
 
       const parts: string[] = [];
       const lines: string[] = [];
+      let anchorCount = 0;
+      let entryCount = 0;
 
       if (kinds.includes("anchor") || kinds.includes("all")) {
         const anchorStore = tapeService.getAnchorStore();
-        const since = sinceAnchor ? tapeService.findAnchorByName(sinceAnchor, anchorScope)?.timestamp : undefined;
-        const until = betweenDates?.end;
+        const { since, until, sessionId } = getAnchorSearchBounds(tapeService, {
+          sinceAnchor,
+          lastAnchor,
+          betweenAnchors,
+          betweenDates,
+          anchorScope,
+          scope,
+        });
 
         const anchors = anchorStore.search({
           query,
           limit,
           since,
           until,
-          sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+          sessionId,
           name: anchorName,
           kind: anchorKind,
           summary: anchorSummary,
@@ -466,14 +588,15 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           keywords: anchorKeywords,
         });
 
-        if (anchors.length > 0) {
-          parts.push(`${anchors.length} anchors`);
+        anchorCount = anchors.length;
+        if (anchorCount > 0) {
+          parts.push(`${anchorCount} anchors`);
           lines.push("Anchors:");
           for (const anchor of anchors.slice(-5)) {
             const metaStr = anchor.meta ? ` ${JSON.stringify(anchor.meta)}` : "";
             lines.push(`  ${anchor.name} [${anchor.kind}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}`);
           }
-          if (anchors.length > 5) lines.push(`  ... and ${anchors.length - 5} more`);
+          if (anchorCount > 5) lines.push(`  ... and ${anchorCount - 5} more`);
         }
       }
 
@@ -490,13 +613,14 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           query,
         });
 
-        if (entries.length > 0) {
-          parts.push(`${entries.length} entries`);
+        entryCount = entries.length;
+        if (entryCount > 0) {
+          parts.push(`${entryCount} entries`);
           for (const entry of entries.slice(-5)) {
             lines.push(formatEntrySummary(entry));
           }
-          if (entries.length > 5) {
-            lines.push(`  ... and ${entries.length - 5} more`);
+          if (entryCount > 5) {
+            lines.push(`  ... and ${entryCount - 5} more`);
           }
         }
       }
@@ -508,7 +632,9 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         details: {
           kinds,
           query,
-          count: lines.length,
+          count: anchorCount + entryCount,
+          anchorCount,
+          entryCount,
           anchorName,
           anchorKind,
           anchorSummary,
@@ -540,7 +666,7 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
   pi.registerTool({
     name: "tape_read",
     label: "Tape Read",
-    description: "Read tape entries from pi sessio with anchor, date, or query filters.",
+    description: "Read tape entries from pi session with anchor, date, or query filters.",
     parameters: Type.Object({
       afterAnchor: Type.Optional(Type.String({ description: "Read entries after this anchor" })),
       lastAnchor: Type.Optional(Type.Boolean({ description: "Read entries after last anchor" })),
@@ -585,13 +711,19 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
         query?: string;
       };
 
-      const queryOptions: Parameters<TapeService["query"]>[0] = { types, limit, scope, anchorScope, query };
-      if (betweenAnchors) queryOptions.betweenAnchors = betweenAnchors;
-      else if (betweenDates) queryOptions.betweenDates = betweenDates;
-      else if (afterAnchor) queryOptions.sinceAnchor = afterAnchor;
-      else if (lastAnchor) queryOptions.lastAnchor = true;
-
-      const entries = tapeService.query(queryOptions);
+      const entries = tapeService.query(
+        buildEntryQueryOptions({
+          types,
+          limit,
+          scope,
+          anchorScope,
+          query,
+          sinceAnchor: afterAnchor,
+          lastAnchor,
+          betweenAnchors,
+          betweenDates,
+        }),
+      );
 
       const formatted = entries.map(formatEntrySummary).join("\n");
       return {
@@ -650,8 +782,12 @@ export function registerTapeReset(pi: ExtensionAPI, getTapeService: TapeServiceG
   });
 }
 
-export function registerAllTapeTools(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
-  registerTapeHandoff(pi, getTapeService);
+export function registerAllTapeTools(
+  pi: ExtensionAPI,
+  getTapeService: TapeServiceGetter,
+  getSettings: TapeSettingsGetter,
+): void {
+  registerTapeHandoff(pi, getTapeService, getSettings);
   registerTapeAnchors(pi, getTapeService);
   registerTapeAnchorDelete(pi, getTapeService);
   registerTapeInfo(pi, getTapeService);

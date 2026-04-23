@@ -5,7 +5,7 @@ import { toTimestamp } from "../utils.js";
 export type TapeAnchorKind = "session" | "handoff";
 
 export type TapeAnchorMeta = {
-  trigger?: "direct" | "keyword";
+  trigger?: "direct" | "keyword" | "manual";
   keywords?: string[];
   summary?: string;
   purpose?: string;
@@ -19,6 +19,10 @@ export interface TapeAnchor {
   sessionEntryId: string;
   timestamp: string;
   meta?: TapeAnchorMeta;
+}
+
+function sortAnchorsByTimestamp(anchors: TapeAnchor[]): TapeAnchor[] {
+  return anchors.sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp));
 }
 
 export class AnchorStore {
@@ -128,31 +132,17 @@ export class AnchorStore {
   }
 
   findBySession(sessionId: string): TapeAnchor[] {
-    const result: TapeAnchor[] = [];
-
-    for (const entries of this.index.values()) {
-      for (const entry of entries) {
-        if (entry.sessionId === sessionId) {
-          result.push(entry);
-        }
-      }
-    }
-
-    return result.sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp));
+    return sortAnchorsByTimestamp(this.getAllAnchors().filter((entry) => entry.sessionId === sessionId));
   }
 
   findBySessionEntryId(sessionEntryId: string, sessionId?: string): TapeAnchor[] {
-    const result: TapeAnchor[] = [];
-
-    for (const entries of this.index.values()) {
-      for (const entry of entries) {
-        if (entry.sessionEntryId !== sessionEntryId) continue;
-        if (sessionId && entry.sessionId !== sessionId) continue;
-        result.push(entry);
-      }
-    }
-
-    return result.sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp));
+    return sortAnchorsByTimestamp(
+      this.getAllAnchors().filter((entry) => {
+        if (entry.sessionEntryId !== sessionEntryId) return false;
+        if (sessionId && entry.sessionId !== sessionId) return false;
+        return true;
+      }),
+    );
   }
 
   getLastAnchor(sessionId?: string): TapeAnchor | null {
@@ -175,13 +165,13 @@ export class AnchorStore {
   }
 
   getAllAnchors(): TapeAnchor[] {
-    const result: TapeAnchor[] = [];
+    const anchors: TapeAnchor[] = [];
 
     for (const entries of this.index.values()) {
-      result.push(...entries);
+      anchors.push(...entries);
     }
 
-    return result.sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp));
+    return sortAnchorsByTimestamp(anchors);
   }
 
   search(options: {

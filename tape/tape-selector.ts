@@ -214,6 +214,21 @@ type MemoryPathStats = {
   memoryWriteCount: number;
 };
 
+type SupportedPathToolName = "memory_read" | "memory_write" | "read" | "edit" | "write";
+
+function createEmptyMemoryPathStats(): MemoryPathStats {
+  return {
+    count: 0,
+    lastAccess: 0,
+    score: 0,
+    readCount: 0,
+    editCount: 0,
+    writeCount: 0,
+    memoryReadCount: 0,
+    memoryWriteCount: 0,
+  };
+}
+
 export class MemoryFileSelector {
   constructor(
     private tapeService: TapeService,
@@ -255,15 +270,24 @@ export class MemoryFileSelector {
   }
 
   buildContextFromFiles(filePaths: string[], options?: { highlightedFiles?: string[] }): string {
-    const existingPaths = filePaths.filter((filePath) => this.pathExists(filePath));
+    const existingPaths = [...new Set(filePaths.filter((filePath) => this.pathExists(filePath)))];
     if (existingPaths.length === 0) return "";
 
-    const highlightedPaths = new Set((options?.highlightedFiles ?? []).filter((filePath) => this.pathExists(filePath)));
+    const highlightedPaths = new Set(
+      (options?.highlightedFiles ?? [])
+        .filter((filePath) => this.pathExists(filePath))
+        .map((filePath) => this.toMemoryRelativePath(filePath) ?? filePath),
+    );
+    const memoryPaths = [
+      ...new Set(
+        existingPaths
+          .map((filePath) => this.toMemoryRelativePath(filePath))
+          .filter((filePath): filePath is string => filePath !== null),
+      ),
+    ];
+    const projectPaths = existingPaths.filter((filePath) => !this.toMemoryRelativePath(filePath));
     const formatPathLabel = (filePath: string): string =>
       highlightedPaths.has(filePath) ? `${filePath} [high priority]` : filePath;
-
-    const memoryPaths = existingPaths.filter((filePath) => !path.isAbsolute(filePath));
-    const projectPaths = existingPaths.filter((filePath) => path.isAbsolute(filePath));
     const lines = ["# Project Memory", "", `Memory directory: ${this.memoryDir}`];
 
     if (memoryPaths.length > 0) {
@@ -302,10 +326,23 @@ export class MemoryFileSelector {
     scanHours: number,
   ): { paths: Map<string, MemoryPathStats>; totalAccesses: number } {
     const pathStats = new Map<string, MemoryPathStats>();
-    const handoffAnchor = this.getLatestHandoffAnchor(scanHours);
-    const keywordHandoffAnchor = this.getLatestKeywordHandoffAnchor(scanHours);
-    const handoffWindowEnd = this.getAnchorWindowEndTimestamp(handoffAnchor, entries);
-    const keywordHandoffWindowEnd = this.getAnchorWindowEndTimestamp(keywordHandoffAnchor, entries);
+    const recentHandoffAnchor = this.getLatestAnchor(scanHours, (anchor) => anchor.kind === "handoff");
+    const recentKeywordHandoffAnchor = this.getLatestAnchor(
+      scanHours,
+      (anchor) => anchor.kind === "handoff" && anchor.meta?.trigger === "keyword",
+    );
+    const anchorWindows = [
+      {
+        timestamp: recentHandoffAnchor?.timestamp ?? null,
+        windowEnd: this.getAnchorWindowEndTimestamp(recentHandoffAnchor, entries),
+        boost: HANDOFF_BOOST,
+      },
+      {
+        timestamp: recentKeywordHandoffAnchor?.timestamp ?? null,
+        windowEnd: this.getAnchorWindowEndTimestamp(recentKeywordHandoffAnchor, entries),
+        boost: KEYWORD_HANDOFF_BOOST,
+      },
+    ];
     let totalAccesses = 0;
 
     for (const entry of entries) {
@@ -320,45 +357,26 @@ export class MemoryFileSelector {
         if (block.type !== "toolCall") continue;
 
         const entryPath = block.arguments.path as string | undefined;
+        const toolName = block.name as SupportedPathToolName;
         if (!entryPath) continue;
 
-        let trackedPath: string | null = null;
-
-        if (block.name === "memory_read" || block.name === "memory_write") {
-          trackedPath = entryPath;
-        } else if (block.name === "read" || block.name === "edit" || block.name === "write") {
-          const fullPath = resolveFrom(this.projectRoot, entryPath);
-          trackedPath = toRelativeIfInside(this.memoryDir, fullPath);
-        }
-
+        const trackedPath = this.resolveTrackedPath(toolName, entryPath);
         if (!trackedPath || !this.pathExists(trackedPath)) continue;
 
         totalAccesses += 1;
-        const stats = pathStats.get(trackedPath) ?? {
-          count: 0,
-          lastAccess: 0,
-          score: 0,
-          readCount: 0,
-          editCount: 0,
-          writeCount: 0,
-          memoryReadCount: 0,
-          memoryWriteCount: 0,
-        };
+        const stats = pathStats.get(trackedPath) ?? createEmptyMemoryPathStats();
         const multiplier = this.getDiminishingReturnsMultiplier(stats.count);
-        const accessScore = this.getAccessScore(block.name);
-        const boost =
-          this.getAnchorBoost(accessTime, handoffAnchor?.timestamp ?? null, handoffWindowEnd, HANDOFF_BOOST) +
-          this.getAnchorBoost(
-            accessTime,
-            keywordHandoffAnchor?.timestamp ?? null,
-            keywordHandoffWindowEnd,
-            KEYWORD_HANDOFF_BOOST,
-          );
+        const accessScore = this.getAccessScore(toolName);
+        const boost = anchorWindows.reduce(
+          (total, anchorWindow) =>
+            total + this.getAnchorBoost(accessTime, anchorWindow.timestamp, anchorWindow.windowEnd, anchorWindow.boost),
+          0,
+        );
 
         stats.count += 1;
         stats.lastAccess = Math.max(stats.lastAccess, accessTime);
         stats.score += (accessScore + boost) * multiplier;
-        this.recordToolAccess(stats, block.name);
+        this.recordToolAccess(stats, toolName);
         pathStats.set(trackedPath, stats);
       }
     }
@@ -375,6 +393,19 @@ export class MemoryFileSelector {
         return rightFinalScore - leftFinalScore || right.score - left.score || right.lastAccess - left.lastAccess;
       })
       .map(([memoryPath]) => memoryPath);
+  }
+
+  private resolveTrackedPath(toolName: SupportedPathToolName, entryPath: string): string | null {
+    if (toolName === "memory_read" || toolName === "memory_write") {
+      return entryPath;
+    }
+
+    if (toolName === "read" || toolName === "edit" || toolName === "write") {
+      const fullPath = resolveFrom(this.projectRoot, entryPath);
+      return toRelativeIfInside(this.memoryDir, fullPath);
+    }
+
+    return null;
   }
 
   private getAccessScore(toolName: string): number {
@@ -454,21 +485,12 @@ export class MemoryFileSelector {
     return this.tapeService.query({ since, scope: "project", anchorScope: "project" });
   }
 
-  private getLatestHandoffAnchor(scanHours: number) {
+  private getLatestAnchor(
+    scanHours: number,
+    match: (anchor: { kind: string; meta?: { trigger?: string } }) => boolean,
+  ) {
     const since = hoursAgoIso(scanHours);
-    const anchors = this.tapeService
-      .getAnchorStore()
-      .search({ since, limit: Number.MAX_SAFE_INTEGER })
-      .filter((anchor) => anchor.kind === "handoff");
-    return anchors[anchors.length - 1] ?? null;
-  }
-
-  private getLatestKeywordHandoffAnchor(scanHours: number) {
-    const since = hoursAgoIso(scanHours);
-    const anchors = this.tapeService
-      .getAnchorStore()
-      .search({ since, limit: Number.MAX_SAFE_INTEGER })
-      .filter((anchor) => anchor.kind === "handoff" && anchor.meta?.trigger === "keyword");
+    const anchors = this.tapeService.getAnchorStore().search({ since, limit: Number.MAX_SAFE_INTEGER }).filter(match);
     return anchors[anchors.length - 1] ?? null;
   }
 
@@ -553,5 +575,10 @@ export class MemoryFileSelector {
     } catch {
       return { description: "No description", tags: "none" };
     }
+  }
+
+  private toMemoryRelativePath(filePath: string): string | null {
+    const normalizedPath = toRelativeIfInside(this.memoryDir, filePath);
+    return path.isAbsolute(normalizedPath) ? null : normalizedPath;
   }
 }

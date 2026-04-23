@@ -20,6 +20,8 @@ After more than half a month of daily use and iteration, tape-mode is much more 
 - **Manual handoff weighting**: Smart tape selection now boosts memory accesses after recent handoff anchors instead of treating generic anchors as the recency boundary.
 - **Project file activity weighting**: Smart tape selection now also tracks `read` / `edit` / `write` tool usage, resolves those paths to full project file paths, and ranks them above `memory_read` / `memory_write`, with handoff-era activity weighted highest.
 - **Keyword-triggered handoff prompts**: Tape can now match configured keywords from user prompts and inject a hidden instruction telling the model to create a `tape_handoff` anchor before continuing the task.
+- **Manual handoff mode**: Added `settings.tape.anchor.mode` so direct proactive `tape_handoff` calls can be hard-blocked, while dedicated `trigger: "keyword"` and `trigger: "manual"` flows remain allowed.
+- **User-created manual anchors**: Added `/memory-anchor` so users can send a prompt to the LLM and have it derive a handoff anchor with `meta.trigger = "manual"` through the dedicated manual-anchor flow.
 
 ### Changes
 
@@ -30,6 +32,7 @@ After more than half a month of daily use and iteration, tape-mode is much more 
 - **Anchor config simplification**: Removed threshold-based auto-anchor settings; `settings.tape.anchor` now only controls display options such as `labelPrefix` and `keywords`.
 - **Tape docs relocation**: The old `skills/tape-mode/SKILL.md` guide was moved into `docs/tape-design.md`, and the package no longer registers tape mode as a skill.
 - **Git sync noise reduction**: Session-start pull and session-end push now skip redundant syncs, and successful no-op syncs no longer notify the user.
+- **Tape memory summary reuse**: Tape smart-mode injection now normalizes selected paths under the memory directory and reuses the traditional memory summary output (`Description`/`Tags`) for them, even when selected via absolute paths.
 
   This was really annoying!
 

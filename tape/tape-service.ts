@@ -24,6 +24,11 @@ type TapeSessionManager = {
 
 type TapeLabelSetter = (entryId: string, label: string | undefined) => void;
 
+type TapeQueryBounds = {
+  startTime: string | null;
+  endTime: string | null;
+};
+
 function hasTextContent(content: unknown): boolean {
   if (typeof content === "string") return content.trim().length > 0;
   if (!Array.isArray(content)) return false;
@@ -160,43 +165,8 @@ export class TapeService {
   }
 
   query(options: TapeQueryOptions & { since?: string }): SessionEntry[] {
-    const {
-      betweenAnchors,
-      betweenDates,
-      types,
-      lastAnchor,
-      limit,
-      query,
-      since,
-      sinceAnchor,
-      scope = "project",
-      anchorScope = "current-session",
-    } = options;
-
-    let startTime: string | null = null;
-    let endTime: string | null = null;
-
-    if (betweenAnchors) {
-      const startAnchor = this.resolveAnchor(betweenAnchors.start, anchorScope);
-      const endAnchor = this.resolveAnchor(betweenAnchors.end, anchorScope);
-
-      if (startAnchor && endAnchor) {
-        startTime = startAnchor.timestamp;
-        endTime = endAnchor.timestamp;
-      }
-    } else if (lastAnchor) {
-      const anchor =
-        anchorScope === "project" ? this.anchorStore.getLastAnchor() : this.anchorStore.getLastAnchor(this.sessionId);
-      if (anchor) startTime = anchor.timestamp;
-    } else if (sinceAnchor) {
-      const anchor = this.resolveAnchor(sinceAnchor, anchorScope);
-      if (anchor) startTime = anchor.timestamp;
-    }
-
-    if (betweenDates) {
-      startTime = betweenDates.start;
-      endTime = betweenDates.end;
-    }
+    const { types, limit, query, since, scope = "project" } = options;
+    const { startTime, endTime } = this.resolveQueryBounds(options);
 
     let entries = this.loadEntries(scope);
 
@@ -227,6 +197,38 @@ export class TapeService {
     }
 
     return entries;
+  }
+
+  private resolveQueryBounds(options: TapeQueryOptions): TapeQueryBounds {
+    const { betweenAnchors, betweenDates, lastAnchor, sinceAnchor, anchorScope = "current-session" } = options;
+
+    if (betweenDates) {
+      return { startTime: betweenDates.start, endTime: betweenDates.end };
+    }
+
+    if (betweenAnchors) {
+      const startAnchor = this.resolveAnchor(betweenAnchors.start, anchorScope);
+      const endAnchor = this.resolveAnchor(betweenAnchors.end, anchorScope);
+
+      if (startAnchor && endAnchor) {
+        return { startTime: startAnchor.timestamp, endTime: endAnchor.timestamp };
+      }
+
+      return { startTime: null, endTime: null };
+    }
+
+    if (lastAnchor) {
+      const anchor =
+        anchorScope === "project" ? this.anchorStore.getLastAnchor() : this.anchorStore.getLastAnchor(this.sessionId);
+      return { startTime: anchor?.timestamp ?? null, endTime: null };
+    }
+
+    if (sinceAnchor) {
+      const anchor = this.resolveAnchor(sinceAnchor, anchorScope);
+      return { startTime: anchor?.timestamp ?? null, endTime: null };
+    }
+
+    return { startTime: null, endTime: null };
   }
 
   private buildAnchorLabel(anchors: TapeAnchor[]): string | null {

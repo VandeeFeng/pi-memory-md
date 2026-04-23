@@ -73,7 +73,7 @@ interface TapeAnchor {
   name: string;           // Anchor name (e.g., "session/new", "session/resume", "task/begin")
   kind: "session" | "handoff";
   meta?: {
-    trigger?: "direct" | "keyword";
+    trigger?: "direct" | "keyword" | "manual";
     keywords?: string[];
     summary?: string;
   };
@@ -341,9 +341,11 @@ The injected content is a memory index/summary plus the tape hint.
 
 // Injection adds:
 - Memory file list with descriptions/tags
+- Files under the memory directory still get descriptions/tags even when selected via absolute paths
 - Recently active project file paths when smart mode detects read/edit/write activity
 - Smart-mode filtering that skips stale tape paths whose files no longer exist
 - Hidden keyword-triggered handoff instruction when configured keywords match
+- Optional `anchor.mode: "manual"` guard that hard-blocks `tape_handoff` unless the tool call uses `trigger: "keyword"` or `trigger: "manual"`
 - Tape hint with tool usage instructions
 ```
 
@@ -355,6 +357,8 @@ The injected content is a memory index/summary plus the tape hint.
 | `system-prompt` | Rebuilds tape-selected memory and appends it to the current system prompt on every agent turn |
 
 Keyword-triggered handoff instructions are independent from the main memory payload and may be delivered later as `pi-memory-md-tape-keyword` when a configured keyword matches a user prompt.
+
+If `settings.tape.anchor.mode === "manual"`, the main tape hint tells the LLM not to create `tape_handoff` anchors proactively, and the tool layer also rejects `tape_handoff` unless the call uses `trigger: "keyword"` or `trigger: "manual"`. Keyword-triggered handoff instructions still override that guard for matching prompts, and `/memory-anchor` injects a dedicated hidden instruction for `trigger: "manual"`.
 
 This means tape affects **selection**, while the injection mode controls **delivery frequency and location**.
 
@@ -383,6 +387,7 @@ Your conversation history is recorded in tape with anchors (checkpoints).
       },
       "anchor": {
         "labelPrefix": "⚓ ",
+        "mode": "auto",
         "keywords": {
           "global": [],
           "project": []
@@ -444,7 +449,7 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 | Kind | Behavior |
 |------|----------|
 | `session` | Lifecycle anchors created by tape (`session/new`, `session/resume`) |
-| `handoff` | Phase-transition anchors created through `tape_handoff` |
+| `handoff` | Phase-transition anchors created through `tape_handoff` and `/memory-anchor` |
 
 `settings.tape.anchor.labelPrefix` customizes how mirrored anchor labels appear in pi `/tree` (default: `⚓ `).
 

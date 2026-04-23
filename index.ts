@@ -139,12 +139,32 @@ function queueKeywordHandoffMessage(pi: ExtensionAPI, keywordHandoff: KeywordHan
   );
 }
 
+function buildTapeHint(settings: MemoryMdSettings): string {
+  const handoffMode = settings.tape?.anchor?.mode ?? "auto";
+  const lines = [
+    "---",
+    "💡 Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.",
+  ];
+
+  if (handoffMode === "manual") {
+    lines.push(
+      "Handoff mode: manual. `tape_handoff` is blocked unless the keyword is triggered or user create manually.",
+    );
+  }
+
+  return `\n\n${lines.join("\n")}\n`;
+}
+
 function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
   pi.on("session_start", async (event, ctx) => {
     ensureTapeRuntime(settings, state, ctx, { recordSessionStart: true, sessionStartReason: event.reason });
 
     if (!state.tapeToolsRegistered) {
-      registerAllTapeTools(pi, () => state.activeTapeRuntime?.service ?? null);
+      registerAllTapeTools(
+        pi,
+        () => state.activeTapeRuntime?.service ?? null,
+        () => settings,
+      );
       state.tapeToolsRegistered = true;
     }
 
@@ -190,7 +210,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       const memoryContext = state.activeTapeRuntime.selector.buildContextFromFiles(selectedFiles, {
         highlightedFiles,
       });
-      const tapeHint = `\n\n---\n💡 Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.\n`;
+      const tapeHint = buildTapeHint(settings);
       const fileCount = selectedFiles.length;
 
       if (mode === "system-prompt") {
@@ -252,6 +272,26 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       }
     }
   });
+}
+
+function buildManualAnchorMessage(prompt: string): string {
+  return [
+    "The user explicitly requested a manual tape anchor via /memory-anchor.",
+    "",
+    "Before continuing, call tape_handoff with:",
+    '- trigger: "manual"',
+    '- name: "<hierarchical anchor name derived from the user request>"',
+    '- summary: "<brief intent summary in the user\'s language, under 18 words>"',
+    '- purpose: "<1-2 word label>"',
+    "",
+    "Constraints:",
+    "- Derive the anchor fields from the user prompt below.",
+    "- Keep the name concrete and reusable.",
+    "- Do not ask follow-up questions.",
+    "- After creating the anchor, continue normally.",
+    "",
+    `User prompt: ${prompt}`,
+  ].join("\n");
 }
 
 function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
@@ -357,6 +397,38 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
       }
 
       ctx.ui.notify(treeOutput.trim(), "info");
+    },
+  });
+
+  pi.registerCommand("memory-anchor", {
+    description: "Ask the LLM to create a manual tape anchor from your prompt",
+    handler: async (args, ctx) => {
+      if (!settings.tape?.enabled) {
+        ctx.ui.notify("Tape is not enabled for the current settings.", "error");
+        return;
+      }
+
+      const prompt = args.trim();
+      if (!prompt) {
+        ctx.ui.notify("Usage: /memory-anchor <prompt>", "warning");
+        return;
+      }
+
+      ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
+      if (!state.activeTapeRuntime?.service) {
+        ctx.ui.notify("Tape runtime is unavailable.", "error");
+        return;
+      }
+
+      pi.sendMessage(
+        {
+          customType: "pi-memory-md-tape-manual-anchor",
+          content: buildManualAnchorMessage(prompt),
+          display: false,
+        },
+        { triggerTurn: true },
+      );
+      ctx.ui.notify("Manual anchor request queued", "info");
     },
   });
 }

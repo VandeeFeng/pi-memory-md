@@ -67,6 +67,8 @@ export interface TapeKeywordConfig {
   project?: string[];
 }
 
+export type TapeHandoffMode = "auto" | "manual";
+
 export interface TapeConfig {
   /** Enable tape mode */
   enabled?: boolean;
@@ -87,6 +89,8 @@ export interface TapeConfig {
   anchor?: {
     /** Prefix mirrored into pi /tree labels for anchor nodes */
     labelPrefix?: string;
+    /** Handoff behavior for autonomous LLM anchor creation */
+    mode?: TapeHandoffMode;
     /** Keyword-triggered handoff settings */
     keywords?: TapeKeywordConfig;
   };
