@@ -3,15 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import matter from "gray-matter";
 import { DEFAULT_HOOKS, normalizeHooks } from "./hooks.js";
+import { normalizeTapeKeywords } from "./tape/tape-selector.js";
 import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, ParsedFrontmatter } from "./types.js";
+import { DEFAULT_LOCAL_PATH, expandHomePath, getCurrentDate } from "./utils.js";
 
 export * from "./types.js";
-
-export function getCurrentDate(): string {
-  return new Date().toISOString().split("T")[0];
-}
-
-export const DEFAULT_LOCAL_PATH = path.join(os.homedir(), ".pi", "memory-md");
+export { DEFAULT_LOCAL_PATH, getCurrentDate } from "./utils.js";
 
 export const DEFAULT_SETTINGS: MemoryMdSettings = {
   enabled: true,
@@ -27,19 +24,17 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
       memoryScan: [72, 168],
     },
     anchor: {
-      mode: "threshold",
-      threshold: 25,
       labelPrefix: "⚓ ",
+      keywords: {
+        global: [],
+        project: [],
+      },
     },
   },
 };
 
 export function expandPath(filePath: string): string {
-  if (filePath.startsWith("~")) {
-    return path.join(os.homedir(), filePath.slice(1));
-  }
-
-  return filePath;
+  return expandHomePath(filePath);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -101,6 +96,10 @@ function normalizeSettings(
     loadedSettings.tape ??= {};
     loadedSettings.tape.context ??= {};
     loadedSettings.tape.context.memoryScan = [normalizedStart, Math.max(normalizedStart, normalizedMax)];
+  }
+
+  if (loadedSettings.tape?.anchor) {
+    loadedSettings.tape.anchor.keywords = normalizeTapeKeywords(loadedSettings.tape.anchor.keywords);
   }
 
   return loadedSettings;

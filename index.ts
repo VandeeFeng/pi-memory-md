@@ -1,11 +1,9 @@
 import fs from "node:fs";
-import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getHookActions, runHookTrigger } from "./hooks.js";
 import {
   buildMemoryContext,
   countMemoryContextFiles,
-  expandPath,
   formatMemoryContext,
   getMemoryCoreDir,
   getMemoryDir,
@@ -14,11 +12,13 @@ import {
   loadSettings,
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
-import { MemoryFileSelector } from "./tape/tape-selector.js";
+import type { KeywordHandoffInstruction } from "./tape/tape-selector.js";
+import { detectKeywordHandoff, MemoryFileSelector } from "./tape/tape-selector.js";
 import { TapeService } from "./tape/tape-service.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
+import { getProjectName, getTapeBasePath } from "./utils.js";
 
 type ExtensionState = {
   tapeToolsRegistered: boolean;
@@ -54,11 +54,9 @@ function ensureTapeRuntime(
   }
 
   const memoryDir = getMemoryDir(settings, ctx.cwd);
-  const projectName = path.basename(ctx.cwd);
+  const projectName = getProjectName(ctx.cwd);
   const sessionId = ctx.sessionManager.getSessionId();
-  const tapeBasePath = settings.tape?.tapePath
-    ? expandPath(settings.tape.tapePath)
-    : path.join(settings.localPath, "TAPE");
+  const tapeBasePath = getTapeBasePath(settings.localPath, settings.tape?.tapePath);
   const runtimeKey = [tapeBasePath, projectName, sessionId].join("::");
 
   if (!state.activeTapeRuntime || state.activeTapeRuntime.cacheKey !== runtimeKey) {
@@ -128,35 +126,20 @@ function initMemoryContext(
   return true;
 }
 
+function queueKeywordHandoffMessage(pi: ExtensionAPI, keywordHandoff: KeywordHandoffInstruction | null): void {
+  if (!keywordHandoff) return;
+
+  pi.sendMessage(
+    {
+      customType: "pi-memory-md-tape-keyword",
+      content: keywordHandoff.message,
+      display: false,
+    },
+    { triggerTurn: false },
+  );
+}
+
 function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
-  pi.on("tool_result", (_toolEvent, toolCtx) => {
-    ensureTapeRuntime(settings, state, toolCtx, { recordSessionStart: false });
-
-    if (!state.activeTapeRuntime) return;
-
-    const info = state.activeTapeRuntime.service.getInfo();
-    const anchorMode = settings.tape?.anchor?.mode ?? "threshold";
-    const anchorThreshold = settings.tape?.anchor?.threshold ?? 25;
-
-    if (anchorMode === "threshold" && info.entriesSinceLastAnchor >= anchorThreshold) {
-      const now = new Date();
-      const timestamp = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        String(now.getDate()).padStart(2, "0"),
-        String(now.getHours()).padStart(2, "0"),
-        String(now.getMinutes()).padStart(2, "0"),
-        String(now.getSeconds()).padStart(2, "0"),
-      ].join("");
-
-      state.activeTapeRuntime.service.createAnchor(`auto/threshold-${timestamp}`);
-      toolCtx.ui.notify(
-        `Anchor auto-created: ${info.anchorCount} anchors total [threshold=${anchorThreshold}]`,
-        "info",
-      );
-    }
-  });
-
   pi.on("session_start", async (event, ctx) => {
     ensureTapeRuntime(settings, state, ctx, { recordSessionStart: true, sessionStartReason: event.reason });
 
@@ -188,6 +171,11 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
 
     const mode = settings.injection || "message-append";
     const tapeEnabled = settings.tape?.enabled;
+    const keywordHandoff = tapeEnabled ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
+
+    if (keywordHandoff) {
+      ctx.ui.notify(`Tape keyword detected: ${keywordHandoff.primary}`, "info");
+    }
 
     if (tapeEnabled && state.activeTapeRuntime && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
       const {
@@ -198,18 +186,29 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       } = settings.tape?.context ?? {};
       const memoryFiles = state.activeTapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
       const selectedFiles = [...new Set([...alwaysInclude, ...memoryFiles])];
-      const memoryContext = state.activeTapeRuntime.selector.buildContextFromFiles(selectedFiles);
-      const tapeHint = `\n\n---\n💡 Tape Context Management:\nYour conversation history is recorded in tape with anchors (checkpoints).\n- Use tape_info to check current tape status\n- Use tape_search to query historical entries by kind or content\n- Use tape_list to list all anchor checkpoints\n- Use tape_handoff to create a new anchor/checkpoint when starting a new task\n`;
+      const highlightedFiles = [...new Set(memoryFiles)].slice(0, 3);
+      const memoryContext = state.activeTapeRuntime.selector.buildContextFromFiles(selectedFiles, {
+        highlightedFiles,
+      });
+      const tapeHint = `\n\n---\n💡 Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.\n`;
       const fileCount = selectedFiles.length;
 
       if (mode === "system-prompt") {
+        queueKeywordHandoffMessage(pi, keywordHandoff);
+        const injectedPrompt = [memoryContext + tapeHint].filter(Boolean).join("\n\n");
         ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (system-prompt)`, "info");
-        return { systemPrompt: `${event.systemPrompt}\n\n${memoryContext + tapeHint}` };
+        return { systemPrompt: `${event.systemPrompt}\n\n${injectedPrompt}` };
       }
 
+      queueKeywordHandoffMessage(pi, keywordHandoff);
       state.hasInjectedInitialContext = true;
+      const injectedMessage = [memoryContext + tapeHint].filter(Boolean).join("\n\n");
       ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (message-append)`, "info");
-      return { message: { customType: "pi-memory-md-tape", content: memoryContext + tapeHint, display: false } };
+      return { message: { customType: "pi-memory-md-tape", content: injectedMessage, display: false } };
+    }
+
+    if (keywordHandoff) {
+      queueKeywordHandoffMessage(pi, keywordHandoff);
     }
 
     if (state.initialMemoryContext && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
@@ -259,7 +258,7 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
   pi.registerCommand("memory-status", {
     description: "Show memory repository status",
     handler: async (_args, ctx) => {
-      const projectName = path.basename(ctx.cwd);
+      const projectName = getProjectName(ctx.cwd);
       const memoryDir = getMemoryDir(settings, ctx.cwd);
       if (!isMemoryInitialized(memoryDir)) {
         ctx.ui.notify(`Memory: ${projectName} | Not initialized | Use /memory-init to set up`, "info");

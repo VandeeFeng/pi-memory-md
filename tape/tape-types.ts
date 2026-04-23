@@ -60,8 +60,13 @@ export interface ContextSelection {
  * @description
  * - `tapePath`: Custom tape path (default: {localPath}/TAPE: ~/.pi/memory-md/TAPE)
  * - `context`: Memory file selection strategy
- * - `anchor`: Auto-anchor behavior settings
+ * - `anchor`: Anchor behavior settings
  */
+export interface TapeKeywordConfig {
+  global?: string[];
+  project?: string[];
+}
+
 export interface TapeConfig {
   /** Enable tape mode */
   enabled?: boolean;
@@ -78,14 +83,12 @@ export interface TapeConfig {
     /** Smart-mode scan range as [startHours, maxHours] (default: [72, 168]) */
     memoryScan?: [number, number];
   };
-  /** Anchor auto-creation settings */
+  /** Anchor behavior settings */
   anchor?: {
-    /** Auto-anchor mode: "hand" (manual only), "threshold" (auto), or "manual" (default: "threshold") */
-    mode?: "hand" | "threshold" | "manual";
-    /** Entries since last anchor before auto-creating new anchor (default: 15) */
-    threshold?: number;
     /** Prefix mirrored into pi /tree labels for anchor nodes */
     labelPrefix?: string;
+    /** Keyword-triggered handoff settings */
+    keywords?: TapeKeywordConfig;
   };
 }
 

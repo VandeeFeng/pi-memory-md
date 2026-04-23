@@ -39,8 +39,7 @@
       "./skills/memory-init/SKILL.md",
       "./skills/memory-management/SKILL.md",
       "./skills/memory-sync/SKILL.md",
-      "./skills/memory-search/SKILL.md",
-      "./skills/tape-mode/SKILL.md"
+      "./skills/memory-search/SKILL.md"
     ]
   },
   "files": [

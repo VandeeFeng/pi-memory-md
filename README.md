@@ -226,6 +226,8 @@ The LLM automatically:
 
 > **Note**: This mode may consume more tokens. Adjust parameters based on your model's context window and your API quota.
 
+More details [tape-design](docs/tape-design.md)
+
 ### Tape vs Injection Modes
 
 **Tape** is an independent feature that can be enabled alongside either injection mode.
@@ -240,16 +242,14 @@ It does not change the delivery mechanism; it changes **which memory files** are
 | Enabled | `message-append` | Sends tape-selected memory once as a hidden custom message on the first agent turn |
 | Enabled | `system-prompt` | Rebuilds tape-selected memory and appends it to the system prompt on every agent turn |
 
-With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the injected list can also include recently active project file paths inferred from tool usage.
+With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the injected list can also include recently active project file paths inferred from tool usage. Stale paths from old tape history are ignored when the file no longer exists.
 
 Tape also:
 - Tracks all operations in an immutable tape (JSONL format): messages, tool calls, memory operations (by default)
 - **Anchor-based context**: Selects relevant memory files and recently active project files based on recent usage and configured strategy
-- Creates checkpoints with `tape_handoff` to mark phase transitions
-- Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale auto-anchor duplicates
-- **Auto-anchor**: Automatically creates anchors when context grows too large
-  - `anchor.mode: "threshold"` (default): Creates anchor when entries exceed `anchor.threshold` (default: 15)
-  - `anchor.mode: "hand"`: Manual only, use `tape_handoff` tool
+- Creates `session/*` lifecycle anchors automatically and `handoff` anchors via `tape_handoff`
+- Can inject a hidden keyword-triggered handoff instruction before the agent starts when configured keywords match the user's message
+- Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale labels
 - **Pros**: Better context selection with checkpoint management, recent project file awareness, and handoff-aware prioritization
 - **Cons**: Slightly more complex configuration
 
@@ -262,6 +262,9 @@ Tape also:
       "enabled": true,
       "context": {
         // "smart": ranks memory files plus recent project file activity from session history (default)
+        //          repeated accesses get diminishing returns, edit/write outrank plain reads,
+        //          recent accesses get a recency bonus, missing/stale paths are ignored,
+        //          and handoff boosts only apply near the latest anchors
         // "recent-only": most recently modified memory files only
         "strategy": "smart",
 
@@ -269,7 +272,9 @@ Tape also:
         "fileLimit": 10,
 
         // Smart-mode pi session history scan range: [startHours, maxHours]
-        // Scans recent tape session history, starting with the smaller window and expanding if samples are too small
+        // Scans history incrementally by 24-hour steps, starting from startHours.
+        // Stops and uses the result once the sample reaches MIN_SMART_ACCESS_SAMPLES (5).
+        // Otherwise keeps expanding until maxHours is reached.
         "memoryScan": [72, 168],
 
         // Files to always include in context (optional, defaults to empty)
@@ -279,15 +284,16 @@ Tape also:
         ]
       },
       "anchor": {
-        // Auto-anchor configuration (default: { mode: "threshold", threshold: 25 })
-        // - mode: "hand" - Manual only, create anchors via tape_handoff tool
-        // - mode: "threshold" - Create anchor when entries exceed threshold
-        // - threshold: Number of entries since last anchor before auto-creating
-        // - labelPrefix: Prefix mirrored into pi /tree labels for anchor nodes
-        "mode": "threshold",
-        "threshold": 25,
-        "labelPrefix": "⚓ "
-     },
+        // Prefix mirrored into pi /tree labels for anchor nodes
+        "labelPrefix": "⚓ ",
+
+        "keywords": {
+          // Match against user prompts with length in [10, 300]
+          // When matched, inject a hidden instruction telling the model to call tape_handoff, then create an anchor
+          "global": ["refactor", "migration"],
+          "project": ["tape", "Emacs"]
+        }
+      },
 
       // Custom tape path (optional)
       // If not set, default is {localPath}/TAPE: ~/.pi/memory-md/TAPE
@@ -317,8 +323,8 @@ Anchors are checkpoints that mark important transitions in your conversation. Th
 Example workflow:
 ```
 1. Create anchor: tape_handoff({name: "task/begin", summary: "Working on feature X"})
-2. Work with memory files (reads/writes recorded to tape)
-3. Create anchor: tape_handoff({name: "task/complete", state: {files_modified: [...]}})
+2. Work with memory files and project files (reads/edits/writes recorded to tape)
+3. Create anchor: tape_handoff({name: "task/complete", meta: {summary: "Feature X complete"}})
 4. Check status: tape_info() or tape_list({limit: 10})
 ```
 more details: https://tape.systems/
@@ -327,11 +333,11 @@ more details: https://tape.systems/
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `tape_handoff` | `{name, summary?, state?}` | Create an anchor checkpoint in the tape |
+| `tape_handoff` | `{name, summary?, meta?}` | Create a handoff anchor checkpoint in the tape |
 | `tape_list` | `{limit?: number}` | List all anchor checkpoints |
 | `tape_delete` | `{id}` | Delete an anchor checkpoint by id |
 | `tape_info` | `{}` | Get tape statistics and information |
-| `tape_search` | `{query?, kinds?, limit?, sinceAnchor?}` | Search tape entries by text or kind |
+| `tape_search` | `{query?, kinds?, limit?, sinceAnchor?, anchorName?, anchorKind?, anchorSummary?, anchorPurpose?, anchorKeywords?}` | Search tape entries by text or kind, with structured anchor-field filters |
 | `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, query?, kinds?, limit?}` | Read tape entries as formatted messages |
 | `tape_reset` | `{archive?: boolean}` | Reset the tape with a new session lifecycle anchor |
 

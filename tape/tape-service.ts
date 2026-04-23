@@ -1,5 +1,6 @@
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
-import { AnchorStore, type TapeAnchor } from "./tape-anchor.js";
+import { nowIso, toTimestamp } from "../utils.js";
+import { AnchorStore, type TapeAnchor, type TapeAnchorKind, type TapeAnchorMeta } from "./tape-anchor.js";
 import {
   getEntriesAfterTimestamp,
   getSessionFilePath,
@@ -20,6 +21,8 @@ type TapeSessionManager = {
   labelsById?: Map<string, string>;
   labelTimestampsById?: Map<string, string>;
 };
+
+type TapeLabelSetter = (entryId: string, label: string | undefined) => void;
 
 function hasTextContent(content: unknown): boolean {
   if (typeof content === "string") return content.trim().length > 0;
@@ -79,6 +82,7 @@ export class TapeService {
   private readonly cwd: string;
   private sessionManager: TapeSessionManager | null = null;
   private anchorLabelPrefix = DEFAULT_ANCHOR_LABEL_PREFIX;
+  private labelWriter: TapeLabelSetter | null = null;
 
   constructor(tapeBasePath: string, projectName: string, sessionId: string, cwd: string) {
     this.sessionId = sessionId;
@@ -90,7 +94,7 @@ export class TapeService {
     return new TapeService(tapeBasePath, projectName, sessionId, cwd);
   }
 
-  configureSessionTree(sm: TapeSessionManager, prefix?: string): void {
+  configureSessionTree(sm: TapeSessionManager, prefix?: string, labelWriter?: TapeLabelSetter): void {
     const nextPrefix = prefix && prefix.trim().length > 0 ? prefix : DEFAULT_ANCHOR_LABEL_PREFIX;
 
     if (this.sessionManager && this.anchorLabelPrefix !== nextPrefix) {
@@ -99,6 +103,7 @@ export class TapeService {
 
     this.sessionManager = sm;
     this.anchorLabelPrefix = nextPrefix;
+    this.labelWriter = labelWriter ?? null;
     this.syncSessionTreeLabels();
   }
 
@@ -106,22 +111,25 @@ export class TapeService {
     const hasExistingEntries = (this.sessionManager?.getEntries().length ?? 0) > 0;
     const anchorName =
       reason === "new" || (reason === "startup" && !hasExistingEntries) ? "session/new" : "session/resume";
-    return this.createAnchor(anchorName);
+    return this.createAnchor(anchorName, "session");
   }
 
-  createAnchor(name: string, state?: Record<string, unknown>): TapeAnchor {
+  createAnchor(name: string, kind: TapeAnchorKind, meta?: TapeAnchorMeta, syncTreeLabel = true): TapeAnchor {
     const sessionEntryId = this.sessionManager?.getLeafId() ?? crypto.randomUUID();
     const anchor: TapeAnchor = {
       id: crypto.randomUUID(),
+      timestamp: nowIso(),
       name,
+      kind,
+      meta: meta ?? undefined,
       sessionId: this.sessionId,
       sessionEntryId,
-      timestamp: new Date().toISOString(),
-      state: state ?? undefined,
     };
 
     this.anchorStore.append(anchor);
-    this.syncTreeLabel(sessionEntryId);
+    if (syncTreeLabel) {
+      this.syncTreeLabel(sessionEntryId);
+    }
     return anchor;
   }
 
@@ -148,7 +156,7 @@ export class TapeService {
       entries.push(...parsed.entries);
     }
 
-    return entries.sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+    return entries.sort((left, right) => toTimestamp(left.timestamp) - toTimestamp(right.timestamp));
   }
 
   query(options: TapeQueryOptions & { since?: string }): SessionEntry[] {
@@ -197,8 +205,8 @@ export class TapeService {
     }
 
     if (endTime) {
-      const endTimestamp = new Date(endTime).getTime();
-      entries = entries.filter((entry) => new Date(entry.timestamp).getTime() <= endTimestamp);
+      const endTimestamp = toTimestamp(endTime);
+      entries = entries.filter((entry) => toTimestamp(entry.timestamp) <= endTimestamp);
     }
 
     if (since) {
@@ -239,12 +247,16 @@ export class TapeService {
   }
 
   private setTreeLabel(entryId: string, label: string | undefined, timestamp?: string): void {
+    if (this.labelWriter) {
+      this.labelWriter(entryId, label);
+    }
+
     const maps = this.getLabelMaps();
     if (!maps) return;
 
     if (label) {
       maps.labelsById.set(entryId, label);
-      maps.labelTimestampsById.set(entryId, timestamp ?? new Date().toISOString());
+      maps.labelTimestampsById.set(entryId, timestamp ?? nowIso());
       return;
     }
 
@@ -329,6 +341,12 @@ export class TapeService {
 
     this.syncTreeLabel(removedAnchor.sessionEntryId);
     return removedAnchor;
+  }
+
+  syncAnchorTreeLabel(anchorId: string): void {
+    const anchor = this.anchorStore.findById(anchorId);
+    if (!anchor || anchor.sessionId !== this.sessionId) return;
+    this.syncTreeLabel(anchor.sessionEntryId);
   }
 
   findAnchorByName(name: string, anchorScope: "current-session" | "project" = "current-session"): TapeAnchor | null {

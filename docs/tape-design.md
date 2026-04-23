@@ -1,9 +1,4 @@
----
-name: tape-mode
-description: This SKILL provides tape provides architecture, design philosophy, and comprehensive usage guide. Use when tape mode is enabled and the user needs tape anchors, tape search, or tape context workflows.
----
-
-# Tape Mode
+# Tape Design
 
 Tape mode is an **anchor-based conversation history management system** that uses pi session as the data source and maintains only an anchor index locally. It provides on-demand context retrieval with intelligent memory file selection.
 
@@ -17,7 +12,7 @@ Tape mode is inspired by:
 
 Tape mode records all interactions from the pi session and provides on-demand, anchor-based context retrieval. Anchors act as named checkpoints that segment the conversation history, enabling efficient selective retrieval without consuming tokens on stale context.
 
-For pi TUI compatibility, anchors are also mirrored into `/tree` as inline labels on the anchored session nodes when there is a concrete session entry to attach to. During resync, tape clears existing anchor-prefixed labels in the current session tree before rebuilding them so stale auto-anchor labels do not remain on old nodes.
+For pi TUI compatibility, anchors are also mirrored into `/tree` as inline labels on the anchored session nodes when there is a concrete session entry to attach to. During resync, tape clears existing anchor-prefixed labels in the current session tree before rebuilding them so stale anchor labels do not remain on old nodes.
 
 ### Architecture Overview
 
@@ -45,12 +40,14 @@ For pi TUI compatibility, anchors are also mirrored into `/tree` as inline label
 
 ## Core Components
 
-### 1. Session Reader (`tape/session-reader.ts`)
+### 1. Session Reader (`tape/tape-session-reader.ts`)
 
-Reads entries directly from pi session file:
+Reads entries directly from pi session files:
 
 ```typescript
-// Session file location: ~/.pi/agent/sessions/--{cwd}--/{sessionId}.jsonl
+// Session directory: ~/.pi/agent/sessions/--{cwd}--/
+// getSessionFilePath() scans JSONL files in that directory and matches the header id
+getSessionFilePaths(cwd: string): string[]
 getSessionFilePath(cwd: string, sessionId: string): string | null
 parseSessionFile(filePath: string): { header: SessionHeader; entries: SessionEntry[] } | null
 getEntriesAfterTimestamp(entries: SessionEntry[], timestamp: string): SessionEntry[]
@@ -58,26 +55,34 @@ getEntriesAfterTimestamp(entries: SessionEntry[], timestamp: string): SessionEnt
 
 **Entry Types** (from pi session):
 - `message` - User/assistant messages
-- `custom` / `custom_message` - Custom events
+- `custom` - Custom events
 - `thinking_level_change` - Thinking level changes
 - `model_change` - Model switches
 - `compaction` - Session compactions
+- plus any additional `SessionEntry` variants exposed by pi
 
 ### 2. Anchor Store (`tape/tape-anchor.ts`)
 
 Local store of anchor checkpoints:
 
 ```typescript
-// Storage: {localPath}/TAPE/{projectName}__anchors.jsonl
-// localPath comes from settings ("localPath" field), default: ~/.pi/memory-md/
+// Storage: {tapePath ?? `${localPath}/TAPE`}/{projectName}__anchors.jsonl
 interface TapeAnchor {
+  id: string;             // Stable anchor id
+  timestamp: string;      // ISO timestamp
   name: string;           // Anchor name (e.g., "session/new", "session/resume", "task/begin")
+  kind: "session" | "handoff";
+  meta?: {
+    trigger?: "direct" | "keyword";
+    keywords?: string[];
+    summary?: string;
+  };
   sessionId: string;      // Session ID
   sessionEntryId: string; // Related session entry ID
-  timestamp: string;      // ISO timestamp
-  state?: Record<string, unknown>;  // Optional state data
 }
 ```
+
+Current JSONL write order is: `id`, `timestamp`, `name`, `kind`, `meta`, `sessionId`, `sessionEntryId`.
 
 **Key Methods:**
 - `append(entry)` - Add new anchor to store
@@ -94,13 +99,14 @@ Main service combining session reading and anchor management:
 ```typescript
 class TapeService {
   // Anchor operations
-  createAnchor(name: string, state?: Record<string, unknown>): TapeAnchor
-  recordSessionStart(): TapeAnchor  // Creates session/new or session/resume based on session_start reason
-  findAnchorByName(name: string): TapeAnchor | null
-  getLastAnchor(): TapeAnchor | null
-  
+  createAnchor(name: string, kind: "session" | "handoff", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
+  recordSessionStart(reason?: "startup" | "reload" | "new" | "resume" | "fork"): TapeAnchor
+  deleteAnchor(id: string): TapeAnchor | null
+  findAnchorByName(name: string, anchorScope?: "current-session" | "project"): TapeAnchor | null
+  getLastAnchor(anchorScope?: "current-session" | "project"): TapeAnchor | null
+
   // Query operations (reads from pi session)
-  query(options: TapeQueryOptions): SessionEntry[]
+  query(options: TapeQueryOptions & { since?: string }): SessionEntry[]
   getInfo(): {
     totalEntries: number;
     anchorCount: number;
@@ -112,12 +118,14 @@ class TapeService {
 
 ### 4. Tape Selectors (`tape/tape-selector.ts`)
 
-**ConversationSelector**: Builds conversation context from session entries
+**ConversationSelector**: Helper for formatting/reducing session entries
 - Token budget filtering (default: 1000 tokens, 40 entries)
-- Formats entries as messages for context
+- Can format selected session entries into compact context text
+- Exists as an internal helper; current runtime injection is driven by `MemoryFileSelector`
 
 **MemoryFileSelector**: Intelligently selects memory and project files
 - **Smart strategy**: Scans recent project history within a configurable time window (`memoryScan`), expands up to the max window when samples are too small, and ranks files with handoff-first weighting
+- **Keyword handoff helper**: Normalizes configured keywords and builds a hidden handoff instruction when a user prompt in the `[10, 300]` character range matches a keyword
 - **Recent-only strategy**: Scans memory files and returns the most recently modified files
 
 ### 5. Tape Tools (`tape/tape-tools.ts`)
@@ -131,8 +139,8 @@ Seven tools registered with pi extension API:
 ```typescript
 tape_handoff(
   name: string,                    // Anchor name (e.g., "task/begin", "handoff")
-  summary?: string,               // Optional summary (stored in state)
-  state?: Record<string, unknown> // Optional state data
+  summary?: string,                // Optional summary
+  meta?: Record<string, unknown>   // Optional metadata (for example trigger or keywords)
 )
 ```
 
@@ -147,10 +155,11 @@ tape_handoff(
 // Phase transition
 tape_handoff(name="task/begin", summary="Starting database migration")
 
-// Save state
+// Keyword-style metadata
 tape_handoff(
-  name="migration/checkpoint",
-  state={ tablesCompleted: 5, totalTables: 10 }
+  name="handoff/keyword-migration",
+  summary="Keyword-triggered handoff: migration",
+  meta={ trigger: "keyword", keywords: ["migration"] }
 )
 ```
 
@@ -165,7 +174,7 @@ tape_list(
 )
 ```
 
-**Returns:** Anchor list with timestamps, state, and entry context
+**Returns:** Anchor list with timestamps, kind, meta, and entry context
 
 ---
 
@@ -179,7 +188,7 @@ tape_delete(
 
 **Use when:**
 - removing a mirrored `/tree` anchor label by deleting the underlying tape anchor
-- cleaning up stale manual or auto anchors
+- cleaning up stale handoff anchors
 
 ---
 
@@ -260,10 +269,10 @@ tape_search({ kinds: ["entry"], types: ["custom"], query: "memory" })
 ### tape_reset - Reset Anchor Store
 
 ```typescript
-tape_reset(archive?: boolean)  // Archive flag (not implemented)
+tape_reset(archive?: boolean)  // Archive flag is accepted but not implemented
 ```
 
-**Warning:** Clears anchor store and creates a fresh session lifecycle anchor.
+**Behavior:** Clears the anchor store, then immediately creates a fresh session lifecycle anchor via `recordSessionStart()`.
 
 ---
 
@@ -290,8 +299,9 @@ session_start event
 └──────────────────────────────────────┘
        ↓
 ┌──────────────────────────────────────┐
-│ tool_result listener stays active    │
-│ - Auto-anchor on threshold           │
+│ Anchor model stays active            │
+│ - session/* lifecycle anchors        │
+│ - handoff anchors via tape_handoff   │
 └──────────────────────────────────────┘
 ```
 
@@ -302,30 +312,18 @@ before_agent_start event
 │ Build injection payload for this turn        │
 │ - Select memory files (smart/recent)         │
 │ - Build memory index + tape hint             │
+│ - Optionally add hidden keyword handoff      │
+│   instruction                                │
 │ - Deliver via system-prompt or               │
 │   message-append                             │
 └──────────────────────────────────────────────┘
 ```
 
 **Important:** `before_agent_start` runs per agent turn, not just once at session startup.
-- `message-append`: injects once on the first agent turn
-- `system-prompt`: rebuilds and appends on every agent turn
+- `message-append`: tape-selected memory is injected once on the first agent turn as a hidden custom message (`pi-memory-md-tape`)
+- `system-prompt`: tape-selected memory is rebuilt and appended on every agent turn
+- Keyword-triggered handoff instructions can still be injected on later turns as a separate hidden custom message (`pi-memory-md-tape-keyword`)
 - In pi, appending means returning `systemPrompt: event.systemPrompt + "..."`; returning a bare string would replace the prompt for that turn
-
-## Auto-Anchor Mechanism
-
-When `settings.tape.anchor.mode === "threshold"`:
-
-```typescript
-pi.on("tool_result", () => {
-  const info = tapeService.getInfo();
-  if (info.entriesSinceLastAnchor >= threshold) {
-    tapeService.createAnchor(`auto/threshold-${timestamp}`);
-  }
-});
-```
-
-**Default threshold:** 25 entries (configurable in settings)
 
 ## Memory Context Injection
 
@@ -344,6 +342,8 @@ The injected content is a memory index/summary plus the tape hint.
 // Injection adds:
 - Memory file list with descriptions/tags
 - Recently active project file paths when smart mode detects read/edit/write activity
+- Smart-mode filtering that skips stale tape paths whose files no longer exist
+- Hidden keyword-triggered handoff instruction when configured keywords match
 - Tape hint with tool usage instructions
 ```
 
@@ -351,8 +351,10 @@ The injected content is a memory index/summary plus the tape hint.
 
 | Injection mode | Tape behavior |
 |----------------|---------------|
-| `message-append` | Injects tape-selected memory once as a hidden custom message on the first agent turn |
+| `message-append` | Injects tape-selected memory once as a hidden custom message on the first agent turn (`pi-memory-md-tape`) |
 | `system-prompt` | Rebuilds tape-selected memory and appends it to the current system prompt on every agent turn |
+
+Keyword-triggered handoff instructions are independent from the main memory payload and may be delivered later as `pi-memory-md-tape-keyword` when a configured keyword matches a user prompt.
 
 This means tape affects **selection**, while the injection mode controls **delivery frequency and location**.
 
@@ -380,9 +382,11 @@ Your conversation history is recorded in tape with anchors (checkpoints).
         "alwaysInclude": []
       },
       "anchor": {
-        "mode": "threshold",
-        "threshold": 25,
-        "labelPrefix": "⚓ "
+        "labelPrefix": "⚓ ",
+        "keywords": {
+          "global": [],
+          "project": []
+        }
       }
     }
   }
@@ -392,12 +396,40 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 ### Context Strategy
 
 **Smart** (default):
-- Scans recent project history for `memory_read` / `memory_write` and core file-tool usage: `read` / `edit` / `write`
-- Starts from `memoryScan[0]` hours and expands up to `memoryScan[1]` hours if the sample is too small
-- Resolves `read` / `edit` / `write` paths to full project file paths
-- Gives the highest boost to accesses after recent manual handoff-style anchors
-- Gives higher base weight to `read` / `edit` / `write` than to `memory_read` / `memory_write`
-- Prioritizes by weighted access score, then frequency, then recency
+- Counts only assistant-side tool calls recorded in tape history
+- Ignores stale tape paths when the referenced file no longer exists on disk
+- Tracks weighted file activity:
+  - `memory_read` => base score `10`
+  - `memory_write` => base score `16`
+  - `read` => base score `20`
+  - `edit` => base score `28`
+  - `write` => base score `30`
+- Repeated accesses use diminishing returns per file:
+  - 1st access: `1.0x`
+  - 2nd access: `0.6x`
+  - 3rd access: `0.35x`
+  - 4th+ access: `0.15x`
+- **Boost rules** (two independent boosts, both applied if applicable):
+  - Latest handoff anchor (any trigger): up to `+30`
+  - Latest keyword-triggered handoff anchor: up to `+40`
+- Anchor boosts are only eligible within the first `15` tape entries after the latest matching anchor
+- Eligible anchor boosts also decay by anchor age:
+  - within 6 hours: `100%`
+  - within 24 hours: `60%`
+  - within 72 hours: `30%`
+  - after 72 hours: `0%`
+- Recency bonus is applied from the last access time:
+  - within 6 hours: `+12`
+  - within 24 hours: `+8`
+  - within 72 hours: `+4`
+- Repeated single-file activity also gets a small repeat penalty when total accesses greatly exceed distinct tool kinds
+- Initial scan window is `memoryScan[0]` hours
+- If total assistant tool-call accesses in that window are fewer than `MIN_SMART_ACCESS_SAMPLES` (hardcoded `5`), expand to `memoryScan[1]` and rescan
+- Final ordering:
+  1. final score (`weighted score + recency bonus - repeat penalty`)
+  2. raw accumulated score
+  3. last access time
+  3. last access time
 - Falls back to directory scan if no history
 
 **Recent-only**:
@@ -407,13 +439,12 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 - Does not include project file paths from tape history
 - Faster but less context-aware
 
-### Anchor Mode
+### Anchor Kinds
 
-| Mode | Behavior |
+| Kind | Behavior |
 |------|----------|
-| `threshold` | Auto-creates anchor after N entries |
-| `hand` | Only manual `tape_handoff` |
-| `manual` | Same as `hand` |
+| `session` | Lifecycle anchors created by tape (`session/new`, `session/resume`) |
+| `handoff` | Phase-transition anchors created through `tape_handoff` |
 
 `settings.tape.anchor.labelPrefix` customizes how mirrored anchor labels appear in pi `/tree` (default: `⚓ `).
 
@@ -430,7 +461,7 @@ tape_handoff(name="task/auth-api", summary="Implement authentication API")
 // Save checkpoint
 tape_handoff(
   name="auth/api-endpoint",
-  state={ endpoint: "/api/auth/login", completed: true }
+  summary="Auth API endpoint checkpoint"
 )
 
 // Later: retrieve context
@@ -441,7 +472,7 @@ tape_read({ afterAnchor: "task/auth-api" })
 
 ```typescript
 // Checkpoint before changes
-tape_handoff(name="debug/before-fix", state={ bug: "timeout error" })
+tape_handoff(name="debug/before-fix", summary="Investigating timeout error")
 
 // ... attempt fix ...
 
@@ -456,7 +487,7 @@ tape_read({ betweenAnchors: { start: "debug/before-fix", end: "debug/after-fix" 
 
 ```typescript
 // Save current state
-tape_handoff(name="context/save", state={ currentTask: "migration" })
+tape_handoff(name="context/save", summary="Saving migration context")
 
 // Switch task
 tape_handoff(name="task/urgent-fix", summary="Hotfix for production")
@@ -486,11 +517,12 @@ tape_handoff(name="task/api/phase2")
 tape_handoff(name="checkpoint")
 ```
 
-✅ **Store relevant state in anchors**
+✅ **Store relevant metadata in anchors when it helps retrieval**
 ```typescript
 tape_handoff(
   name="migration/checkpoint",
-  state={ table: "users", rowsProcessed: 1500, totalRows: 5000 }
+  summary="Users table migration checkpoint",
+  meta={ trigger: "direct", keywords: ["migration", "users"] }
 )
 ```
 
@@ -532,12 +564,13 @@ tape_read({})
 2. Anchor name exists: `tape_list()`
 3. Try without filters: `tape_read({ limit: 10 })`
 
-### Issue: Auto-anchor not working
+### Issue: Keyword-triggered handoff not appearing
 
 **Check:**
-1. `settings.tape.anchor.mode === "threshold"`
-2. Threshold value (default: 25)
-3. `settings.tape.enabled === true`
+1. `settings.tape.enabled === true`
+2. `settings.tape.anchor.keywords.global` or `project` contains the expected keyword
+3. The user prompt length is between 10 and 300 characters
+4. The keyword is actually present in the submitted user message
 
 ### Issue: Memory files not injected
 
@@ -546,19 +579,20 @@ tape_read({})
 2. Memory repository initialized: `memory_check`
 3. `core/` directory exists
 4. Delivery mode behavior matches expectations:
-   - `message-append` injects once on the first agent turn
-   - `system-prompt` appends on every agent turn
+   - `message-append` sends the main memory payload once on the first agent turn
+   - `system-prompt` appends the main memory payload on every agent turn
+   - keyword handoff instructions may still appear later as a separate hidden custom message
 
 ## File Structure
 
 ```
 {localPath}/                    # From settings ("localPath"), default: ~/.pi/memory-md/
-└── TAPE/
+└── TAPE/                       # Or custom settings.tape.tapePath
     └── {projectName}__anchors.jsonl
 
 ~/.pi/agent/sessions/           # pi session storage (read-only)
 └── --{cwd-path}--/
-    └── {sessionId}.jsonl
+    └── *.jsonl                 # Session reader scans files here and matches by session header id
 ```
 
 ## Related Skills

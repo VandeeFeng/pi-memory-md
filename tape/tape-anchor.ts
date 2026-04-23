@@ -1,13 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
+import { toTimestamp } from "../utils.js";
+
+export type TapeAnchorKind = "session" | "handoff";
+
+export type TapeAnchorMeta = {
+  trigger?: "direct" | "keyword";
+  keywords?: string[];
+  summary?: string;
+  purpose?: string;
+};
 
 export interface TapeAnchor {
   id: string;
   name: string;
+  kind: TapeAnchorKind;
   sessionId: string;
   sessionEntryId: string;
   timestamp: string;
-  state?: Record<string, unknown>;
+  meta?: TapeAnchorMeta;
 }
 
 export class AnchorStore {
@@ -38,17 +49,24 @@ export class AnchorStore {
 
         try {
           const rawEntry = JSON.parse(line) as Partial<TapeAnchor>;
-          if (!rawEntry.name || !rawEntry.sessionId || !rawEntry.sessionEntryId || !rawEntry.timestamp) {
+          if (
+            !rawEntry.name ||
+            !rawEntry.kind ||
+            !rawEntry.sessionId ||
+            !rawEntry.sessionEntryId ||
+            !rawEntry.timestamp
+          ) {
             continue;
           }
 
           const entry: TapeAnchor = {
             id: rawEntry.id ?? `${rawEntry.sessionEntryId}:${rawEntry.timestamp}:${rawEntry.name}`,
             name: rawEntry.name,
+            kind: rawEntry.kind,
             sessionId: rawEntry.sessionId,
             sessionEntryId: rawEntry.sessionEntryId,
             timestamp: rawEntry.timestamp,
-            state: rawEntry.state,
+            meta: rawEntry.meta,
           };
           this.addToMemoryIndex(entry);
         } catch {
@@ -120,7 +138,7 @@ export class AnchorStore {
       }
     }
 
-    return result.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return result.sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp));
   }
 
   findBySessionEntryId(sessionEntryId: string, sessionId?: string): TapeAnchor[] {
@@ -134,7 +152,7 @@ export class AnchorStore {
       }
     }
 
-    return result.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return result.sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp));
   }
 
   getLastAnchor(sessionId?: string): TapeAnchor | null {
@@ -147,7 +165,7 @@ export class AnchorStore {
 
     for (const entries of this.index.values()) {
       for (const entry of entries) {
-        if (!last || new Date(entry.timestamp).getTime() > new Date(last.timestamp).getTime()) {
+        if (!last || toTimestamp(entry.timestamp) > toTimestamp(last.timestamp)) {
           last = entry;
         }
       }
@@ -163,7 +181,7 @@ export class AnchorStore {
       result.push(...entries);
     }
 
-    return result.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return result.sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp));
   }
 
   search(options: {
@@ -172,10 +190,15 @@ export class AnchorStore {
     limit?: number;
     since?: string;
     until?: string;
+    name?: string;
+    kind?: TapeAnchorKind;
+    summary?: string;
+    purpose?: string;
+    keywords?: string[];
   }): TapeAnchor[] {
-    const { query, sessionId, limit = 20, since, until } = options;
-    const sinceTime = since ? new Date(since).getTime() : null;
-    const untilTime = until ? new Date(until).getTime() : null;
+    const { query, sessionId, limit = 20, since, until, name, kind, summary, purpose, keywords } = options;
+    const sinceTime = since ? toTimestamp(since) : null;
+    const untilTime = until ? toTimestamp(until) : null;
     const needle = query?.toLowerCase();
 
     let anchors = this.getAllAnchors();
@@ -185,19 +208,47 @@ export class AnchorStore {
     }
 
     if (sinceTime !== null) {
-      anchors = anchors.filter((anchor) => new Date(anchor.timestamp).getTime() >= sinceTime);
+      anchors = anchors.filter((anchor) => toTimestamp(anchor.timestamp) >= sinceTime);
     }
 
     if (untilTime !== null) {
-      anchors = anchors.filter((anchor) => new Date(anchor.timestamp).getTime() <= untilTime);
+      anchors = anchors.filter((anchor) => toTimestamp(anchor.timestamp) <= untilTime);
     }
 
     if (needle) {
       anchors = anchors.filter(
         (anchor) =>
           anchor.name.toLowerCase().includes(needle) ||
-          (anchor.state && JSON.stringify(anchor.state).toLowerCase().includes(needle)),
+          anchor.kind.toLowerCase().includes(needle) ||
+          (anchor.meta && JSON.stringify(anchor.meta).toLowerCase().includes(needle)),
       );
+    }
+
+    if (name) {
+      const normalizedName = name.toLowerCase();
+      anchors = anchors.filter((anchor) => anchor.name.toLowerCase().includes(normalizedName));
+    }
+
+    if (kind) {
+      anchors = anchors.filter((anchor) => anchor.kind === kind);
+    }
+
+    if (summary) {
+      const normalizedSummary = summary.toLowerCase();
+      anchors = anchors.filter((anchor) => anchor.meta?.summary?.toLowerCase().includes(normalizedSummary));
+    }
+
+    if (purpose) {
+      const normalizedPurpose = purpose.toLowerCase();
+      anchors = anchors.filter((anchor) => anchor.meta?.purpose?.toLowerCase().includes(normalizedPurpose));
+    }
+
+    if (keywords?.length) {
+      const normalizedKeywords = keywords.map((keyword) => keyword.toLowerCase());
+      anchors = anchors.filter((anchor) => {
+        const anchorKeywords = anchor.meta?.keywords?.map((keyword) => keyword.toLowerCase()) ?? [];
+        return normalizedKeywords.every((keyword) => anchorKeywords.includes(keyword));
+      });
     }
 
     return anchors.slice(-limit);

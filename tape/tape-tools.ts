@@ -2,6 +2,8 @@ import type { ExtensionAPI, SessionEntry, Theme } from "@mariozechner/pi-coding-
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { toLocaleDateTime, toLocaleTime } from "../utils.js";
+import type { TapeAnchorMeta } from "./tape-anchor.js";
 import { extractMessageContent } from "./tape-selector.js";
 import type { TapeService } from "./tape-service.js";
 import type { RenderState } from "./tape-types.js";
@@ -40,7 +42,7 @@ function renderDefaultResult(
 }
 
 function formatEntrySummary(entry: SessionEntry): string {
-  const time = new Date(entry.timestamp).toLocaleTimeString();
+  const time = toLocaleTime(entry.timestamp);
 
   switch (entry.type) {
     case "message": {
@@ -49,7 +51,6 @@ function formatEntrySummary(entry: SessionEntry): string {
       return `[${time}] ${msg.message.role === "user" ? "User" : "Assistant"}: ${content}...`;
     }
     case "custom":
-    case "custom_message":
       return `[${time}] Custom: ${(entry as { customType?: string }).customType ?? "unknown"}`;
     case "thinking_level_change":
       return `[${time}] Thinking level: ${entry.thinkingLevel}`;
@@ -65,7 +66,6 @@ function formatEntrySummary(entry: SessionEntry): string {
 const EntryTypeUnion = Type.Union([
   Type.Literal("message"),
   Type.Literal("custom"),
-  Type.Literal("custom_message"),
   Type.Literal("thinking_level_change"),
   Type.Literal("model_change"),
   Type.Literal("compaction"),
@@ -78,33 +78,57 @@ function getTapeUnavailableResult() {
   };
 }
 
+function normalizeHandoffMeta(
+  summary: string | undefined,
+  purpose: string | undefined,
+  trigger: "direct" | "keyword" | undefined,
+  keywords: string[] | undefined,
+): TapeAnchorMeta | undefined {
+  const mergedMeta: Record<string, unknown> = {};
+
+  if (summary) mergedMeta.summary = summary;
+  if (purpose) mergedMeta.purpose = purpose;
+  mergedMeta.trigger = trigger === "keyword" ? "keyword" : "direct";
+  if (keywords?.length) mergedMeta.keywords = [...new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean))];
+
+  return Object.keys(mergedMeta).length > 0 ? (mergedMeta as TapeAnchorMeta) : undefined;
+}
+
 export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
     name: "tape_handoff",
     label: "Tape Handoff",
-    description: "Create an anchor checkpoint in the tape (marks a phase transition)",
+    description: "Create a handoff anchor in tape",
     parameters: Type.Object({
       name: Type.String({ description: "Anchor name (e.g., 'task/begin', 'task/complete', 'handoff')" }),
-      summary: Type.Optional(Type.String({ description: "Optional summary of this checkpoint" })),
-      state: Type.Optional(
-        Type.Record(Type.String(), Type.Unknown(), { description: "Optional state to associate with this anchor" }),
+      summary: Type.Optional(Type.String({ description: "Brief intent summary of current task (under 18 words)" })),
+      purpose: Type.Optional(Type.String({ description: "1-2 word label for the anchor's purpose" })),
+      trigger: Type.Optional(
+        Type.Union([Type.Literal("direct"), Type.Literal("keyword")], { description: "Anchor trigger source" }),
       ),
+      keywords: Type.Optional(Type.Array(Type.String(), { description: "Matched keywords when trigger is 'keyword'" })),
     }),
 
     async execute(_toolCallId, params) {
       const tapeService = getTapeService();
       if (!tapeService) return getTapeUnavailableResult();
 
-      const { name, summary, state } = params as { name: string; summary?: string; state?: Record<string, unknown> };
-      const anchorState = { ...(state ?? {}), ...(summary ? { summary } : {}) };
-      const anchor = tapeService.createAnchor(name, Object.keys(anchorState).length > 0 ? anchorState : undefined);
+      const { name, summary, purpose, trigger, keywords } = params as {
+        name: string;
+        summary?: string;
+        purpose?: string;
+        trigger?: "direct" | "keyword";
+        keywords?: string[];
+      };
+      const mergedMeta = normalizeHandoffMeta(summary, purpose, trigger, keywords);
+      const anchor = tapeService.createAnchor(name, "handoff", mergedMeta, false);
 
       return {
         content: [{ type: "text", text: JSON.stringify(anchor) }],
         details: {
           anchorId: anchor.id,
           name,
-          state: { ...anchorState, timestamp: anchor.timestamp },
+          meta: { ...mergedMeta, timestamp: anchor.timestamp },
         },
       };
     },
@@ -117,7 +141,7 @@ export function registerTapeHandoff(pi: ExtensionAPI, getTapeService: TapeServic
       if (state.isPartial) return renderText(theme.fg("warning", "Creating anchor..."));
 
       const text = (result.content[0] as { text?: string })?.text ?? "";
-      return renderText(`${theme.fg("success", "Anchor created successfully")}\n${theme.fg("toolOutput", text)}`);
+      return renderText(`${theme.fg("success", "Anchor created:")}\n${theme.fg("toolOutput", text)}`);
     },
   });
 }
@@ -126,7 +150,7 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
   pi.registerTool({
     name: "tape_list",
     label: "Tape List",
-    description: "List all anchor checkpoints in the tape with context",
+    description: "List tape anchors with nearby context",
     parameters: Type.Object({
       limit: Type.Optional(
         Type.Integer({ description: "Maximum number of anchors to return (default: 20)", minimum: 1, maximum: 100 }),
@@ -155,7 +179,8 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
           id: anchor.id,
           name: anchor.name,
           timestamp: anchor.timestamp,
-          state: anchor.state ?? {},
+          kind: anchor.kind,
+          meta: anchor.meta ?? {},
           beforeContext: entries.slice(0, contextLines).map(formatEntrySummary),
           afterContext: entries.slice(contextLines, contextLines * 2).map(formatEntrySummary),
         };
@@ -167,12 +192,12 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
           `Found ${anchorsWithContext.length} anchor(s):\n\n` +
           anchorsWithContext
             .map((anchor) => {
-              const stateStr = Object.keys(anchor.state).length > 0 ? `\n  State: ${JSON.stringify(anchor.state)}` : "";
+              const metaStr = Object.keys(anchor.meta).length > 0 ? `\n  Meta: ${JSON.stringify(anchor.meta)}` : "";
               const beforeStr =
                 anchor.beforeContext.length > 0 ? `\n  Before:\n    ${anchor.beforeContext.join("\n    ")}` : "";
               const afterStr =
                 anchor.afterContext.length > 0 ? `\n  After:\n    ${anchor.afterContext.join("\n    ")}` : "";
-              return `  - ${anchor.name} (${new Date(anchor.timestamp).toLocaleString()})${stateStr}${beforeStr}${afterStr}`;
+              return `  - ${anchor.name} [${anchor.kind}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}${beforeStr}${afterStr}`;
             })
             .join("\n\n");
       }
@@ -198,7 +223,8 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
             anchors?: Array<{
               name: string;
               timestamp: string;
-              state: Record<string, unknown>;
+              kind: string;
+              meta: Record<string, unknown>;
               beforeContext: string[];
               afterContext: string[];
             }>;
@@ -208,15 +234,15 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
 
       if (!state.expanded && details?.anchors && details.anchors.length > 0) {
         const first = details.anchors[0];
-        const time = new Date(first.timestamp).toLocaleTimeString();
+        const time = toLocaleTime(first.timestamp);
         let summary = theme.fg("success", `${first.name} (${time})`);
 
         if (first.beforeContext.length > 0)
           summary += `\n${theme.fg("muted", "Before:\n  ")}${first.beforeContext.map((c) => theme.fg("muted", c)).join("\n  ")}`;
         if (first.afterContext.length > 0)
           summary += `\n${theme.fg("muted", "After:\n  ")}${first.afterContext.map((c) => theme.fg("muted", c)).join("\n  ")}`;
-        if (Object.keys(first.state).length > 0)
-          summary += `\n${theme.fg("muted", `State: ${JSON.stringify(first.state)}`)}`;
+        if (Object.keys(first.meta).length > 0)
+          summary += `\n${theme.fg("muted", `Meta: ${JSON.stringify(first.meta)}`)}`;
 
         return renderWithExpandHint(summary, theme, details.count ?? 1);
       }
@@ -268,7 +294,7 @@ export function registerTapeAnchorDelete(pi: ExtensionAPI, getTapeService: TapeS
         return renderText(theme.fg("warning", text || "Not found"));
       }
 
-      return renderText(`${theme.fg("success", "Anchor deleted successfully")}\n${theme.fg("toolOutput", text)}`);
+      return renderText(`${theme.fg("success", "Anchor deleted:")}\n${theme.fg("toolOutput", text)}`);
     },
   });
 }
@@ -277,7 +303,7 @@ export function registerTapeInfo(pi: ExtensionAPI, getTapeService: TapeServiceGe
   pi.registerTool({
     name: "tape_info",
     label: "Tape Info",
-    description: "Get tape information (entries, anchors, last anchor, etc.)",
+    description: "Get tape summary and last-anchor info",
     parameters: Type.Object({}),
 
     async execute(_toolCallId) {
@@ -372,6 +398,13 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         }),
       ),
       query: Type.Optional(Type.String({ description: "Text search in entry/anchor content" })),
+      anchorName: Type.Optional(Type.String({ description: "Filter anchors by name substring" })),
+      anchorKind: Type.Optional(Type.String({ description: "Filter anchors by exact kind, e.g. 'handoff'" })),
+      anchorSummary: Type.Optional(Type.String({ description: "Filter anchors by summary substring" })),
+      anchorPurpose: Type.Optional(Type.String({ description: "Filter anchors by purpose substring" })),
+      anchorKeywords: Type.Optional(
+        Type.Array(Type.String(), { description: "Filter anchors that contain all given keywords" }),
+      ),
     }),
 
     async execute(_toolCallId, params) {
@@ -389,6 +422,11 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         scope = "project",
         anchorScope = "current-session",
         query,
+        anchorName,
+        anchorKind,
+        anchorSummary,
+        anchorPurpose,
+        anchorKeywords,
       } = params as {
         kinds?: string[];
         types?: SessionEntry["type"][];
@@ -400,6 +438,11 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         scope?: "session" | "project";
         anchorScope?: "current-session" | "project";
         query?: string;
+        anchorName?: string;
+        anchorKind?: "session" | "handoff";
+        anchorSummary?: string;
+        anchorPurpose?: string;
+        anchorKeywords?: string[];
       };
 
       const parts: string[] = [];
@@ -416,14 +459,19 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           since,
           until,
           sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+          name: anchorName,
+          kind: anchorKind,
+          summary: anchorSummary,
+          purpose: anchorPurpose,
+          keywords: anchorKeywords,
         });
 
         if (anchors.length > 0) {
           parts.push(`${anchors.length} anchors`);
           lines.push("Anchors:");
           for (const anchor of anchors.slice(-5)) {
-            const stateStr = anchor.state ? ` ${JSON.stringify(anchor.state)}` : "";
-            lines.push(`  ${anchor.name} (${new Date(anchor.timestamp).toLocaleString()})${stateStr}`);
+            const metaStr = anchor.meta ? ` ${JSON.stringify(anchor.meta)}` : "";
+            lines.push(`  ${anchor.name} [${anchor.kind}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}`);
           }
           if (anchors.length > 5) lines.push(`  ... and ${anchors.length - 5} more`);
         }
@@ -445,7 +493,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         if (entries.length > 0) {
           parts.push(`${entries.length} entries`);
           for (const entry of entries.slice(-5)) {
-            lines.push(`[${new Date(entry.timestamp).toLocaleTimeString()}] ${formatEntrySummary(entry)}`);
+            lines.push(formatEntrySummary(entry));
           }
           if (entries.length > 5) {
             lines.push(`  ... and ${entries.length - 5} more`);
@@ -457,7 +505,16 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
 
       return {
         content: [{ type: "text", text: `${header}\n\n${lines.join("\n") || "(no results)"}` }],
-        details: { kinds, query, count: lines.length },
+        details: {
+          kinds,
+          query,
+          count: lines.length,
+          anchorName,
+          anchorKind,
+          anchorSummary,
+          anchorPurpose,
+          anchorKeywords,
+        },
       };
     },
 
@@ -466,6 +523,9 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
       if (args.kinds?.length) parts.push(theme.fg("muted", args.kinds.join(",")));
       if (args.sinceAnchor) parts.push(theme.fg("accent", `@${args.sinceAnchor}`));
       if (args.query) parts.push(theme.fg("accent", `"${args.query}"`));
+      if (args.anchorSummary) parts.push(theme.fg("accent", `summary:${args.anchorSummary}`));
+      if (args.anchorPurpose) parts.push(theme.fg("accent", `purpose:${args.anchorPurpose}`));
+      if (args.anchorKeywords?.length) parts.push(theme.fg("accent", `keywords:${args.anchorKeywords.join(",")}`));
       return renderText(parts.join(" "));
     },
 
@@ -480,7 +540,7 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
   pi.registerTool({
     name: "tape_read",
     label: "Tape Read",
-    description: "Read tape entries from pi session. Supports anchor-based, date-based, or query filtering.",
+    description: "Read tape entries from pi sessio with anchor, date, or query filters.",
     parameters: Type.Object({
       afterAnchor: Type.Optional(Type.String({ description: "Read entries after this anchor" })),
       lastAnchor: Type.Optional(Type.Boolean({ description: "Read entries after last anchor" })),
@@ -491,9 +551,11 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
         Type.Object({ start: Type.String(), end: Type.String() }, { description: "Between dates (ISO)" }),
       ),
       query: Type.Optional(Type.String({ description: "Text search" })),
-      types: Type.Optional(Type.Array(EntryTypeUnion)),
-      scope: Type.Optional(QueryScopeUnion),
-      anchorScope: Type.Optional(AnchorScopeUnion),
+      types: Type.Optional(Type.Array(EntryTypeUnion, { description: "Filter entries by type" })),
+      scope: Type.Optional(Type.Unsafe({ ...QueryScopeUnion, description: "Entry scope: 'session' or 'project'" })),
+      anchorScope: Type.Optional(
+        Type.Unsafe({ ...AnchorScopeUnion, description: "Anchor resolution: 'current-session' or 'project'" }),
+      ),
       limit: Type.Optional(Type.Integer({ description: "Max entries (default: 20)", minimum: 1, maximum: 100 })),
     }),
 
@@ -558,7 +620,7 @@ export function registerTapeReset(pi: ExtensionAPI, getTapeService: TapeServiceG
   pi.registerTool({
     name: "tape_reset",
     label: "Tape Reset",
-    description: "Clear anchor store (creates a fresh session lifecycle anchor)",
+    description: "Clear tape anchors and create a fresh session anchor",
     parameters: Type.Object({
       archive: Type.Optional(Type.Boolean({ description: "Archive old tape first (not implemented)" })),
     }),

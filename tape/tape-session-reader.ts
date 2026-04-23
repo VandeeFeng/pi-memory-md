@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { SessionEntry, SessionHeader } from "@mariozechner/pi-coding-agent";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
+import { toTimestamp } from "../utils.js";
 
 function getSessionsDir(): string {
   return path.join(getAgentDir(), "sessions");
@@ -75,18 +76,8 @@ export function parseSessionFile(filePath: string): { header: SessionHeader; ent
 }
 
 export function getEntriesAfterTimestamp(entries: SessionEntry[], timestamp: string): SessionEntry[] {
-  const targetTime = new Date(timestamp).getTime();
-  return entries.filter((entry) => new Date(entry.timestamp).getTime() > targetTime);
-}
-
-export function getEntriesInRange(entries: SessionEntry[], start: string, end: string): SessionEntry[] {
-  const startTime = new Date(start).getTime();
-  const endTime = new Date(end).getTime();
-
-  return entries.filter((entry) => {
-    const time = new Date(entry.timestamp).getTime();
-    return time >= startTime && time <= endTime;
-  });
+  const targetTime = toTimestamp(timestamp);
+  return entries.filter((entry) => toTimestamp(entry.timestamp) > targetTime);
 }
 
 export function getEntriesByIds(entries: SessionEntry[], ids: string[]): SessionEntry[] {
@@ -133,14 +124,6 @@ export function formatEntryAsContext(entry: SessionEntry): SessionContextEntry |
     case "custom": {
       const customEntry = entry as { customType: string; data?: unknown };
       return { ...commonFields, customType: customEntry.customType, data: customEntry.data };
-    }
-    case "custom_message": {
-      const customMessageEntry = entry as { customType: string; content?: unknown; details?: unknown };
-      return {
-        ...commonFields,
-        customType: customMessageEntry.customType,
-        data: { content: customMessageEntry.content, details: customMessageEntry.details },
-      };
     }
     default:
       return null;

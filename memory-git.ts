@@ -1,10 +1,9 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { GitResult, MemoryMdSettings, SyncResult } from "./types.js";
+import { DEFAULT_LOCAL_PATH, formatCommitTimestamp, getGitDir } from "./utils.js";
 
-const DEFAULT_LOCAL_PATH = path.join(os.homedir(), ".pi", "memory-md");
 const TIMEOUT_MS = 10000;
 const TIMEOUT_MESSAGE =
   "Unable to connect to GitHub repository, connection timeout (10s). Please check your network connection or try again later.";
@@ -77,7 +76,7 @@ export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSetting
   const repoName = getRepoName(settings);
 
   if (fs.existsSync(localPath)) {
-    const gitDir = path.join(localPath, ".git");
+    const gitDir = getGitDir(localPath);
     if (!fs.existsSync(gitDir)) {
       return { success: false, message: `Directory exists but is not a git repo: ${localPath}` };
     }
@@ -121,7 +120,7 @@ export async function pushRepository(pi: ExtensionAPI, settings: MemoryMdSetting
     return { success: false, message: "GitHub repo URL or local path not configured" };
   }
 
-  if (!fs.existsSync(path.join(localPath, ".git"))) {
+  if (!fs.existsSync(getGitDir(localPath))) {
     return { success: false, message: `Git repository not initialized: ${localPath}` };
   }
 
@@ -139,7 +138,7 @@ export async function pushRepository(pi: ExtensionAPI, settings: MemoryMdSetting
       return { success: false, message: addResult.stdout || "Git add failed" };
     }
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const timestamp = formatCommitTimestamp();
     const commitResult = await gitExec(pi, localPath, ["commit", "-m", `Update memory - ${timestamp}`]);
     if (!commitResult.success) {
       return { success: false, message: commitResult.stdout || "Commit failed" };

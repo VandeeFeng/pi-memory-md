@@ -16,27 +16,34 @@ After more than half a month of daily use and iteration, tape-mode is much more 
 
 - **Tape `/tree` compatibility**: Mirror tape anchors into pi `/tree` labels so anchored nodes are visible directly in the tree navigator. Customize the `/tree` anchor label prefix in setting with `"labelPrefix": "⚓ "`.
 - **Anchor deletion tool**: Added `tape_delete` so tape anchors can be removed by id, with `/tree` mirrored labels resynced after deletion.
-- **Manual handoff weighting**: Smart tape selection now boosts memory accesses after recent manual handoff-style anchors instead of treating generic anchors as the recency boundary.
+- **Anchor context listing**: `tape_list` now supports `contextLines` and returns anchor kind, metadata, and nearby entry context.
+- **Manual handoff weighting**: Smart tape selection now boosts memory accesses after recent handoff anchors instead of treating generic anchors as the recency boundary.
 - **Project file activity weighting**: Smart tape selection now also tracks `read` / `edit` / `write` tool usage, resolves those paths to full project file paths, and ranks them above `memory_read` / `memory_write`, with handoff-era activity weighted highest.
+- **Keyword-triggered handoff prompts**: Tape can now match configured keywords from user prompts and inject a hidden instruction telling the model to create a `tape_handoff` anchor before continuing the task.
 
 ### Changes
 
 - **Configurable anchor path**: Now `settings.tape.tapePath` customize where anchor index files are stored. Defaults to `{localPath}/TAPE`. The dumb `anchor-index` folder was removed.
+- **Anchor model cleanup**: Anchors now use `kind` plus optional `meta` instead of the old loose `state` shape.
 - **Tape runtime consolidation**: Collapsed separate tape service / selector / runtime key fields into a single `activeTapeRuntime` object.
 - **Session lifecycle anchors**: Tape now uses `session/new` for new-session entry points and `session/resume` for continued-session entry points instead of flattening everything into `session/start`.
+- **Anchor config simplification**: Removed threshold-based auto-anchor settings; `settings.tape.anchor` now only controls display options such as `labelPrefix` and `keywords`.
+- **Tape docs relocation**: The old `skills/tape-mode/SKILL.md` guide was moved into `docs/tape-design.md`, and the package no longer registers tape mode as a skill.
 - **Git sync noise reduction**: Session-start pull and session-end push now skip redundant syncs, and successful no-op syncs no longer notify the user.
 
   This was really annoying!
 
 ### Fix
 
-- **Auto-anchor defaults restored**: Threshold-based auto anchors work when users do not explicitly set `settings.tape.anchor.mode`; the default mode is now correctly treated as `"threshold"`.
+- **Smart selector ranking refinement**: Smart tape selection now applies diminishing returns to repeated accesses, gives stronger weight to `edit` / `write` activity than plain `read`, adds a recency bonus to recently touched files, ignores stale paths whose files no longer exist, and limits handoff boosts to the first 15 entries after the latest matching anchor with time decay.
 - **Runtime state simplification**: Removed the unused repo initialization ref and reshaped `index.ts` state around the current extension behavior: tape tool registration, session-start hook coordination, initial memory injection, and active tape runtime.
 - **Tape + system-prompt alignment**: Tape mode now follows the same append semantics as normal `system-prompt` mode by appending to `event.systemPrompt` instead of replacing it.
-- **Tree label resync cleanup**: Tape `/tree` label syncing now clears all anchor-prefixed labels in the current session tree before rebuilding, preventing stale auto-anchor labels from appearing on multiple entries.
-- **Smart selector time-window logic**: Smart tape selection no longer uses the latest arbitrary anchor as a hard cutoff. It now scans recent memory access history using `context.memoryScan` with a preferred and fallback window, which avoids auto anchors collapsing the sample size.
+- **Tree label resync cleanup**: Tape `/tree` label syncing now clears all anchor-prefixed labels in the current session tree before rebuilding, preventing stale anchor labels from appearing on multiple entries.
+- **Smart selector time-window logic**: Smart tape selection no longer uses the latest arbitrary anchor as a hard cutoff. It now scans recent memory access history using `context.memoryScan` with a preferred and fallback window.
 - **Recent-only semantics restored**: `recent-only` now matches its original intent by sorting memory files by modification time and selecting the newest files first.
 - **Duplicate tape memory injection**: Tape injection now de-duplicates `alwaysInclude` and selector results before building the injected memory index.
+- **Keyword handoff fallback**: `tape_handoff` now treats malformed or unauthorized keyword-trigger metadata as a normal direct handoff anchor.
+- **Tape keyword normalization**: Tape keyword settings are normalized on load so matching stays case-insensitive and de-duplicated.
 
 ## [0.1.29] - 2026-04-21
 
