@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
     context: {
       strategy: "smart",
       fileLimit: 10,
+      memoryScan: [72, 168],
     },
     anchor: {
       mode: "threshold",
@@ -90,6 +91,16 @@ function normalizeSettings(
 
   if (loadedSettings.localPath) {
     loadedSettings.localPath = expandPath(loadedSettings.localPath);
+  }
+
+  const memoryScan = loadedSettings.tape?.context?.memoryScan;
+  if (memoryScan) {
+    const [startHours, maxHours] = memoryScan;
+    const normalizedStart = Number.isFinite(startHours) && startHours > 0 ? Math.floor(startHours) : 72;
+    const normalizedMax = Number.isFinite(maxHours) && maxHours > 0 ? Math.floor(maxHours) : 168;
+    loadedSettings.tape ??= {};
+    loadedSettings.tape.context ??= {};
+    loadedSettings.tape.context.memoryScan = [normalizedStart, Math.max(normalizedStart, normalizedMax)];
   }
 
   return loadedSettings;

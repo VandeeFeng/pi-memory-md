@@ -240,17 +240,17 @@ It does not change the delivery mechanism; it changes **which memory files** are
 | Enabled | `message-append` | Sends tape-selected memory once as a hidden custom message on the first agent turn |
 | Enabled | `system-prompt` | Rebuilds tape-selected memory and appends it to the system prompt on every agent turn |
 
-With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan.
+With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the injected list can also include recently active project file paths inferred from tool usage.
 
 Tape also:
 - Tracks all operations in an immutable tape (JSONL format): messages, tool calls, memory operations (by default)
-- **Anchor-based context**: Selects relevant memory files based on recent usage and configured strategy
+- **Anchor-based context**: Selects relevant memory files and recently active project files based on recent usage and configured strategy
 - Creates checkpoints with `tape_handoff` to mark phase transitions
 - Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale auto-anchor duplicates
 - **Auto-anchor**: Automatically creates anchors when context grows too large
   - `anchor.mode: "threshold"` (default): Creates anchor when entries exceed `anchor.threshold` (default: 15)
   - `anchor.mode: "hand"`: Manual only, use `tape_handoff` tool
-- **Pros**: Better context selection with checkpoint management
+- **Pros**: Better context selection with checkpoint management, recent project file awareness, and handoff-aware prioritization
 - **Cons**: Slightly more complex configuration
 
 ```json
@@ -261,12 +261,16 @@ Tape also:
     "tape": {
       "enabled": true,
       "context": {
-        // "smart": balances recency + frequency (default)
-        // "recent-only": only recently accessed files
+        // "smart": ranks memory files plus recent project file activity from session history (default)
+        // "recent-only": most recently modified memory files only
         "strategy": "smart",
 
         // Max files to inject into LLM context
         "fileLimit": 10,
+
+        // Smart-mode pi session history scan range: [startHours, maxHours]
+        // Scans recent tape session history, starting with the smaller window and expanding if samples are too small
+        "memoryScan": [72, 168],
 
         // Files to always include in context (optional, defaults to empty)
         "alwaysInclude": [

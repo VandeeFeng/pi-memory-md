@@ -109,30 +109,46 @@ export class ConversationSelector {
   }
 }
 
+const DEFAULT_MEMORY_SCAN: [number, number] = [72, 168];
+const MIN_SMART_ACCESS_SAMPLES = 5;
+const HANDOFF_BOOST = 30;
+const MEMORY_ACCESS_SCORE = 10;
+const PROJECT_FILE_ACCESS_SCORE = 20;
+
+type MemoryPathStats = {
+  count: number;
+  lastAccess: number;
+  score: number;
+};
+
 export class MemoryFileSelector {
   constructor(
     private tapeService: TapeService,
     private memoryDir: string,
+    private projectRoot: string,
   ) {}
 
-  selectFilesForContext(strategy: "recent-only" | "smart", limit: number): string[] {
+  selectFilesForContext(
+    strategy: "recent-only" | "smart",
+    limit: number,
+    options?: { memoryScan?: [number, number] },
+  ): string[] {
     if (strategy === "recent-only") {
       return this.scanMemoryDirectory(limit);
     }
 
-    return this.selectSmart(limit);
+    return this.selectSmart(limit, options?.memoryScan ?? DEFAULT_MEMORY_SCAN);
   }
 
-  private selectSmart(limit: number): string[] {
-    const anchor = this.tapeService.getLastAnchor("project");
+  private selectSmart(limit: number, memoryScan: [number, number]): string[] {
+    const [startHours, maxHours] = this.normalizeMemoryScan(memoryScan);
+    const startStats = this.analyzePathAccess(this.getEntriesWithinHours(startHours), startHours);
 
-    const entries = this.tapeService.query({
-      ...(anchor ? { since: anchor.timestamp } : {}),
-      scope: "project",
-      anchorScope: "project",
-    });
+    let pathStats = startStats.paths;
+    if (startStats.totalAccesses < MIN_SMART_ACCESS_SAMPLES && startHours !== maxHours) {
+      pathStats = this.analyzePathAccess(this.getEntriesWithinHours(maxHours), maxHours).paths;
+    }
 
-    const pathStats = this.analyzePathAccess(entries);
     if (pathStats.size === 0) return this.scanMemoryDirectory(limit);
 
     return this.sortPathsByStats(pathStats).slice(0, limit);
@@ -141,26 +157,48 @@ export class MemoryFileSelector {
   buildContextFromFiles(filePaths: string[]): string {
     if (filePaths.length === 0) return "";
 
-    const lines = [
-      "# Project Memory",
-      "",
-      `Memory directory: ${this.memoryDir}`,
-      "Paths below are relative to that directory.",
-      "",
-      "Available memory files (use memory_read to view full content):",
-      "",
-    ];
+    const memoryPaths = filePaths.filter((filePath) => !path.isAbsolute(filePath));
+    const projectPaths = filePaths.filter((filePath) => path.isAbsolute(filePath));
+    const lines = ["# Project Memory", "", `Memory directory: ${this.memoryDir}`];
 
-    for (const relPath of filePaths) {
-      const { description, tags } = this.extractFrontmatter(relPath);
-      lines.push(`- ${relPath}`, `  Description: ${description}`, `  Tags: ${tags}`, "");
+    if (memoryPaths.length > 0) {
+      lines.push(
+        "Paths below are relative to that directory.",
+        "",
+        "Available memory files (use memory_read to view full content):",
+        "",
+      );
+
+      for (const relPath of memoryPaths) {
+        const { description, tags } = this.extractFrontmatter(relPath);
+        lines.push(`- ${relPath}`, `  Description: ${description}`, `  Tags: ${tags}`, "");
+      }
+    }
+
+    if (projectPaths.length > 0) {
+      lines.push(
+        ...(memoryPaths.length > 0 ? ["---", ""] : ["", ""]),
+        "Recently active project files (full paths from read/edit/write tool usage):",
+        "",
+      );
+
+      for (const fullPath of projectPaths) {
+        lines.push(`- ${fullPath}`);
+      }
+
+      lines.push("");
     }
 
     return lines.join("\n");
   }
 
-  private analyzePathAccess(entries: SessionEntry[]): Map<string, { count: number; lastAccess: number }> {
-    const pathStats = new Map<string, { count: number; lastAccess: number }>();
+  private analyzePathAccess(
+    entries: SessionEntry[],
+    scanHours: number,
+  ): { paths: Map<string, MemoryPathStats>; totalAccesses: number } {
+    const pathStats = new Map<string, MemoryPathStats>();
+    const handoffTimestamp = this.getLatestManualAnchorTimestamp(scanHours);
+    let totalAccesses = 0;
 
     for (const entry of entries) {
       if (entry.type !== "message") continue;
@@ -169,40 +207,85 @@ export class MemoryFileSelector {
       if (messageEntry.message.role !== "assistant") continue;
       if (!Array.isArray(messageEntry.message.content)) continue;
 
+      const accessTime = new Date(entry.timestamp).getTime();
       for (const block of messageEntry.message.content) {
         if (block.type !== "toolCall") continue;
-        if (block.name !== "memory_read" && block.name !== "memory_write") continue;
 
         const entryPath = block.arguments.path as string | undefined;
         if (!entryPath) continue;
 
-        const stats = pathStats.get(entryPath) ?? { count: 0, lastAccess: 0 };
+        let trackedPath: string | null = null;
+        let accessScore = 0;
+
+        if (block.name === "memory_read" || block.name === "memory_write") {
+          trackedPath = entryPath;
+          accessScore = MEMORY_ACCESS_SCORE;
+        } else if (block.name === "read" || block.name === "edit" || block.name === "write") {
+          const fullPath = path.isAbsolute(entryPath) ? entryPath : path.resolve(this.projectRoot, entryPath);
+          trackedPath = fullPath.startsWith(`${this.memoryDir}${path.sep}`)
+            ? path.relative(this.memoryDir, fullPath)
+            : fullPath;
+          accessScore = PROJECT_FILE_ACCESS_SCORE;
+        }
+
+        if (!trackedPath) continue;
+
+        totalAccesses += 1;
+        const stats = pathStats.get(trackedPath) ?? { count: 0, lastAccess: 0, score: 0 };
         stats.count += 1;
-        stats.lastAccess = Math.max(stats.lastAccess, new Date(entry.timestamp).getTime());
-        pathStats.set(entryPath, stats);
+        stats.lastAccess = Math.max(stats.lastAccess, accessTime);
+        stats.score += accessScore;
+        if (handoffTimestamp !== null && accessTime >= handoffTimestamp) {
+          stats.score += HANDOFF_BOOST;
+        }
+        pathStats.set(trackedPath, stats);
       }
     }
 
-    return pathStats;
+    return { paths: pathStats, totalAccesses };
   }
 
-  private sortPathsByStats(pathStats: Map<string, { count: number; lastAccess: number }>): string[] {
+  private sortPathsByStats(pathStats: Map<string, MemoryPathStats>): string[] {
     return Array.from(pathStats.entries())
-      .sort(([, left], [, right]) => right.count - left.count || right.lastAccess - left.lastAccess)
+      .sort(
+        ([, left], [, right]) =>
+          right.score - left.score || right.count - left.count || right.lastAccess - left.lastAccess,
+      )
       .map(([memoryPath]) => memoryPath);
+  }
+
+  private getEntriesWithinHours(hours: number): SessionEntry[] {
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    return this.tapeService.query({ since, scope: "project", anchorScope: "project" });
+  }
+
+  private getLatestManualAnchorTimestamp(scanHours: number): number | null {
+    const since = new Date(Date.now() - scanHours * 60 * 60 * 1000).toISOString();
+    const anchors = this.tapeService
+      .getAnchorStore()
+      .search({ since, limit: Number.MAX_SAFE_INTEGER })
+      .filter((anchor) => !anchor.name.startsWith("auto/") && !anchor.name.startsWith("session/"));
+    const lastAnchor = anchors[anchors.length - 1];
+    return lastAnchor ? new Date(lastAnchor.timestamp).getTime() : null;
+  }
+
+  private normalizeMemoryScan(memoryScan: [number, number]): [number, number] {
+    const [startHours, maxHours] = memoryScan;
+    const normalizedStart =
+      Number.isFinite(startHours) && startHours > 0 ? Math.floor(startHours) : DEFAULT_MEMORY_SCAN[0];
+    const normalizedMax = Number.isFinite(maxHours) && maxHours > 0 ? Math.floor(maxHours) : DEFAULT_MEMORY_SCAN[1];
+    return [normalizedStart, Math.max(normalizedStart, normalizedMax)];
   }
 
   private scanMemoryDirectory(limit: number): string[] {
     const coreDir = path.join(this.memoryDir, "core");
     if (!fs.existsSync(coreDir)) return [];
 
-    const paths: string[] = [];
+    const paths: Array<{ relPath: string; modifiedAt: number }> = [];
 
     const scanDir = (dir: string, base: string): void => {
-      if (paths.length >= limit) return;
-
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (paths.length >= limit || entry.name.startsWith(".")) continue;
+        if (entry.name.startsWith(".")) continue;
 
         const fullPath = path.join(dir, entry.name);
         const relPath = path.join(base, entry.name);
@@ -210,13 +293,17 @@ export class MemoryFileSelector {
         if (entry.isDirectory()) {
           scanDir(fullPath, relPath);
         } else if (entry.isFile() && entry.name.endsWith(".md")) {
-          paths.push(relPath);
+          paths.push({ relPath, modifiedAt: fs.statSync(fullPath).mtimeMs });
         }
       }
     };
 
     scanDir(coreDir, "core");
-    return paths;
+
+    return paths
+      .sort((left, right) => right.modifiedAt - left.modifiedAt || left.relPath.localeCompare(right.relPath))
+      .slice(0, limit)
+      .map(({ relPath }) => relPath);
   }
 
   private extractFrontmatter(relPath: string): { description: string; tags: string } {

@@ -75,6 +75,8 @@ export interface TapeConfig {
     fileLimit?: number;
     /** Files to always include in context (default: []) */
     alwaysInclude?: string[];
+    /** Smart-mode scan range as [startHours, maxHours] (default: [72, 168]) */
+    memoryScan?: [number, number];
   };
   /** Anchor auto-creation settings */
   anchor?: {

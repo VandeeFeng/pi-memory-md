@@ -16,6 +16,8 @@ After more than half a month of daily use and iteration, tape-mode is much more 
 
 - **Tape `/tree` compatibility**: Mirror tape anchors into pi `/tree` labels so anchored nodes are visible directly in the tree navigator. Customize the `/tree` anchor label prefix in setting with `"labelPrefix": "⚓ "`.
 - **Anchor deletion tool**: Added `tape_delete` so tape anchors can be removed by id, with `/tree` mirrored labels resynced after deletion.
+- **Manual handoff weighting**: Smart tape selection now boosts memory accesses after recent manual handoff-style anchors instead of treating generic anchors as the recency boundary.
+- **Project file activity weighting**: Smart tape selection now also tracks `read` / `edit` / `write` tool usage, resolves those paths to full project file paths, and ranks them above `memory_read` / `memory_write`, with handoff-era activity weighted highest.
 
 ### Changes
 
@@ -32,6 +34,9 @@ After more than half a month of daily use and iteration, tape-mode is much more 
 - **Runtime state simplification**: Removed the unused repo initialization ref and reshaped `index.ts` state around the current extension behavior: tape tool registration, session-start hook coordination, initial memory injection, and active tape runtime.
 - **Tape + system-prompt alignment**: Tape mode now follows the same append semantics as normal `system-prompt` mode by appending to `event.systemPrompt` instead of replacing it.
 - **Tree label resync cleanup**: Tape `/tree` label syncing now clears all anchor-prefixed labels in the current session tree before rebuilding, preventing stale auto-anchor labels from appearing on multiple entries.
+- **Smart selector time-window logic**: Smart tape selection no longer uses the latest arbitrary anchor as a hard cutoff. It now scans recent memory access history using `context.memoryScan` with a preferred and fallback window, which avoids auto anchors collapsing the sample size.
+- **Recent-only semantics restored**: `recent-only` now matches its original intent by sorting memory files by modification time and selecting the newest files first.
+- **Duplicate tape memory injection**: Tape injection now de-duplicates `alwaysInclude` and selector results before building the injected memory index.
 
 ## [0.1.29] - 2026-04-21
 

@@ -116,9 +116,9 @@ class TapeService {
 - Token budget filtering (default: 1000 tokens, 40 entries)
 - Formats entries as messages for context
 
-**MemoryFileSelector**: Intelligently selects memory files
-- **Smart strategy**: Analyzes path access from entries, prioritizes by frequency
-- **Recent-only strategy**: Simply scans directory
+**MemoryFileSelector**: Intelligently selects memory and project files
+- **Smart strategy**: Scans recent project history within a configurable time window (`memoryScan`), expands up to the max window when samples are too small, and ranks files with handoff-first weighting
+- **Recent-only strategy**: Scans memory files and returns the most recently modified files
 
 ### 5. Tape Tools (`tape/tape-tools.ts`)
 
@@ -337,11 +337,13 @@ The injected content is a memory index/summary plus the tape hint.
 {
   strategy: "smart",           // "smart" or "recent-only"
   fileLimit: 10,                // Max memory files
+  memoryScan: [72, 168],        // Smart scan range: [startHours, maxHours]
   alwaysInclude: [],            // Always include these files
 }
 
 // Injection adds:
 - Memory file list with descriptions/tags
+- Recently active project file paths when smart mode detects read/edit/write activity
 - Tape hint with tool usage instructions
 ```
 
@@ -374,6 +376,7 @@ Your conversation history is recorded in tape with anchors (checkpoints).
       "context": {
         "strategy": "smart",
         "fileLimit": 10,
+        "memoryScan": [72, 168],
         "alwaysInclude": []
       },
       "anchor": {
@@ -389,14 +392,19 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 ### Context Strategy
 
 **Smart** (default):
-- Analyzes session entries for memory tool usage
-- Tracks file paths accessed
-- Prioritizes by access frequency + recency
+- Scans recent project history for `memory_read` / `memory_write` and core file-tool usage: `read` / `edit` / `write`
+- Starts from `memoryScan[0]` hours and expands up to `memoryScan[1]` hours if the sample is too small
+- Resolves `read` / `edit` / `write` paths to full project file paths
+- Gives the highest boost to accesses after recent manual handoff-style anchors
+- Gives higher base weight to `read` / `edit` / `write` than to `memory_read` / `memory_write`
+- Prioritizes by weighted access score, then frequency, then recency
 - Falls back to directory scan if no history
 
 **Recent-only**:
 - Scans memory directory directly
-- Returns N most recent files
+- Sorts files by modification time (newest first)
+- Returns the top N memory files
+- Does not include project file paths from tape history
 - Faster but less context-aware
 
 ### Anchor Mode

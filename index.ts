@@ -67,7 +67,7 @@ function ensureTapeRuntime(
 
     state.activeTapeRuntime = {
       service,
-      selector: new MemoryFileSelector(service, memoryDir),
+      selector: new MemoryFileSelector(service, memoryDir, ctx.cwd),
       cacheKey: runtimeKey,
     };
 
@@ -190,11 +190,17 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
     const tapeEnabled = settings.tape?.enabled;
 
     if (tapeEnabled && state.activeTapeRuntime && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
-      const { fileLimit = 10, alwaysInclude = [], strategy = "smart" } = settings.tape?.context ?? {};
-      const memoryFiles = state.activeTapeRuntime.selector.selectFilesForContext(strategy, fileLimit);
-      const memoryContext = state.activeTapeRuntime.selector.buildContextFromFiles([...alwaysInclude, ...memoryFiles]);
+      const {
+        fileLimit = 10,
+        alwaysInclude = [],
+        strategy = "smart",
+        memoryScan = [72, 168],
+      } = settings.tape?.context ?? {};
+      const memoryFiles = state.activeTapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
+      const selectedFiles = [...new Set([...alwaysInclude, ...memoryFiles])];
+      const memoryContext = state.activeTapeRuntime.selector.buildContextFromFiles(selectedFiles);
       const tapeHint = `\n\n---\n💡 Tape Context Management:\nYour conversation history is recorded in tape with anchors (checkpoints).\n- Use tape_info to check current tape status\n- Use tape_search to query historical entries by kind or content\n- Use tape_list to list all anchor checkpoints\n- Use tape_handoff to create a new anchor/checkpoint when starting a new task\n`;
-      const fileCount = memoryFiles.length + alwaysInclude.length;
+      const fileCount = selectedFiles.length;
 
       if (mode === "system-prompt") {
         ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (system-prompt)`, "info");
