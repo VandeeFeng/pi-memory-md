@@ -336,7 +336,8 @@ The injected content is a memory index/summary plus the tape hint.
   strategy: "smart",           // "smart" or "recent-only"
   fileLimit: 10,                // Max memory files
   memoryScan: [72, 168],        // Smart scan range: [startHours, maxHours]
-  alwaysInclude: [],            // Always include these files
+  whitelist: [],                // Always include these files or directories
+  blacklist: [],                // Always exclude these files or directories; other paths still use rg/default ignore filtering
 }
 
 // Injection adds:
@@ -383,7 +384,8 @@ Your conversation history is recorded in tape with anchors (checkpoints).
         "strategy": "smart",
         "fileLimit": 10,
         "memoryScan": [72, 168],
-        "alwaysInclude": []
+        "whitelist": [],
+        "blacklist": []
       },
       "anchor": {
         "labelPrefix": "⚓ ",

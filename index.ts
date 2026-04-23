@@ -67,7 +67,10 @@ function ensureTapeRuntime(
 
     state.activeTapeRuntime = {
       service,
-      selector: new MemoryFileSelector(service, memoryDir, ctx.cwd),
+      selector: new MemoryFileSelector(service, memoryDir, ctx.cwd, {
+        whitelist: settings.tape?.context?.whitelist,
+        blacklist: settings.tape?.context?.blacklist,
+      }),
       cacheKey: runtimeKey,
     };
 
@@ -206,15 +209,13 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
     }
 
     if (tapeEnabled && state.activeTapeRuntime && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
-      const {
-        fileLimit = 10,
-        alwaysInclude = [],
-        strategy = "smart",
-        memoryScan = [72, 168],
-      } = settings.tape?.context ?? {};
+      const { fileLimit = 10, strategy = "smart", memoryScan = [72, 168] } = settings.tape?.context ?? {};
       const memoryFiles = state.activeTapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
-      const selectedFiles = [...new Set([...alwaysInclude, ...memoryFiles])];
-      const highlightedFiles = [...new Set(memoryFiles)].slice(0, 3);
+      const selectedFiles = state.activeTapeRuntime.selector.finalizeContextFiles(memoryFiles);
+      const highlightedFiles = [...new Set(memoryFiles.filter((filePath) => selectedFiles.includes(filePath)))].slice(
+        0,
+        3,
+      );
       const memoryContext = state.activeTapeRuntime.selector.buildContextFromFiles(selectedFiles, {
         highlightedFiles,
       });

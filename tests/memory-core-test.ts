@@ -31,6 +31,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
         enabled: true,
         context: {
           memoryScan: [3.8, 1.2],
+          whitelist: [" core/user/identity.md ", "core/user/identity.md"],
         },
         anchor: {
           mode: "manual",
@@ -53,6 +54,8 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
         context: {
           fileLimit: 3,
           memoryScan: [10.9, 5.1],
+          alwaysInclude: [" docs/tape-design.md "],
+          blacklist: [" node_modules ", "node_modules"],
         },
         anchor: {
           mode: "invalid",
@@ -80,6 +83,8 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
     assert.equal(settings.tape?.enabled, true);
     assert.equal(settings.tape?.context?.fileLimit, 3);
     assert.deepEqual(settings.tape?.context?.memoryScan, [10, 10]);
+    assert.deepEqual(settings.tape?.context?.whitelist, ["docs/tape-design.md", "core/user/identity.md"]);
+    assert.deepEqual(settings.tape?.context?.blacklist, ["node_modules"]);
     assert.equal(settings.tape?.anchor?.mode, "auto");
     assert.deepEqual(settings.tape?.anchor?.keywords, {
       global: ["foo"],

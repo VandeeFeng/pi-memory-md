@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changes
+
+- **Tape context include/exclude overhaul**: In tape config, `"alwaysInclude": [...]` is replaced by `"whitelist": [...]`, and you can now also add `"blacklist": [...]`. Smart project-file injection prefers `rg --files` ignore behavior when available, falls back to a built-in default ignore list for common noise, keeps `"blacklist"` as a hard exclude, and treats `"whitelist"` as a force-include override.
+- **Deprecated legacy tape include setting**: If your config still uses `"alwaysInclude": [...]`, it will keep working for now, but please move it to `"whitelist": [...]`.
+
 ## [0.1.30] - 2026-04-23
 
 I'am sorry for so many default settings changes like the tapePath in tape-mode these days. But all these default settings remain customizable.

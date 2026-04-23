@@ -80,10 +80,14 @@ export interface TapeConfig {
     strategy?: TapeContextStrategy;
     /** Maximum number of memory files to inject (default: 10) */
     fileLimit?: number;
-    /** Files to always include in context (default: []) */
-    alwaysInclude?: string[];
     /** Smart-mode scan range as [startHours, maxHours] (default: [72, 168]) */
     memoryScan?: [number, number];
+    /** @deprecated Use whitelist instead */
+    alwaysInclude?: string[];
+    /** Files or directories to always include in injected context */
+    whitelist?: string[];
+    /** Files or directories to always exclude from injected context */
+    blacklist?: string[];
   };
   /** Anchor behavior settings */
   anchor?: {

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { SessionEntry, SessionMessageEntry } from "@mariozechner/pi-coding-agent";
@@ -119,6 +120,38 @@ const MEMORY_ACCESS_SCORE = 10;
 const PROJECT_FILE_ACCESS_SCORE = 20;
 const MIN_KEYWORD_PROMPT_LENGTH = 10;
 const MAX_KEYWORD_PROMPT_LENGTH = 300;
+const DEFAULT_IGNORED_DIRS = new Set([
+  ".cache",
+  ".git",
+  ".hg",
+  ".idea",
+  ".next",
+  ".nuxt",
+  ".pnpm-store",
+  ".svn",
+  ".turbo",
+  ".venv",
+  ".vscode",
+  ".yarn",
+  "__pycache__",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+  "temp",
+  "tmp",
+  "venv",
+]);
+const DEFAULT_IGNORED_FILES = new Set([
+  ".DS_Store",
+  "bun.lockb",
+  "composer.lock",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+]);
 
 // Keyword-triggered handoff.
 
@@ -201,6 +234,47 @@ export function buildKeywordHandoffMessage(prompt: string, config?: TapeKeywordC
   return detectKeywordHandoff(prompt, config)?.message ?? null;
 }
 
+function isInsideDirectory(parentDir: string, targetPath: string): boolean {
+  const normalizedParent = path.resolve(parentDir);
+  const normalizedTarget = path.resolve(targetPath);
+  return normalizedTarget === normalizedParent || normalizedTarget.startsWith(`${normalizedParent}${path.sep}`);
+}
+
+export function matchesDefaultIgnoredPath(filePath: string, projectRoot?: string): boolean {
+  const normalizedPath = path.resolve(filePath);
+  const relativePath =
+    projectRoot && isInsideDirectory(projectRoot, normalizedPath)
+      ? path.relative(projectRoot, normalizedPath)
+      : normalizedPath;
+  const segments = relativePath.split(path.sep).filter(Boolean);
+  const baseName = path.basename(normalizedPath);
+
+  if (DEFAULT_IGNORED_FILES.has(baseName)) return true;
+  if (baseName.startsWith(".")) return true;
+
+  return segments.some((segment) => DEFAULT_IGNORED_DIRS.has(segment) || segment.startsWith("."));
+}
+
+function getRipgrepVisibleProjectPaths(projectRoot: string): Set<string> | null {
+  const result = spawnSync("rg", ["--files"], {
+    cwd: projectRoot,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+
+  if (result.error || (result.status !== 0 && result.status !== 1)) {
+    return null;
+  }
+
+  return new Set(
+    result.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((filePath) => path.resolve(projectRoot, filePath)),
+  );
+}
+
 // Memory file selection.
 
 type MemoryPathStats = {
@@ -230,11 +304,18 @@ function createEmptyMemoryPathStats(): MemoryPathStats {
 }
 
 export class MemoryFileSelector {
+  private readonly whitelist: string[];
+  private readonly blacklist: string[];
+
   constructor(
     private tapeService: TapeService,
     private memoryDir: string,
     private projectRoot: string,
-  ) {}
+    options?: { whitelist?: string[]; blacklist?: string[] },
+  ) {
+    this.whitelist = [...new Set(options?.whitelist ?? [])];
+    this.blacklist = [...new Set(options?.blacklist ?? [])];
+  }
 
   selectFilesForContext(
     strategy: "recent-only" | "smart",
@@ -246,6 +327,16 @@ export class MemoryFileSelector {
     }
 
     return this.selectSmart(limit, options?.memoryScan ?? DEFAULT_MEMORY_SCAN);
+  }
+
+  finalizeContextFiles(filePaths: string[]): string[] {
+    const selectedPaths = this.filterInjectedPaths(filePaths);
+    const selectedPathSet = new Set(selectedPaths.map((filePath) => path.resolve(this.toAbsolutePath(filePath))));
+    const whitelistedPaths = this.resolveListedPaths(this.whitelist).filter(
+      (filePath) => !selectedPathSet.has(path.resolve(filePath)),
+    );
+
+    return [...whitelistedPaths, ...selectedPaths];
   }
 
   private selectSmart(limit: number, memoryScan: [number, number]): string[] {
@@ -266,7 +357,7 @@ export class MemoryFileSelector {
 
     if (pathStats.size === 0) return this.scanMemoryDirectory(limit);
 
-    return this.sortPathsByStats(pathStats).slice(0, limit);
+    return this.filterInjectedPaths(this.sortPathsByStats(pathStats)).slice(0, limit);
   }
 
   buildContextFromFiles(filePaths: string[], options?: { highlightedFiles?: string[] }): string {
@@ -476,8 +567,27 @@ export class MemoryFileSelector {
   }
 
   private pathExists(filePath: string): boolean {
-    const fullPath = path.isAbsolute(filePath) ? filePath : path.join(this.memoryDir, filePath);
+    const fullPath = this.toAbsolutePath(filePath);
     return fs.existsSync(fullPath);
+  }
+
+  private filterInjectedPaths(filePaths: string[]): string[] {
+    const existingPaths = [...new Set(filePaths.filter((filePath) => this.pathExists(filePath)))];
+    const projectPaths = existingPaths.filter(
+      (filePath) => path.isAbsolute(filePath) && !this.toMemoryRelativePath(filePath),
+    );
+    const ripgrepVisiblePaths = projectPaths.some((filePath) => isInsideDirectory(this.projectRoot, filePath))
+      ? getRipgrepVisibleProjectPaths(this.projectRoot)
+      : new Set<string>();
+
+    return existingPaths.filter((filePath) => {
+      if (this.matchesListedPath(filePath, this.blacklist)) return false;
+      if (this.matchesListedPath(filePath, this.whitelist)) return true;
+      if (this.toMemoryRelativePath(filePath)) return true;
+      if (matchesDefaultIgnoredPath(filePath, this.projectRoot)) return false;
+      if (!isInsideDirectory(this.projectRoot, this.toAbsolutePath(filePath))) return true;
+      return ripgrepVisiblePaths?.has(path.resolve(this.toAbsolutePath(filePath))) ?? true;
+    });
   }
 
   private getEntriesWithinHours(hours: number): SessionEntry[] {
@@ -577,8 +687,64 @@ export class MemoryFileSelector {
     }
   }
 
+  private toAbsolutePath(filePath: string): string {
+    if (path.isAbsolute(filePath)) return filePath;
+
+    const memoryPath = path.join(this.memoryDir, filePath);
+    if (fs.existsSync(memoryPath)) return memoryPath;
+
+    return path.resolve(this.projectRoot, filePath);
+  }
+
+  private resolveListedPaths(entries: string[]): string[] {
+    const resolvedPaths = new Set<string>();
+
+    const collectFiles = (targetPath: string): void => {
+      if (!fs.existsSync(targetPath)) return;
+
+      const stat = fs.statSync(targetPath);
+      if (stat.isFile()) {
+        resolvedPaths.add(targetPath);
+        return;
+      }
+
+      if (!stat.isDirectory()) return;
+
+      for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
+        collectFiles(path.join(targetPath, entry.name));
+      }
+    };
+
+    for (const entry of entries) {
+      const absoluteEntry = path.isAbsolute(entry) ? path.resolve(entry) : null;
+      const candidatePaths = absoluteEntry
+        ? [absoluteEntry]
+        : [path.resolve(this.memoryDir, entry), path.resolve(this.projectRoot, entry)];
+
+      for (const candidatePath of candidatePaths) {
+        collectFiles(candidatePath);
+      }
+    }
+
+    return [...resolvedPaths];
+  }
+
+  private matchesListedPath(filePath: string, entries: string[]): boolean {
+    const absolutePath = path.resolve(this.toAbsolutePath(filePath));
+
+    return entries.some((entry) => {
+      const candidates = path.isAbsolute(entry)
+        ? [path.resolve(entry)]
+        : [path.resolve(this.memoryDir, entry), path.resolve(this.projectRoot, entry)];
+
+      return candidates.some(
+        (candidate) => absolutePath === candidate || absolutePath.startsWith(`${candidate}${path.sep}`),
+      );
+    });
+  }
+
   private toMemoryRelativePath(filePath: string): string | null {
-    const normalizedPath = toRelativeIfInside(this.memoryDir, filePath);
+    const normalizedPath = toRelativeIfInside(this.memoryDir, this.toAbsolutePath(filePath));
     return path.isAbsolute(normalizedPath) ? null : normalizedPath;
   }
 }

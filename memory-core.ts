@@ -22,6 +22,8 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
       strategy: "smart",
       fileLimit: 10,
       memoryScan: [72, 168],
+      whitelist: [],
+      blacklist: [],
     },
     anchor: {
       labelPrefix: "⚓ ",
@@ -76,6 +78,14 @@ function readSettingsFile(filePath: string): Record<string, unknown> {
   }
 }
 
+function normalizePathList(value: string[] | undefined): string[] {
+  return [...new Set((value ?? []).map((entry) => entry.trim()).filter(Boolean))];
+}
+
+function mergePathLists(...lists: Array<string[] | undefined>): string[] {
+  return normalizePathList(lists.flatMap((list) => list ?? []));
+}
+
 function normalizeSettings(
   rawSettings: MemoryMdSettings & {
     hooks?: MemoryMdSettings["hooks"];
@@ -97,6 +107,14 @@ function normalizeSettings(
     loadedSettings.tape ??= {};
     loadedSettings.tape.context ??= {};
     loadedSettings.tape.context.memoryScan = [normalizedStart, Math.max(normalizedStart, normalizedMax)];
+  }
+
+  if (loadedSettings.tape?.context) {
+    loadedSettings.tape.context.whitelist = mergePathLists(
+      loadedSettings.tape.context.alwaysInclude,
+      loadedSettings.tape.context.whitelist,
+    );
+    loadedSettings.tape.context.blacklist = normalizePathList(loadedSettings.tape.context.blacklist);
   }
 
   if (loadedSettings.tape?.anchor) {

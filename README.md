@@ -297,10 +297,18 @@ Tape also:
         // Otherwise keeps expanding until maxHours is reached.
         "memoryScan": [72, 168], // default
 
-        // Files to always include in context (optional, defaults to empty)
-        "alwaysInclude": [
-          "core/user/identity.md",
-          "core/user/prefer.md"
+        // "alwaysInclude" is deprecated
+        // Files or directories to always include in context (optional, defaults to empty)
+        "whitelist": [
+          "core/user",
+          "docs/tape-design.md"
+        ],
+
+        // Files or directories to always exclude from context (optional, defaults to empty)
+        // Other paths still go through rg ignore rules first, then the built-in default ignore list.
+        "blacklist": [
+          "node_modules",
+          "dist"
         ]
       },
       "anchor": {

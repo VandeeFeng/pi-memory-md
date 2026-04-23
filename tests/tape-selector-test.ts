@@ -1,5 +1,6 @@
 // Covers keyword handoff detection, conversation trimming, and memory file selection/context output.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -10,6 +11,7 @@ import {
   ConversationSelector,
   detectKeywordHandoff,
   MemoryFileSelector,
+  matchesDefaultIgnoredPath,
   normalizeTapeKeywords,
 } from "../tape/tape-selector.js";
 import { createTempDir } from "./test-helpers.js";
@@ -156,6 +158,13 @@ test("MemoryFileSelector recent-only returns newest core markdown files", () => 
   assert.deepEqual(files, ["core/project/roadmap.md", "core/user/identity.md"]);
 });
 
+test("matchesDefaultIgnoredPath ignores common noise files and directories", () => {
+  assert.equal(matchesDefaultIgnoredPath("/tmp/project/node_modules/pkg/index.js", "/tmp/project"), true);
+  assert.equal(matchesDefaultIgnoredPath("/tmp/project/.git/config", "/tmp/project"), true);
+  assert.equal(matchesDefaultIgnoredPath("/tmp/project/package-lock.json", "/tmp/project"), true);
+  assert.equal(matchesDefaultIgnoredPath("/tmp/project/src/index.ts", "/tmp/project"), false);
+});
+
 test("MemoryFileSelector smart mode prioritizes frequently accessed memory files", () => {
   const tempDir = createTempDir("pi-memory-md-selector-smart");
   const memoryDir = path.join(tempDir, "memory");
@@ -182,12 +191,76 @@ test("MemoryFileSelector smart mode prioritizes frequently accessed memory files
     createMessageEntry("2026-04-23T10:40:00.000Z", "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: coldFile } },
     ]),
+    createMessageEntry("2026-04-23T10:50:00.000Z", "assistant", [
+      { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
+    ]),
   ];
   const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
 
-  const files = selector.selectFilesForContext("smart", 2, { memoryScan: [1, 1] });
+  const files = selector.selectFilesForContext("smart", 2, { memoryScan: [6, 6] });
 
   assert.deepEqual(files, [hotFile, coldFile]);
+});
+
+test("MemoryFileSelector smart mode filters common ignored project files", () => {
+  const tempDir = createTempDir("pi-memory-md-selector-ignore");
+  const memoryDir = path.join(tempDir, "memory");
+  const projectRoot = path.join(tempDir, "project");
+  const srcFile = path.join(projectRoot, "src", "index.ts");
+  const ignoredFile = path.join(projectRoot, "node_modules", "pkg", "index.js");
+
+  fs.mkdirSync(path.dirname(srcFile), { recursive: true });
+  fs.mkdirSync(path.dirname(ignoredFile), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, ".gitignore"), "node_modules/\n");
+  fs.writeFileSync(srcFile, "export const ok = true;\n");
+  fs.writeFileSync(ignoredFile, "module.exports = true;\n");
+  spawnSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+
+  const entries = [
+    createMessageEntry("2026-04-23T10:00:00.000Z", "assistant", [
+      { type: "toolCall", name: "read", arguments: { path: "src/index.ts" } },
+    ]),
+    createMessageEntry("2026-04-23T10:05:00.000Z", "assistant", [
+      { type: "toolCall", name: "read", arguments: { path: "node_modules/pkg/index.js" } },
+    ]),
+    createMessageEntry("2026-04-23T10:10:00.000Z", "assistant", [
+      { type: "toolCall", name: "edit", arguments: { path: "src/index.ts" } },
+    ]),
+    createMessageEntry("2026-04-23T10:15:00.000Z", "assistant", [
+      { type: "toolCall", name: "edit", arguments: { path: "node_modules/pkg/index.js" } },
+    ]),
+    createMessageEntry("2026-04-23T10:20:00.000Z", "assistant", [
+      { type: "toolCall", name: "write", arguments: { path: "src/index.ts" } },
+    ]),
+  ];
+
+  const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
+  const files = selector.selectFilesForContext("smart", 5, { memoryScan: [6, 6] });
+
+  assert.deepEqual(files, [srcFile]);
+});
+
+test("MemoryFileSelector finalizeContextFiles applies whitelist and blacklist", () => {
+  const tempDir = createTempDir("pi-memory-md-selector-lists");
+  const memoryDir = path.join(tempDir, "memory");
+  const projectRoot = path.join(tempDir, "project");
+  const memoryFile = path.join(memoryDir, "core", "user", "identity.md");
+  const whitelistedFile = path.join(projectRoot, "docs", "guide.md");
+  const blacklistedFile = path.join(projectRoot, "dist", "bundle.js");
+
+  writeMemoryFile(memoryFile, "# Identity", { description: "Identity", tags: ["user"] });
+  fs.mkdirSync(path.dirname(whitelistedFile), { recursive: true });
+  fs.mkdirSync(path.dirname(blacklistedFile), { recursive: true });
+  fs.writeFileSync(whitelistedFile, "# Guide\n");
+  fs.writeFileSync(blacklistedFile, "console.log('bundle');\n");
+
+  const selector = new MemoryFileSelector(createMockTapeService([]) as never, memoryDir, projectRoot, {
+    whitelist: ["docs"],
+    blacklist: ["dist"],
+  });
+  const files = selector.finalizeContextFiles([memoryFile, blacklistedFile]);
+
+  assert.deepEqual(files, [whitelistedFile, memoryFile]);
 });
 
 test("MemoryFileSelector buildContextFromFiles renders memory and project files with highlights", () => {
