@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.30] - 2026-04-23
 
 I'am sorry for so many default settings changes like the tapePath in tape-mode these days. But all these default settings remain customizable.
 
@@ -11,6 +11,8 @@ More stable chassis, longer mileage.
 There’s still a lot of logic problems in the code I need to tidy up before next step.
 
 After more than half a month of daily use and iteration, tape-mode is much more stable now.
+
+The npm version may remain unchanged for quite a while. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
 ### Features
 
@@ -45,7 +47,7 @@ After more than half a month of daily use and iteration, tape-mode is much more 
 - **Smart selector time-window logic**: Smart tape selection no longer uses the latest arbitrary anchor as a hard cutoff. It now scans recent memory access history using `context.memoryScan` with a preferred and fallback window.
 - **Recent-only semantics restored**: `recent-only` now matches its original intent by sorting memory files by modification time and selecting the newest files first.
 - **Duplicate tape memory injection**: Tape injection now de-duplicates `alwaysInclude` and selector results before building the injected memory index.
-- **Keyword handoff fallback**: `tape_handoff` now treats malformed or unauthorized keyword-trigger metadata as a normal direct handoff anchor.
+- **Keyword handoff authorization**: `tape_handoff` now only accepts `trigger: "keyword"` when the current turn actually produced a real keyword match. Unauthorized keyword-trigger metadata is downgraded to a normal direct handoff anchor, and the stored `keywords` come from the verified match instead of model-supplied arguments.
 - **Tape keyword normalization**: Tape keyword settings are normalized on load so matching stays case-insensitive and de-duplicated.
 
 ## [0.1.29] - 2026-04-21

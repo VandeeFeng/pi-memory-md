@@ -5,12 +5,14 @@ import { Type } from "@sinclair/typebox";
 import type { MemoryMdSettings } from "../types.js";
 import { toLocaleDateTime, toLocaleTime } from "../utils.js";
 import type { TapeAnchorKind, TapeAnchorMeta } from "./tape-anchor.js";
+import type { KeywordHandoffInstruction } from "./tape-selector.js";
 import { extractMessageContent } from "./tape-selector.js";
 import type { TapeService } from "./tape-service.js";
 import type { RenderState } from "./tape-types.js";
 
 export type TapeServiceGetter = () => TapeService | null;
 type TapeSettingsGetter = () => MemoryMdSettings;
+type ConsumeKeywordHandoff = () => KeywordHandoffInstruction | null;
 
 type EntryQueryParams = {
   types?: SessionEntry["type"][];
@@ -165,6 +167,11 @@ function getTapeUnavailableResult(): {
   };
 }
 
+function normalizeKeywords(keywords: string[] | undefined): string[] | undefined {
+  const normalized = [...new Set((keywords ?? []).map((keyword) => keyword.trim()).filter(Boolean))];
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function normalizeHandoffMeta(
   summary: string | undefined,
   purpose: string | undefined,
@@ -176,7 +183,9 @@ function normalizeHandoffMeta(
   if (summary) mergedMeta.summary = summary;
   if (purpose) mergedMeta.purpose = purpose;
   mergedMeta.trigger = trigger === "keyword" || trigger === "manual" ? trigger : "direct";
-  if (keywords?.length) mergedMeta.keywords = [...new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean))];
+
+  const normalizedKeywords = normalizeKeywords(keywords);
+  if (normalizedKeywords) mergedMeta.keywords = normalizedKeywords;
 
   return Object.keys(mergedMeta).length > 0 ? (mergedMeta as TapeAnchorMeta) : undefined;
 }
@@ -185,6 +194,7 @@ export function registerTapeHandoff(
   pi: ExtensionAPI,
   getTapeService: TapeServiceGetter,
   getSettings: TapeSettingsGetter,
+  consumeKeywordHandoff: ConsumeKeywordHandoff = () => null,
 ): void {
   pi.registerTool({
     name: "tape_handoff",
@@ -214,8 +224,13 @@ export function registerTapeHandoff(
         keywords?: string[];
       };
       const handoffMode = getSettings().tape?.anchor?.mode ?? "auto";
+      const keywordHandoff = trigger === "keyword" ? consumeKeywordHandoff() : null;
+      const normalizedRequestedKeywords = normalizeKeywords(keywords);
+      const effectiveTrigger = trigger === "keyword" && !keywordHandoff ? "direct" : trigger;
+      const effectiveKeywords =
+        effectiveTrigger === "keyword" ? normalizeKeywords(keywordHandoff?.matched) : normalizedRequestedKeywords;
 
-      if (handoffMode === "manual" && trigger !== "keyword" && trigger !== "manual") {
+      if (handoffMode === "manual" && effectiveTrigger !== "keyword" && effectiveTrigger !== "manual") {
         return {
           content: [
             {
@@ -227,11 +242,14 @@ export function registerTapeHandoff(
             disabled: true,
             handoffMode,
             allowedTriggers: ["keyword", "manual"],
+            requestedTrigger: trigger ?? "direct",
+            effectiveTrigger,
+            unauthorizedKeywordTrigger: trigger === "keyword",
           },
         };
       }
 
-      const mergedMeta = normalizeHandoffMeta(summary, purpose, trigger, keywords);
+      const mergedMeta = normalizeHandoffMeta(summary, purpose, effectiveTrigger, effectiveKeywords);
       const anchor = tapeService.createAnchor(name, "handoff", mergedMeta);
 
       return {
@@ -240,6 +258,9 @@ export function registerTapeHandoff(
           anchorId: anchor.id,
           name,
           meta: { ...mergedMeta, timestamp: anchor.timestamp },
+          requestedTrigger: trigger ?? "direct",
+          effectiveTrigger: effectiveTrigger ?? "direct",
+          unauthorizedKeywordTrigger: trigger === "keyword" && !keywordHandoff,
         },
       };
     },
@@ -786,8 +807,9 @@ export function registerAllTapeTools(
   pi: ExtensionAPI,
   getTapeService: TapeServiceGetter,
   getSettings: TapeSettingsGetter,
+  consumeKeywordHandoff?: ConsumeKeywordHandoff,
 ): void {
-  registerTapeHandoff(pi, getTapeService, getSettings);
+  registerTapeHandoff(pi, getTapeService, getSettings, consumeKeywordHandoff);
   registerTapeAnchors(pi, getTapeService);
   registerTapeAnchorDelete(pi, getTapeService);
   registerTapeInfo(pi, getTapeService);

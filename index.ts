@@ -25,6 +25,7 @@ type ExtensionState = {
   sessionStartHookPromise: ReturnType<typeof runHookTrigger> | null;
   initialMemoryContext: string | null;
   hasInjectedInitialContext: boolean;
+  pendingKeywordHandoff: KeywordHandoffInstruction | null;
   activeTapeRuntime: {
     service: TapeService;
     selector: MemoryFileSelector;
@@ -38,6 +39,7 @@ function createExtensionState(): ExtensionState {
     sessionStartHookPromise: null,
     initialMemoryContext: null,
     hasInjectedInitialContext: false,
+    pendingKeywordHandoff: null,
     activeTapeRuntime: null,
   };
 }
@@ -164,6 +166,11 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
         pi,
         () => state.activeTapeRuntime?.service ?? null,
         () => settings,
+        () => {
+          const keywordHandoff = state.pendingKeywordHandoff;
+          state.pendingKeywordHandoff = null;
+          return keywordHandoff;
+        },
       );
       state.tapeToolsRegistered = true;
     }
@@ -192,6 +199,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
     const mode = settings.injection || "message-append";
     const tapeEnabled = settings.tape?.enabled;
     const keywordHandoff = tapeEnabled ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
+    state.pendingKeywordHandoff = keywordHandoff;
 
     if (keywordHandoff) {
       ctx.ui.notify(`Tape keyword detected: ${keywordHandoff.primary}`, "info");

@@ -228,6 +228,26 @@ The LLM automatically:
 
 More details [tape-design](docs/tape-design.md) / [中文版](docs/tape-design.zh.md)
 
+Minimal setting:
+
+```json
+{
+  "pi-memory-md": {
+    ...
+    "tape": {
+      "enabled": true,
+       "keywords": {
+          "global": ["refactor", "migration"],
+          "project": ["tape", "Emacs"]
+      }
+    }
+  }
+}
+```
+Then use `/memory-anchor` to create an anchor manually, or let anchors be created automatically when configured keywords are triggered.
+
+If you want to jump to the conversation around an anchor and restart from there, `/tree` and the anchors in this session are all there with a customizable anchor label in pi TUI.
+
 ### Tape vs Injection Modes
 
 **Tape** is an independent feature that can be enabled alongside either injection mode.
@@ -245,14 +265,13 @@ It does not change the delivery mechanism; it changes **which memory files** are
 With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the injected list can also include recently active project file paths inferred from tool usage. Stale paths from old tape history are ignored when the file no longer exists.
 
 Tape also:
-- Reads from pi session file (JSONL): messages, tool calls, memory operations, etc.
+- Uses pi session entries as the source of truth, with anchors attached directly to points in the session
 - **Anchor-based context**: Selects relevant memory files and recently active project files based on recent usage and configured strategy
 - Creates `session/*` lifecycle anchors automatically and `handoff` anchors via `tape_handoff` or `/memory-anchor`
 - Supports `anchor.mode: "manual"` to hard-block `tape_handoff` unless the tool call uses `trigger: "keyword"` or `trigger: "manual"`
-- Can inject a hidden keyword-triggered handoff instruction before the agent starts when configured keywords match the user's message
 - Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale labels
 - **Pros**: Better context selection with checkpoint management, recent project file awareness, and handoff-aware prioritization
-- **Cons**: Slightly more complex configuration
+- **Cons**: Slightly more complex configuration and more token costs
 
 ```json
 {
@@ -267,16 +286,16 @@ Tape also:
         //          recent accesses get a recency bonus, missing/stale paths are ignored,
         //          and handoff boosts only apply near the latest anchors
         // "recent-only": most recently modified memory files only
-        "strategy": "smart",
+        "strategy": "smart", // default
 
         // Max files to inject into LLM context
-        "fileLimit": 10,
+        "fileLimit": 10, // default
 
         // Smart-mode pi session history scan range: [startHours, maxHours]
         // Scans history incrementally by 24-hour steps, starting from startHours.
         // Stops and uses the result once the sample reaches MIN_SMART_ACCESS_SAMPLES (5).
         // Otherwise keeps expanding until maxHours is reached.
-        "memoryScan": [72, 168],
+        "memoryScan": [72, 168], // default
 
         // Files to always include in context (optional, defaults to empty)
         "alwaysInclude": [
@@ -286,11 +305,12 @@ Tape also:
       },
       "anchor": {
         // "auto": LLM may create handoff anchors when it decides they are useful
-        // "manual": tape_handoff is hard-blocked unless trigger="keyword"
-        "mode": "auto",
+        // "manual": tape_handoff is hard-blocked unless trigger="keyword" or trigger="manual" (via /memory-anchor)
+        // which means keywords and /memory-anchor still work in manual mode
+        "mode": "auto", // default
 
         // Prefix mirrored into pi /tree labels for anchor nodes
-        "labelPrefix": "⚓ ",
+        "labelPrefix": "⚓ ", // default
 
         "keywords": {
           // Match against user prompts with length in [10, 300]
@@ -328,7 +348,7 @@ Each anchor has:
 - **`sessionId`**: The pi session this anchor belongs to
 - **`sessionEntryId`**: The associated session entry ID for tree mirroring
 - **`timestamp`**: ISO timestamp of when the anchor was created
-- **`meta`**: Optional metadata including `summary`, `trigger` (`direct`/`keyword`/`manual`), `keywords`, etc.
+- **`meta`**: Optional metadata including `summary`, `trigger`, `keywords`, etc. `direct` means created by the agent automatically, `keyword` means created because configured keywords matched, and `manual` means created explicitly by the user or tool call
 
 Example workflow:
 ```
@@ -343,12 +363,12 @@ more details: https://tape.systems/
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
+| `/memory-anchor` | `<prompt>` | Slash command that asks the LLM to derive and create a handoff anchor with `meta.trigger = "manual"` |
 | `tape_handoff` | `{name, summary?, meta?}` | Create a handoff anchor checkpoint in the tape |
 | `tape_list` | `{limit?: number}` | List all anchor checkpoints |
 | `tape_delete` | `{id}` | Delete an anchor checkpoint by id |
 | `tape_info` | `{}` | Get tape statistics and information |
 | `tape_search` | `{query?, kinds?, limit?, sinceAnchor?, anchorName?, anchorKind?, anchorSummary?, anchorPurpose?, anchorKeywords?}` | Search tape entries by text or kind, with structured anchor-field filters |
-| `/memory-anchor` | `<prompt>` | Ask the LLM to derive and create a handoff anchor with `meta.trigger = "manual"` |
 | `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, query?, kinds?, limit?}` | Read tape entries as formatted messages |
 | `tape_reset` | `{archive?: boolean}` | Reset the tape with a new session lifecycle anchor |
 
