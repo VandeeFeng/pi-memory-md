@@ -3,7 +3,7 @@
 Tape mode is an **anchor-based conversation history management system** that uses pi session as the data source and maintains only an anchor index locally. It provides on-demand context retrieval with intelligent memory file selection.
 
 ## Design Philosophy
-**"Record everything, retrieve on-demand"**
+**"On-demand memory, intelligent retrieval"**
 
 Tape mode is inspired by:
 -- **LSTM memory** - Sequential context with checkpoint gates

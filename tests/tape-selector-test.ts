@@ -1,0 +1,216 @@
+// Covers keyword handoff detection, conversation trimming, and memory file selection/context output.
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { test } from "node:test";
+import type { SessionEntry } from "@mariozechner/pi-coding-agent";
+import { writeMemoryFile } from "../memory-core.js";
+import {
+  buildKeywordHandoffMessage,
+  ConversationSelector,
+  detectKeywordHandoff,
+  MemoryFileSelector,
+  normalizeTapeKeywords,
+} from "../tape/tape-selector.js";
+import { createTempDir } from "./test-helpers.js";
+
+type MockAnchor = {
+  kind: string;
+  timestamp: string;
+  meta?: { trigger?: string };
+};
+
+type MockTapeService = {
+  query: (options: Record<string, unknown>) => SessionEntry[];
+  getAnchorStore: () => { search: (options: Record<string, unknown>) => MockAnchor[] };
+};
+
+function createMessageEntry(timestamp: string, role: "user" | "assistant", content: unknown): SessionEntry {
+  return {
+    type: "message",
+    timestamp,
+    id: crypto.randomUUID(),
+    message: { role, content },
+  } as SessionEntry;
+}
+
+function createMockTapeService(entries: SessionEntry[], anchors: MockAnchor[] = []): MockTapeService {
+  return {
+    query(options) {
+      if (options.scope === "session") {
+        return entries;
+      }
+
+      if (typeof options.since === "string") {
+        const sinceTime = new Date(options.since).getTime();
+        return entries.filter((entry) => new Date(entry.timestamp).getTime() >= sinceTime);
+      }
+
+      return entries;
+    },
+    getAnchorStore() {
+      return {
+        search(options) {
+          const sinceTime = typeof options.since === "string" ? new Date(options.since).getTime() : -Infinity;
+          return anchors.filter((anchor) => new Date(anchor.timestamp).getTime() >= sinceTime);
+        },
+      };
+    },
+  };
+}
+
+test("normalizeTapeKeywords trims, lowercases, and de-duplicates keywords", () => {
+  assert.deepEqual(normalizeTapeKeywords({ global: [" Foo ", "foo", ""], project: [" Bar ", "BAR"] }), {
+    global: ["foo"],
+    project: ["bar"],
+  });
+  assert.deepEqual(normalizeTapeKeywords(), { global: [], project: [] });
+});
+
+test("detectKeywordHandoff ignores too-short and too-long prompts", () => {
+  assert.equal(detectKeywordHandoff("short", { global: ["bug"] }), null);
+  assert.equal(detectKeywordHandoff("x".repeat(301), { global: ["bug"] }), null);
+});
+
+test("detectKeywordHandoff matches merged keywords case-insensitively with word boundaries", () => {
+  const result = detectKeywordHandoff("Please help fix a BUG and review auth flow", {
+    global: ["bug"],
+    project: ["Auth Flow", "auth"],
+  });
+
+  assert.ok(result);
+  assert.equal(result?.primary, "auth flow");
+  assert.deepEqual(result?.matched, ["auth flow", "auth", "bug"]);
+  assert.match(result?.anchorName ?? "", /^handoff\/keyword-auth-flow-\d{6}$/);
+  assert.match(result?.message ?? "", /Keyword detected: auth flow\./);
+  assert.equal(detectKeywordHandoff("debugging takes time", { global: ["bug"] }), null);
+});
+
+test("buildKeywordHandoffMessage returns the generated instruction text", () => {
+  const message = buildKeywordHandoffMessage("Please fix this bug today", { global: ["bug"] });
+
+  assert.match(message ?? "", /Before continuing, call tape_handoff/);
+  assert.match(message ?? "", /- trigger: "keyword"/);
+});
+
+test("ConversationSelector respects maxEntries and token budget", () => {
+  const entries = [
+    createMessageEntry("2026-04-23T10:00:00.000Z", "user", "first"),
+    createMessageEntry("2026-04-23T10:01:00.000Z", "assistant", "second"),
+    createMessageEntry("2026-04-23T10:02:00.000Z", "user", "x".repeat(220)),
+    createMessageEntry("2026-04-23T10:03:00.000Z", "assistant", "tail"),
+  ];
+  const selector = new ConversationSelector(createMockTapeService(entries) as never, 40, 3);
+
+  const selected = selector.selectFromAnchor("anchor-1");
+
+  assert.deepEqual(
+    selected.map((entry) => (entry as { message: { content: string } }).message.content),
+    ["tail"],
+  );
+});
+
+test("ConversationSelector builds formatted context from visible entry lines", () => {
+  const entries = [
+    createMessageEntry("2026-04-23T10:00:00.000Z", "user", "hello"),
+    {
+      type: "compaction",
+      timestamp: "2026-04-23T10:01:00.000Z",
+      id: crypto.randomUUID(),
+      summary: "summarized work",
+    } as SessionEntry,
+  ];
+  const selector = new ConversationSelector(createMockTapeService(entries) as never);
+
+  const context = selector.buildFormattedContext(entries);
+
+  assert.match(context, /User: hello/);
+  assert.match(context, /\[Compaction\] summarized work/);
+  assert.match(context, /---/);
+});
+
+test("MemoryFileSelector recent-only returns newest core markdown files", () => {
+  const tempDir = createTempDir("pi-memory-md-selector-recent");
+  const memoryDir = path.join(tempDir, "memory");
+  const projectRoot = path.join(tempDir, "project");
+  const tapeService = createMockTapeService([]);
+  const selector = new MemoryFileSelector(tapeService as never, memoryDir, projectRoot);
+
+  const olderFile = path.join(memoryDir, "core", "user", "identity.md");
+  const newerFile = path.join(memoryDir, "core", "project", "roadmap.md");
+  const hiddenFile = path.join(memoryDir, "core", ".hidden.md");
+  const referenceFile = path.join(memoryDir, "reference", "ignore.md");
+
+  writeMemoryFile(olderFile, "# Identity", { description: "Identity", tags: ["user"] });
+  writeMemoryFile(newerFile, "# Roadmap", { description: "Roadmap", tags: ["project"] });
+  writeMemoryFile(hiddenFile, "# Hidden", { description: "Hidden" });
+  writeMemoryFile(referenceFile, "# Ignore", { description: "Ignore" });
+
+  const oldTime = new Date("2026-04-23T10:00:00.000Z");
+  const newTime = new Date("2026-04-23T12:00:00.000Z");
+  fs.utimesSync(olderFile, oldTime, oldTime);
+  fs.utimesSync(newerFile, newTime, newTime);
+
+  const files = selector.selectFilesForContext("recent-only", 2);
+
+  assert.deepEqual(files, ["core/project/roadmap.md", "core/user/identity.md"]);
+});
+
+test("MemoryFileSelector smart mode prioritizes frequently accessed memory files", () => {
+  const tempDir = createTempDir("pi-memory-md-selector-smart");
+  const memoryDir = path.join(tempDir, "memory");
+  const projectRoot = path.join(tempDir, "project");
+  const hotFile = "core/user/hot.md";
+  const coldFile = "core/user/cold.md";
+
+  writeMemoryFile(path.join(memoryDir, hotFile), "# Hot", { description: "Hot", tags: ["hot"] });
+  writeMemoryFile(path.join(memoryDir, coldFile), "# Cold", { description: "Cold", tags: ["cold"] });
+
+  const entries = [
+    createMessageEntry("2026-04-23T10:00:00.000Z", "assistant", [
+      { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
+    ]),
+    createMessageEntry("2026-04-23T10:10:00.000Z", "assistant", [
+      { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
+    ]),
+    createMessageEntry("2026-04-23T10:20:00.000Z", "assistant", [
+      { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
+    ]),
+    createMessageEntry("2026-04-23T10:30:00.000Z", "assistant", [
+      { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
+    ]),
+    createMessageEntry("2026-04-23T10:40:00.000Z", "assistant", [
+      { type: "toolCall", name: "memory_read", arguments: { path: coldFile } },
+    ]),
+  ];
+  const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
+
+  const files = selector.selectFilesForContext("smart", 2, { memoryScan: [1, 1] });
+
+  assert.deepEqual(files, [hotFile, coldFile]);
+});
+
+test("MemoryFileSelector buildContextFromFiles renders memory and project files with highlights", () => {
+  const tempDir = createTempDir("pi-memory-md-selector-context");
+  const memoryDir = path.join(tempDir, "memory");
+  const projectRoot = path.join(tempDir, "project");
+  const projectFile = path.join(projectRoot, "src", "index.ts");
+  fs.mkdirSync(path.dirname(projectFile), { recursive: true });
+  fs.writeFileSync(projectFile, "export const ok = true;\n");
+
+  const memoryPath = path.join(memoryDir, "core", "user", "identity.md");
+  writeMemoryFile(memoryPath, "# Identity", { description: "Identity", tags: ["user", "profile"] });
+
+  const selector = new MemoryFileSelector(createMockTapeService([]) as never, memoryDir, projectRoot);
+  const context = selector.buildContextFromFiles([memoryPath, projectFile], {
+    highlightedFiles: [memoryPath, projectFile],
+  });
+
+  assert.match(context, /# Project Memory/);
+  assert.match(context, /core\/user\/identity\.md \[high priority\]/);
+  assert.match(context, /Description: Identity/);
+  assert.match(context, /Tags: user, profile/);
+  assert.match(context, /Recently active project files/);
+  assert.match(context, new RegExp(projectFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(context, /\[high priority\]/);
+});

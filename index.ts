@@ -400,37 +400,34 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
     },
   });
 
-  pi.registerCommand("memory-anchor", {
-    description: "Ask the LLM to create a manual tape anchor from your prompt",
-    handler: async (args, ctx) => {
-      if (!settings.tape?.enabled) {
-        ctx.ui.notify("Tape is not enabled for the current settings.", "error");
-        return;
-      }
+  if (settings.tape?.enabled) {
+    pi.registerCommand("memory-anchor", {
+      description: "Ask the LLM to create a manual tape anchor from your prompt",
+      handler: async (args, ctx) => {
+        const prompt = args.trim();
+        if (!prompt) {
+          ctx.ui.notify("Usage: /memory-anchor <prompt>", "warning");
+          return;
+        }
 
-      const prompt = args.trim();
-      if (!prompt) {
-        ctx.ui.notify("Usage: /memory-anchor <prompt>", "warning");
-        return;
-      }
+        ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
+        if (!state.activeTapeRuntime?.service) {
+          ctx.ui.notify("Tape runtime is unavailable.", "error");
+          return;
+        }
 
-      ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
-      if (!state.activeTapeRuntime?.service) {
-        ctx.ui.notify("Tape runtime is unavailable.", "error");
-        return;
-      }
-
-      pi.sendMessage(
-        {
-          customType: "pi-memory-md-tape-manual-anchor",
-          content: buildManualAnchorMessage(prompt),
-          display: false,
-        },
-        { triggerTurn: true },
-      );
-      ctx.ui.notify("Manual anchor request queued", "info");
-    },
-  });
+        pi.sendMessage(
+          {
+            customType: "pi-memory-md-tape-manual-anchor",
+            content: buildManualAnchorMessage(prompt),
+            display: false,
+          },
+          { triggerTurn: true },
+        );
+        ctx.ui.notify("Manual anchor request queued", "info");
+      },
+    });
+  }
 }
 
 export default function memoryMdExtension(pi: ExtensionAPI): void {

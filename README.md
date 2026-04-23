@@ -226,7 +226,7 @@ The LLM automatically:
 
 > **Note**: This mode may consume more tokens. Adjust parameters based on your model's context window and your API quota.
 
-More details [tape-design](docs/tape-design.md)
+More details [tape-design](docs/tape-design.md) / [中文版](docs/tape-design.zh.md)
 
 ### Tape vs Injection Modes
 
@@ -245,7 +245,7 @@ It does not change the delivery mechanism; it changes **which memory files** are
 With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the injected list can also include recently active project file paths inferred from tool usage. Stale paths from old tape history are ignored when the file no longer exists.
 
 Tape also:
-- Tracks all operations in an immutable tape (JSONL format): messages, tool calls, memory operations (by default)
+- Reads from pi session file (JSONL): messages, tool calls, memory operations, etc.
 - **Anchor-based context**: Selects relevant memory files and recently active project files based on recent usage and configured strategy
 - Creates `session/*` lifecycle anchors automatically and `handoff` anchors via `tape_handoff` or `/memory-anchor`
 - Supports `anchor.mode: "manual"` to hard-block `tape_handoff` unless the tool call uses `trigger: "keyword"` or `trigger: "manual"`
@@ -294,7 +294,8 @@ Tape also:
 
         "keywords": {
           // Match against user prompts with length in [10, 300]
-          // When matched, inject a hidden instruction telling the model to call tape_handoff, then create an anchor
+          // When matched, inject a hidden instruction telling the model to call tape_handoff, thencreate an anchor  automatically
+          // Strongly recommended! Keywords make anchor creation much smarter - customize based on your focus areas
           "global": ["refactor", "migration"],
           "project": ["tape", "Emacs"]
         }
@@ -309,21 +310,25 @@ Tape also:
 }
 ```
 
-Each line in the tape is a JSON record:
-```json
-{"id":"1234567890-abc123","kind":"tool_call","timestamp":"2026-04-04T12:00:00.000Z","payload":{"tool":"memory_search","args":{"query":"context"}}}
-```
-
 ### Tape Anchors
 
-Anchors are checkpoints that mark important transitions in your conversation. They enable efficient context reconstruction:
+Anchors are named checkpoints that correspond to pi session entries, marking important transitions in your conversation. They enable efficient context reconstruction and are mirrored into pi `/tree` labels:
 
-- **`session/new`**: First anchor of a new session, including startup into an empty session
-- **`session/resume`**: Session continued from an existing context, including `/resume`, `pi -r`, `pi -c`, `/reload`, `/fork`, or startup into an existing session
-- **`task/begin`**: Starting a new task
-- **`task/complete`**: Task completed
-- **`context/switch`**: Context switching point
-- **`handoff`**: Generic handoff point
+<img src="docs/pi-tree.png" width="400" />
+
+Each line in the tape anchor store is a JSON record:
+```json
+{"id":"1234567890-abc123","name":"task/begin","kind":"handoff","sessionId":"abc","sessionEntryId":"def","timestamp":"2026-04-04T12:00:00.000Z","meta":{"summary":"Working on feature X","trigger":"direct"}}
+```
+
+Each anchor has:
+- **`id`**: A stable unique identifier, auto-generated from `sessionEntryId:timestamp:name`
+- **`name`**: A human-readable label (e.g., `session/new`, `task/begin`)
+- **`kind`**: Anchor type - `session` for lifecycle anchors, `handoff` for manual/semantic transitions
+- **`sessionId`**: The pi session this anchor belongs to
+- **`sessionEntryId`**: The associated session entry ID for tree mirroring
+- **`timestamp`**: ISO timestamp of when the anchor was created
+- **`meta`**: Optional metadata including `summary`, `trigger` (`direct`/`keyword`/`manual`), `keywords`, etc.
 
 Example workflow:
 ```
