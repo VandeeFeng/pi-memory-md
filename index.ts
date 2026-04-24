@@ -12,9 +12,13 @@ import {
   loadSettings,
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
-import { resolveTapeActivation, type TapeActivationResult } from "./tape/tape-activation.js";
-import type { KeywordHandoffInstruction } from "./tape/tape-selector.js";
-import { detectKeywordHandoff, MemoryFileSelector } from "./tape/tape-selector.js";
+import {
+  detectKeywordHandoff,
+  type KeywordHandoffInstruction,
+  resolveTapeActivation,
+  type TapeActivationResult,
+} from "./tape/tape-gate.js";
+import { MemoryFileSelector } from "./tape/tape-selector.js";
 import { TapeService } from "./tape/tape-service.js";
 import type { PendingHandoffMatch } from "./tape/tape-tools.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";

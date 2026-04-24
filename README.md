@@ -171,6 +171,7 @@ When tape mode is enabled, the same delivery mode still applies, but tape change
 
 - Memory is sent as a custom message before the user's first message
 - Not visible in the TUI (`display: false` in pi-tui)
+- This hidden message is injected into the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
 - Persists in the session history
 - Injected only once per session (on first agent turn)
 - **Pros**: Lower token usage, memory persists naturally in conversation
@@ -299,6 +300,7 @@ Tape also:
 - Creates `session/*` lifecycle anchors automatically and `handoff` anchors via `tape_handoff` or `/memory-anchor`
 - Supports `anchor.mode: "manual"` to hard-block direct `tape_handoff`; keyword-matched hidden instructions and `/memory-anchor` still authorize handoff creation
 - Keyword detection can send a hidden message that guides the agent to create a keyword anchor, while still allowing the agent to refuse when such an anchor is unnecessary
+  This hidden message is injected into the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
 - Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale labels
 - **Pros**: Better context selection with checkpoint management, recent project file awareness, and handoff-aware prioritization
 - **Cons**: Slightly more complex configuration and more token costs
@@ -364,6 +366,7 @@ Tape also:
         "keywords": {
           // Match against user prompts with length in [10, 300]
           // When matched, send a hidden instruction about the tape_handoff tool call
+          // It stays in the same agent turn: no extra LLM request, only extra tokens in the current request
           // This gives the agent room to refuse when creating a keyword anchor is not necessary at all
           // Strongly recommended! Keywords make anchor creation much smarter - customize based on your focus areas
           "global": ["refactor", "migration"],

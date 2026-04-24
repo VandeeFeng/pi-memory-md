@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import matter from "gray-matter";
 import { DEFAULT_HOOKS, normalizeHooks } from "./hooks.js";
-import { normalizeTapeKeywords } from "./tape/tape-selector.js";
+import { normalizeTapeKeywords } from "./tape/tape-gate.js";
 import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, ParsedFrontmatter } from "./types.js";
 import { DEFAULT_LOCAL_PATH, DEFAULT_TAPE_EXCLUDE_DIRS, expandHomePath, getCurrentDate } from "./utils.js";
 

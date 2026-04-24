@@ -325,6 +325,7 @@ before_agent_start event
 - `message-append`: tape-selected memory is injected once on the first agent turn as a hidden custom message (`pi-memory-md-tape`)
 - `system-prompt`: tape-selected memory is rebuilt and appended on every agent turn
 - Keyword-triggered handoff instructions can still be injected on later turns as a separate hidden custom message (`pi-memory-md-tape-keyword`)
+- That hidden keyword message stays within the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request.
 - In pi, appending means returning `systemPrompt: event.systemPrompt + "..."`; returning a bare string would replace the prompt for that turn
 
 ## Memory Context Injection
@@ -361,7 +362,7 @@ The injected content is a memory index/summary plus the tape hint.
 | `message-append` | Injects tape-selected memory once as a hidden custom message on the first agent turn (`pi-memory-md-tape`) |
 | `system-prompt` | Rebuilds tape-selected memory and appends it to the current system prompt on every agent turn |
 
-Keyword-triggered handoff instructions are independent from the main memory payload and may be delivered later as `pi-memory-md-tape-keyword` when a configured keyword matches a user prompt.
+Keyword-triggered handoff instructions are independent from the main memory payload and may be delivered later as `pi-memory-md-tape-keyword` when a configured keyword matches a user prompt. This remains part of the same agent turn, so it does not trigger an extra LLM request; it only increases the current turn's token usage.
 
 If `settings.tape.anchor.mode === "manual"`, the main tape hint tells the LLM not to create `tape_handoff` anchors proactively, and the tool layer rejects direct `tape_handoff` calls. Keyword-triggered hidden instructions and `/memory-anchor` still authorize handoff creation through runtime binding.
 

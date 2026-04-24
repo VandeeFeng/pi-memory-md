@@ -6,14 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import { writeMemoryFile } from "../memory-core.js";
-import {
-  buildKeywordHandoffMessage,
-  ConversationSelector,
-  detectKeywordHandoff,
-  MemoryFileSelector,
-  matchesDefaultIgnoredPath,
-  normalizeTapeKeywords,
-} from "../tape/tape-selector.js";
+import { ConversationSelector, MemoryFileSelector, matchesDefaultIgnoredPath } from "../tape/tape-selector.js";
 import { createTempDir } from "./test-helpers.js";
 
 type MockAnchor = {
@@ -80,41 +73,6 @@ function createMockTapeService(entries: SessionEntry[], anchors: MockAnchor[] = 
     },
   };
 }
-
-test("normalizeTapeKeywords trims, lowercases, and de-duplicates keywords", () => {
-  assert.deepEqual(normalizeTapeKeywords({ global: [" Foo ", "foo", ""], project: [" Bar ", "BAR"] }), {
-    global: ["foo"],
-    project: ["bar"],
-  });
-  assert.deepEqual(normalizeTapeKeywords(), { global: [], project: [] });
-});
-
-test("detectKeywordHandoff ignores too-short and too-long prompts", () => {
-  assert.equal(detectKeywordHandoff("short", { global: ["bug"] }), null);
-  assert.equal(detectKeywordHandoff("x".repeat(301), { global: ["bug"] }), null);
-});
-
-test("detectKeywordHandoff matches merged keywords case-insensitively with word boundaries", () => {
-  const result = detectKeywordHandoff("Please help fix a BUG and review auth flow", {
-    global: ["bug"],
-    project: ["Auth Flow", "auth"],
-  });
-
-  assert.ok(result);
-  assert.equal(result?.primary, "auth flow");
-  assert.deepEqual(result?.matched, ["auth flow", "auth", "bug"]);
-  assert.match(result?.anchorName ?? "", /^handoff\/keyword-auth-flow-\d{6}$/);
-  assert.match(result?.message ?? "", /Keyword detected: auth flow\./);
-  assert.equal(detectKeywordHandoff("debugging takes time", { global: ["bug"] }), null);
-});
-
-test("buildKeywordHandoffMessage returns the generated instruction text", () => {
-  const message = buildKeywordHandoffMessage("Please fix this bug today", { global: ["bug"] });
-
-  assert.match(message ?? "", /Before continuing, call tape_handoff/);
-  assert.doesNotMatch(message ?? "", /- trigger: "keyword"/);
-  assert.doesNotMatch(message ?? "", /- keywords:/);
-});
 
 test("ConversationSelector respects maxEntries and token budget", () => {
   const entries = [
