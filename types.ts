@@ -23,13 +23,16 @@ export type HookTrigger = "sessionStart" | "sessionEnd";
 export type BuiltinHookAction = "pull" | "push";
 export type HookAction = BuiltinHookAction | (string & {});
 export type HookConfig = Partial<Record<HookTrigger, HookAction[]>>;
+export type MemoryDeliveryMode = "system-prompt" | "message-append";
 
 export interface MemoryMdSettings {
   enabled?: boolean;
   repoUrl?: string;
   localPath?: string;
   hooks?: HookConfig;
-  injection?: "system-prompt" | "message-append";
+  delivery?: MemoryDeliveryMode;
+  /** @deprecated Use `delivery` instead. */
+  injection?: MemoryDeliveryMode;
   tape?: TapeConfig;
 }
 

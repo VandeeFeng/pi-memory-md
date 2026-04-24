@@ -52,7 +52,7 @@ Session Start
     ↓
 3. Build index (descriptions + tags only - NOT full content)
     ↓
-4. Inject memory index via `message-append` or `system-prompt`
+4. Deliver memory index via `message-append` or `system-prompt`
     ↓
 5. LLM reads full file content via tools when needed
 ```
@@ -65,7 +65,7 @@ You can also use these slash commands directly in pi:
 |---------|-------------|
 | `/memory-init` | Initialize memory repository (clone repo, create directory structure, generate default files) |
 | `/memory-status` | Show memory repository status (project name, git status, path) |
-| `/memory-refresh` | Refresh memory context from files (rebuild cache and inject into current session) |
+| `/memory-refresh` | Refresh memory context from files (rebuild cache and deliver into current session) |
 | `/memory-check` | Check memory folder structure (display directory tree) |
 
 ## Available Tools
@@ -120,7 +120,8 @@ Markdown content...
   "pi-memory-md": {
     // "enabled": false,
     "repoUrl": "git@github.com:username/repo.git", // Or HTTPS format
-    "injection": "message-append",
+    // `injection` is still accepted as a legacy alias for `delivery`.
+    "delivery": "message-append",
     "hooks": {
       "sessionStart": ["pull"],
       "sessionEnd": ["push"]
@@ -134,12 +135,13 @@ Markdown content...
 | `enabled` | `true` | Enable extension |
 | `repoUrl` | Required | GitHub repository URL |
 | `localPath` | `~/.pi/memory-md` | Local clone path |
-| `injection` | `"message-append"` | Memory injection mode: `"message-append"`, `"system-prompt"` |
+| `delivery` | `"message-append"` | Memory delivery mode: `"message-append"`, `"system-prompt"` |
 | `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts |
 | `hooks.sessionEnd` | `[]` | Actions to run when a session ends |
 | `tape.enabled` | `false` | Enable tape mode for dynamic context selection |
 
 When settings change, run `/reload` to apply them.
+
 
 ### Hooks
 
@@ -160,9 +162,9 @@ But it is recommended to migrate to the new `hooks` config.
 
 More trigger actions can be added later, even custom hooks.
 
-### Memory Injection Modes
+### Memory Delivery Modes
 
-The extension supports two base modes for injecting memory into the conversation.
+The extension supports two base modes for delivering memory into the conversation.
 When tape mode is disabled, behavior is exactly as described below.
 When tape mode is enabled, the same delivery mode still applies, but tape changes how memory files are selected.
 
@@ -172,16 +174,16 @@ When tape mode is enabled, the same delivery mode still applies, but tape change
 {
   "pi-memory-md": {
     ...
-    "injection": "message-append"
+    "delivery": "message-append"
   }
 }
 ```
 
 - Memory is sent as a custom message before the user's first message
 - Not visible in the TUI (`display: false` in pi-tui)
-- This hidden message is injected into the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
+- This hidden message is delivered in the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
 - Persists in the session history
-- Injected only once per session (on first agent turn)
+- Delivered only once per session (on first agent turn)
 - **Pros**: Lower token usage, memory persists naturally in conversation
 - **Cons**: Only visible when the model scrolls back to earlier messages
 
@@ -191,13 +193,13 @@ When tape mode is enabled, the same delivery mode still applies, but tape change
 {
   "pi-memory-md": {
     ...
-    "injection": "system-prompt"
+    "delivery": "system-prompt"
   }
 }
 ```
 
 - Memory is appended to the system prompt
-- Rebuilt and injected on every agent turn
+- Rebuilt and delivered on every agent turn
 - Always visible to the model in the system context
 - **Pros**: Memory always present in system context, no need to scroll back
 - **Cons**: Higher token usage (repeated on every prompt)
@@ -226,7 +228,7 @@ The LLM automatically:
 - Writes new information when you ask to remember something
 - Syncs changes when needed
 
-## Tape Mode (Dynamic Context Injection)
+## Tape Mode (Dynamic Context Delivery)
 
 > **Experimental**: This mode is under active development. APIs and behavior may change.
 >
@@ -258,23 +260,23 @@ Then use `/memory-anchor` to create an anchor manually, or let anchors be create
 
 If you want to jump to the conversation around an anchor and restart from there, `/tree` and the anchors in this session are all there with a customizable anchor label in pi TUI.
 
-### Tape vs Injection Modes
+### Tape vs Delivery Modes
 
-**Tape** is an independent feature that can be enabled alongside either injection mode.
+**Tape** is an independent feature that can be enabled alongside either delivery mode.
 It does not change the delivery mechanism; it changes **which memory files** are selected.
 
-| Tape | Injection mode | Behavior |
+| Tape | Delivery mode | Behavior |
 |------|----------------|----------|
 | Disabled | `message-append` | Sends memory once as a hidden custom message on the first agent turn |
 | Disabled | `system-prompt` | Rebuilds memory and appends it to the system prompt on every agent turn |
 | Enabled | `message-append` | Sends tape-selected memory once as a hidden custom message on the first agent turn |
 | Enabled | `system-prompt` | Rebuilds tape-selected memory and appends it to the system prompt on every agent turn |
 
-With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the injected list can also include recently active project file paths inferred from tool usage, plus a `recent focus` summary for each selected file showing the most recently attended `read` / `edit` ranges inside the same effective smart-scan window. Stale paths from old tape history are ignored when the file no longer exists.
+With tape enabled, the delivered content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the delivered list can also include recently active project file paths inferred from tool usage, plus a `recent focus` summary for each selected file showing the most recently attended `read` / `edit` ranges inside the same effective smart-scan window. Stale paths from old tape history are ignored when the file no longer exists.
 
 Tape follows an opt-out rule: if a `tape` block exists, tape is on unless you set `"enabled": false`.
 
-A tape hidden message injected looks like this:
+A delivered tape hidden message looks like this:
 
 ```md
 # Project Memory
@@ -308,7 +310,7 @@ Tape also:
 - Creates `session/*` lifecycle anchors automatically and `handoff` anchors via `tape_handoff` or `/memory-anchor`
 - Supports `anchor.mode: "manual"` to hard-block direct `tape_handoff`; keyword-matched hidden instructions and `/memory-anchor` still authorize handoff creation
 - Keyword detection can send a hidden message that guides the agent to create a keyword anchor, while still allowing the agent to refuse when such an anchor is unnecessary
-  This hidden message is injected into the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
+  This hidden message is delivered in the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
 - Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale labels
 - **Pros**: Better context selection with checkpoint management, recent project file awareness, and handoff-aware prioritization
 - **Cons**: Slightly more complex configuration and more token costs
@@ -322,7 +324,7 @@ Tape also:
     "localPath": "~/.pi/memory-md",
     "tape": {
       // Run tape only inside a Git repository by default
-      // Without .git, tape inject and anchors are skipped
+      // Without .git, tape delivery and anchors are skipped
       "onlyGit": true, // default
 
       // Absolute directory paths where tape is always disabled
@@ -339,7 +341,7 @@ Tape also:
         // "recent-only": most recently modified memory files only
         "strategy": "smart", // default
 
-        // Max files to inject into LLM context
+        // Max files to deliver into LLM context
         "fileLimit": 10, // default
 
         // Smart-mode pi session history scan range: [startHours, maxHours]

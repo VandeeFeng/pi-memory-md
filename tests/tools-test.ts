@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { readMemoryFile, writeMemoryFile } from "../memory-core.js";
+import { readMemoryFileAsync, writeMemoryFile } from "../memory-core.js";
 import { registerMemoryList, registerMemoryRead, registerMemorySearch, registerMemoryWrite } from "../tools.js";
 import { createTempDir } from "./test-helpers.js";
 
@@ -153,7 +153,7 @@ test("memory_write creates a file and preserves created while updating descripti
     content: Array<{ text?: string }>;
     details?: { frontmatter?: { description?: string; tags?: string[]; created?: string; updated?: string } };
   };
-  const written = readMemoryFile(filePath);
+  const written = await readMemoryFileAsync(filePath);
 
   assert.match(result.content[0]?.text ?? "", /Memory file written: core\/user\/note\.md/);
   assert.equal(result.details?.frontmatter?.created, "2026-01-01");

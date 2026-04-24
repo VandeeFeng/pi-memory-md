@@ -1,6 +1,6 @@
 ---
 name: memory-sync
-description: Git synchronization operations for pi-memory-md repository
+description: Git synchronization operations for pi-memory-md repository. Use when you need to sync memory.
 ---
 
 # Memory Sync

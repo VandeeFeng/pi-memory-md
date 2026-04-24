@@ -29,6 +29,9 @@ export class AnchorStore {
   private readonly anchorDir: string;
   private readonly indexPath: string;
   private index: Map<string, TapeAnchor[]> = new Map();
+  private allAnchors: TapeAnchor[] = [];
+  private anchorsBySession: Map<string, TapeAnchor[]> = new Map();
+  private anchorsBySessionEntry: Map<string, TapeAnchor[]> = new Map();
 
   constructor(tapeBasePath: string, projectName: string) {
     const anchorDir = tapeBasePath;
@@ -83,9 +86,27 @@ export class AnchorStore {
   }
 
   private addToMemoryIndex(entry: TapeAnchor): void {
-    const existing = this.index.get(entry.name) ?? [];
-    existing.push(entry);
-    this.index.set(entry.name, existing);
+    const byName = this.index.get(entry.name) ?? [];
+    byName.push(entry);
+    this.index.set(entry.name, byName);
+
+    this.allAnchors.push(entry);
+    sortAnchorsByTimestamp(this.allAnchors);
+
+    const bySession = this.anchorsBySession.get(entry.sessionId) ?? [];
+    bySession.push(entry);
+    sortAnchorsByTimestamp(bySession);
+    this.anchorsBySession.set(entry.sessionId, bySession);
+
+    const sessionEntryKey = this.getSessionEntryKey(entry.sessionEntryId, entry.sessionId);
+    const bySessionEntry = this.anchorsBySessionEntry.get(sessionEntryKey) ?? [];
+    bySessionEntry.push(entry);
+    sortAnchorsByTimestamp(bySessionEntry);
+    this.anchorsBySessionEntry.set(sessionEntryKey, bySessionEntry);
+  }
+
+  private getSessionEntryKey(sessionEntryId: string, sessionId?: string): string {
+    return `${sessionId ?? "*"}::${sessionEntryId}`;
   }
 
   append(entry: TapeAnchor): void {
@@ -97,8 +118,7 @@ export class AnchorStore {
     const anchor = this.findById(id);
     if (!anchor) return null;
 
-    const anchors = this.getAllAnchors().filter((entry) => entry.id !== id);
-    this.rebuildIndex(anchors);
+    this.rebuildIndex(this.allAnchors.filter((entry) => entry.id !== id));
     return anchor;
   }
 
@@ -132,46 +152,28 @@ export class AnchorStore {
   }
 
   findBySession(sessionId: string): TapeAnchor[] {
-    return sortAnchorsByTimestamp(this.getAllAnchors().filter((entry) => entry.sessionId === sessionId));
+    return [...(this.anchorsBySession.get(sessionId) ?? [])];
   }
 
   findBySessionEntryId(sessionEntryId: string, sessionId?: string): TapeAnchor[] {
-    return sortAnchorsByTimestamp(
-      this.getAllAnchors().filter((entry) => {
-        if (entry.sessionEntryId !== sessionEntryId) return false;
-        if (sessionId && entry.sessionId !== sessionId) return false;
-        return true;
-      }),
-    );
+    if (sessionId) {
+      return [...(this.anchorsBySessionEntry.get(this.getSessionEntryKey(sessionEntryId, sessionId)) ?? [])];
+    }
+
+    return this.allAnchors.filter((entry) => entry.sessionEntryId === sessionEntryId);
   }
 
   getLastAnchor(sessionId?: string): TapeAnchor | null {
     if (sessionId) {
-      const sessionAnchors = this.findBySession(sessionId);
+      const sessionAnchors = this.anchorsBySession.get(sessionId) ?? [];
       return sessionAnchors[sessionAnchors.length - 1] ?? null;
     }
 
-    let last: TapeAnchor | null = null;
-
-    for (const entries of this.index.values()) {
-      for (const entry of entries) {
-        if (!last || toTimestamp(entry.timestamp) > toTimestamp(last.timestamp)) {
-          last = entry;
-        }
-      }
-    }
-
-    return last;
+    return this.allAnchors[this.allAnchors.length - 1] ?? null;
   }
 
   getAllAnchors(): TapeAnchor[] {
-    const anchors: TapeAnchor[] = [];
-
-    for (const entries of this.index.values()) {
-      anchors.push(...entries);
-    }
-
-    return sortAnchorsByTimestamp(anchors);
+    return [...this.allAnchors];
   }
 
   search(options: {
@@ -191,11 +193,7 @@ export class AnchorStore {
     const untilTime = until ? toTimestamp(until) : null;
     const needle = query?.toLowerCase();
 
-    let anchors = this.getAllAnchors();
-
-    if (sessionId) {
-      anchors = anchors.filter((anchor) => anchor.sessionId === sessionId);
-    }
+    let anchors = sessionId ? [...(this.anchorsBySession.get(sessionId) ?? [])] : [...this.allAnchors];
 
     if (sinceTime !== null) {
       anchors = anchors.filter((anchor) => toTimestamp(anchor.timestamp) >= sinceTime);
@@ -250,10 +248,16 @@ export class AnchorStore {
     }
 
     this.index.clear();
+    this.allAnchors = [];
+    this.anchorsBySession.clear();
+    this.anchorsBySessionEntry.clear();
   }
 
   private rebuildIndex(entries: TapeAnchor[]): void {
     this.index.clear();
+    this.allAnchors = [];
+    this.anchorsBySession.clear();
+    this.anchorsBySessionEntry.clear();
 
     if (entries.length === 0) {
       if (fs.existsSync(this.indexPath)) {

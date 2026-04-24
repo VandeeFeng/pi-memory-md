@@ -1,6 +1,6 @@
 ---
 name: memory-search
-description: Search and retrieve information from pi-memory-md memory files
+description: Search and retrieve information from pi-memory-md memory files. Use when you need to search memory.
 ---
 
 # Memory Search

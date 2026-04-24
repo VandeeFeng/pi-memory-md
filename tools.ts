@@ -10,8 +10,8 @@ import {
   getMemoryDir,
   initializeMemoryDirectory,
   isMemoryInitialized,
-  listMemoryFiles,
-  readMemoryFile,
+  listMemoryFilesAsync,
+  readMemoryFileAsync,
   writeMemoryFile,
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
@@ -228,7 +228,7 @@ export function registerMemoryRead(pi: ExtensionAPI, settings: MemoryMdSettings)
         };
       }
 
-      const memory = readMemoryFile(fullPath);
+      const memory = await readMemoryFileAsync(fullPath);
       if (!memory) {
         return {
           content: [{ type: "text", text: `Failed to read memory file: ${relPath}` }],
@@ -284,7 +284,7 @@ export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings
         };
       }
 
-      const existing = readMemoryFile(fullPath);
+      const existing = await readMemoryFileAsync(fullPath);
 
       const frontmatter: MemoryFrontmatter = {
         ...existing?.frontmatter,
@@ -333,7 +333,7 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
         };
       }
 
-      const files = listMemoryFiles(listDir);
+      const files = await listMemoryFilesAsync(listDir);
       const relPaths = files.map((f) => path.relative(memoryDir, f));
       return {
         content: [
@@ -591,7 +591,7 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
         }
       }
 
-      const files = listMemoryFiles(memoryDir);
+      const files = await listMemoryFilesAsync(memoryDir);
       const relPaths = files.map((f) => path.relative(memoryDir, f));
       return {
         content: [

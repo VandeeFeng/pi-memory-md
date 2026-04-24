@@ -1,11 +1,7 @@
 ---
 name: memory-init
-description: Initial setup and bootstrap for pi-memory-md repository
+description: Initial setup and bootstrap guide for pi-memory-md repository. Use when you need to set up pi-memory-md for the first time or reinitialize an existing installation.
 ---
-
-# Memory Init
-
-Use this skill to set up pi-memory-md for the first time or reinitialize an existing installation.
 
 ## Prerequisites
 

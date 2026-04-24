@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { mock, test } from "node:test";
 import {
-  buildMemoryContext,
+  buildMemoryContextAsync,
   DEFAULT_SETTINGS,
   getMemoryCoreDir,
   getMemoryDir,
@@ -13,7 +13,7 @@ import {
   initializeMemoryDirectory,
   isMemoryInitialized,
   loadSettings,
-  readMemoryFile,
+  readMemoryFileAsync,
   writeMemoryFile,
 } from "../memory-core.js";
 import { DEFAULT_TAPE_EXCLUDE_DIRS, hasSymlinkInPath, resolvePathWithin } from "../utils.js";
@@ -31,7 +31,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
         sessionStart: ["pull"],
         sessionEnd: [],
       },
-      injection: "system-prompt",
+      delivery: "system-prompt",
       tape: {
         enabled: true,
         context: {
@@ -82,6 +82,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
 
     assert.equal(settings.enabled, DEFAULT_SETTINGS.enabled);
     assert.equal(settings.repoUrl, "https://github.com/acme/global-memory.git");
+    assert.equal(settings.delivery, "system-prompt");
     assert.equal(settings.injection, "system-prompt");
     assert.equal(settings.localPath, path.join(tempHome, "global-memory"));
     assert.deepEqual(settings.hooks, {
@@ -101,6 +102,27 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
       global: ["foo"],
       project: ["bar"],
     });
+  } finally {
+    homedirMock.mock.restore();
+  }
+});
+
+test("loadSettings falls back to legacy injection when delivery is unset", () => {
+  const tempHome = createTempDir("pi-memory-md-home-legacy-delivery");
+  const projectDir = createTempDir("pi-memory-md-project-legacy-delivery");
+
+  writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": {
+      injection: "system-prompt",
+    },
+  });
+
+  const homedirMock = mock.method(os, "homedir", () => tempHome);
+
+  try {
+    const settings = loadSettings(projectDir);
+    assert.equal(settings.delivery, "system-prompt");
+    assert.equal(settings.injection, "system-prompt");
   } finally {
     homedirMock.mock.restore();
   }
@@ -143,33 +165,33 @@ test("loadSettings enables tape when tape config exists unless explicitly disabl
   }
 });
 
-test("readMemoryFile returns fallback frontmatter for missing frontmatter", () => {
+test("readMemoryFileAsync returns fallback frontmatter for missing frontmatter", async () => {
   const tempDir = createTempDir("pi-memory-md-read-no-frontmatter");
   const filePath = path.join(tempDir, "note.md");
 
   writeText(filePath, "# Plain note\n\nNo frontmatter here.");
 
-  const memory = readMemoryFile(filePath);
+  const memory = await readMemoryFileAsync(filePath);
 
   assert.ok(memory);
   assert.equal(memory?.frontmatter.description, "No description");
   assert.equal(memory?.content, "# Plain note\n\nNo frontmatter here.");
 });
 
-test("readMemoryFile returns fallback frontmatter for invalid frontmatter", () => {
+test("readMemoryFileAsync returns fallback frontmatter for invalid frontmatter", async () => {
   const tempDir = createTempDir("pi-memory-md-read-invalid-frontmatter");
   const filePath = path.join(tempDir, "note.md");
 
   writeText(filePath, "---\ndescription: 123\ntags: nope\n---\n\n# Broken\n");
 
-  const memory = readMemoryFile(filePath);
+  const memory = await readMemoryFileAsync(filePath);
 
   assert.ok(memory);
   assert.equal(memory?.frontmatter.description, "No description");
   assert.match(memory?.content ?? "", /description: 123/);
 });
 
-test("writeMemoryFile writes YAML frontmatter and body that can be read back", () => {
+test("writeMemoryFile writes YAML frontmatter and body that can be read back", async () => {
   const tempDir = createTempDir("pi-memory-md-write");
   const filePath = path.join(tempDir, "core", "user", "identity.md");
 
@@ -180,7 +202,7 @@ test("writeMemoryFile writes YAML frontmatter and body that can be read back", (
   });
 
   const raw = fs.readFileSync(filePath, "utf-8");
-  const memory = readMemoryFile(filePath);
+  const memory = await readMemoryFileAsync(filePath);
 
   assert.match(raw, /^---/);
   assert.match(raw, /description: User identity/);
@@ -205,7 +227,7 @@ test("initializeMemoryDirectory creates required directories and default files",
   assert.equal(fs.existsSync(path.join(memoryDir, "core", "user", "prefer.md")), true);
 });
 
-test("buildMemoryContext lists only core markdown files with relative paths", () => {
+test("buildMemoryContextAsync lists only core markdown files with relative paths", async () => {
   const tempDir = createTempDir("pi-memory-md-context");
   const projectDir = path.join(tempDir, "project-a");
   const settings = {
@@ -226,7 +248,7 @@ test("buildMemoryContext lists only core markdown files with relative paths", ()
     tags: ["reference"],
   });
 
-  const context = buildMemoryContext(settings, projectDir);
+  const context = await buildMemoryContextAsync(settings, projectDir);
 
   assert.match(context, /# Project Memory/);
   assert.match(context, new RegExp(`Memory directory: ${memoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
@@ -235,14 +257,14 @@ test("buildMemoryContext lists only core markdown files with relative paths", ()
   assert.doesNotMatch(context, /reference\/ignore\.md/);
 });
 
-test("buildMemoryContext returns empty string when core directory is missing", () => {
+test("buildMemoryContextAsync returns empty string when core directory is missing", async () => {
   const tempDir = createTempDir("pi-memory-md-empty-context");
   const projectDir = path.join(tempDir, "project-b");
   const settings = {
     localPath: path.join(tempDir, "memory-root"),
   };
 
-  assert.equal(buildMemoryContext(settings, projectDir), "");
+  assert.equal(await buildMemoryContextAsync(settings, projectDir), "");
 });
 
 test("resolvePathWithin blocks path traversal outside memory directory", () => {

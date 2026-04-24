@@ -4,6 +4,17 @@ import type { SessionEntry, SessionHeader } from "@mariozechner/pi-coding-agent"
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import { toTimestamp } from "../utils.js";
 
+type FileStatCache<T> = {
+  mtimeMs: number;
+  size: number;
+  value: T;
+};
+
+const sessionFilePathsCache = new Map<string, { mtimeMs: number; filePaths: string[] }>();
+const sessionFilePathCache = new Map<string, { sessionDirMtimeMs: number; filePath: string | null }>();
+const sessionHeaderCache = new Map<string, FileStatCache<SessionHeader | null>>();
+const sessionParseCache = new Map<string, FileStatCache<{ header: SessionHeader; entries: SessionEntry[] } | null>>();
+
 function getSessionsDir(): string {
   return path.join(getAgentDir(), "sessions");
 }
@@ -16,45 +27,115 @@ export function getSessionDir(cwd: string): string {
   return path.join(getSessionsDir(), encodeSessionPath(cwd));
 }
 
+function getDirectoryMtimeMs(dirPath: string): number | null {
+  try {
+    return fs.statSync(dirPath).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function readSessionHeader(filePath: string): SessionHeader | null {
+  try {
+    const stat = fs.statSync(filePath);
+    const cached = sessionHeaderCache.get(filePath);
+
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return cached.value;
+    }
+
+    const content = fs.readFileSync(filePath, "utf-8");
+    const firstLine = content.split("\n", 1)[0];
+    if (!firstLine) {
+      sessionHeaderCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: null });
+      return null;
+    }
+
+    const header = JSON.parse(firstLine) as SessionHeader;
+    const value = header.type === "session" ? header : null;
+    sessionHeaderCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value });
+    return value;
+  } catch {
+    sessionHeaderCache.delete(filePath);
+    return null;
+  }
+}
+
 export function getSessionFilePaths(cwd: string): string[] {
   const sessionDir = getSessionDir(cwd);
-  if (!fs.existsSync(sessionDir)) return [];
+  const sessionDirMtimeMs = getDirectoryMtimeMs(sessionDir);
+  if (sessionDirMtimeMs === null) {
+    sessionFilePathsCache.delete(sessionDir);
+    return [];
+  }
 
-  return fs
+  const cached = sessionFilePathsCache.get(sessionDir);
+  if (cached && cached.mtimeMs === sessionDirMtimeMs) {
+    return cached.filePaths;
+  }
+
+  const filePaths = fs
     .readdirSync(sessionDir)
     .filter((file) => file.endsWith(".jsonl"))
     .map((file) => path.join(sessionDir, file));
+
+  sessionFilePathsCache.set(sessionDir, { mtimeMs: sessionDirMtimeMs, filePaths });
+  return filePaths;
 }
 
 export function getSessionFilePath(cwd: string, sessionId: string): string | null {
-  const files = getSessionFilePaths(cwd);
-
-  for (const fullPath of files) {
-    try {
-      const content = fs.readFileSync(fullPath, "utf-8");
-      const firstLine = content.split("\n", 1)[0];
-      if (!firstLine) continue;
-
-      const header: SessionHeader = JSON.parse(firstLine);
-      if (header.type === "session" && header.id === sessionId) {
-        return fullPath;
-      }
-    } catch {}
+  const sessionDir = getSessionDir(cwd);
+  const sessionDirMtimeMs = getDirectoryMtimeMs(sessionDir);
+  if (sessionDirMtimeMs === null) {
+    sessionFilePathCache.delete(`${sessionDir}::${sessionId}`);
+    return null;
   }
 
+  const cacheKey = `${sessionDir}::${sessionId}`;
+  const files = getSessionFilePaths(cwd);
+  const cached = sessionFilePathCache.get(cacheKey);
+  if (cached && cached.sessionDirMtimeMs === sessionDirMtimeMs) {
+    if (!cached.filePath) {
+      return null;
+    }
+
+    if (files.includes(cached.filePath) && readSessionHeader(cached.filePath)?.id === sessionId) {
+      return cached.filePath;
+    }
+  }
+
+  for (const fullPath of files) {
+    if (readSessionHeader(fullPath)?.id === sessionId) {
+      sessionFilePathCache.set(cacheKey, { sessionDirMtimeMs, filePath: fullPath });
+      return fullPath;
+    }
+  }
+
+  sessionFilePathCache.set(cacheKey, { sessionDirMtimeMs, filePath: null });
   return null;
 }
 
 export function parseSessionFile(filePath: string): { header: SessionHeader; entries: SessionEntry[] } | null {
-  if (!fs.existsSync(filePath)) return null;
-
   try {
+    const stat = fs.statSync(filePath);
+    const cached = sessionParseCache.get(filePath);
+
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return cached.value;
+    }
+
     const content = fs.readFileSync(filePath, "utf-8");
     const lines = content.trim().split("\n");
-    if (lines.length === 0) return null;
+    if (lines.length === 0) {
+      sessionParseCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: null });
+      return null;
+    }
 
     const header: SessionHeader = JSON.parse(lines[0]);
-    if (header.type !== "session") return null;
+    if (header.type !== "session") {
+      sessionParseCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: null });
+      return null;
+    }
 
     const entries: SessionEntry[] = [];
 
@@ -69,8 +150,13 @@ export function parseSessionFile(filePath: string): { header: SessionHeader; ent
       }
     }
 
-    return { header, entries };
+    const parsed = { header, entries };
+    sessionHeaderCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: header });
+    sessionParseCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: parsed });
+    return parsed;
   } catch {
+    sessionHeaderCache.delete(filePath);
+    sessionParseCache.delete(filePath);
     return null;
   }
 }

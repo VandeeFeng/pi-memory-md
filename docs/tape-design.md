@@ -121,7 +121,7 @@ class TapeService {
 **ConversationSelector**: Helper for formatting/reducing session entries
 - Token budget filtering (default: 1000 tokens, 40 entries)
 - Can format selected session entries into compact context text
-- Exists as an internal helper; current runtime injection is driven by `MemoryFileSelector`
+- Exists as an internal helper; current runtime delivery is driven by `MemoryFileSelector`
 
 **MemoryFileSelector**: Intelligently selects memory and project files
 - **Smart strategy**: Scans recent project history within a configurable time window (`memoryScan`), expands up to the max window when samples are too small, and ranks files with handoff-first weighting
@@ -280,7 +280,7 @@ tape_reset(archive?: boolean)  // Archive flag is accepted but not implemented
 
 ## Runtime Flow
 
-Tape mode has two different phases: session setup and per-turn context injection.
+Tape mode has two different phases: session setup and per-turn context delivery.
 
 ```
 session_start event
@@ -311,7 +311,7 @@ session_start event
 before_agent_start event
        ↓
 ┌──────────────────────────────────────────────┐
-│ Build injection payload for this turn        │
+│ Build delivery payload for this turn         │
 │ - Select memory files (smart/recent)         │
 │ - Build memory index + tape hint             │
 │ - Optionally add hidden keyword handoff      │
@@ -322,16 +322,16 @@ before_agent_start event
 ```
 
 **Important:** `before_agent_start` runs per agent turn, not just once at session startup.
-- `message-append`: tape-selected memory is injected once on the first agent turn as a hidden custom message (`pi-memory-md-tape`)
+- `message-append`: tape-selected memory is delivered once on the first agent turn as a hidden custom message (`pi-memory-md-tape`)
 - `system-prompt`: tape-selected memory is rebuilt and appended on every agent turn
-- Keyword-triggered handoff instructions can still be injected on later turns as a separate hidden custom message (`pi-memory-md-tape-keyword`)
+- Keyword-triggered handoff instructions can still be delivered on later turns as a separate hidden custom message (`pi-memory-md-tape-keyword`)
 - That hidden keyword message stays within the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request.
 - In pi, appending means returning `systemPrompt: event.systemPrompt + "..."`; returning a bare string would replace the prompt for that turn
 
-## Memory Context Injection
+## Memory Context Delivery
 
 Tape mode changes **which memory files are selected**, not the delivery mechanism itself.
-The injected content is a memory index/summary plus the tape hint.
+The delivered content is a memory index/summary plus the tape hint.
 
 ```typescript
 // settings.tape.context
@@ -343,7 +343,7 @@ The injected content is a memory index/summary plus the tape hint.
   blacklist: [],                // Always exclude these files or directories; other paths still use rg/default ignore filtering
 }
 
-// Injection adds:
+// Delivery adds:
 - Memory file list with descriptions/tags
 - Files under the memory directory still get descriptions/tags even when selected via absolute paths
 - Recently active project file paths when smart mode detects read/edit/write activity
@@ -357,16 +357,16 @@ The injected content is a memory index/summary plus the tape hint.
 
 ### Delivery behavior
 
-| Injection mode | Tape behavior |
-|----------------|---------------|
-| `message-append` | Injects tape-selected memory once as a hidden custom message on the first agent turn (`pi-memory-md-tape`) |
+| Delivery mode | Tape behavior |
+|---------------|---------------|
+| `message-append` | Delivers tape-selected memory once as a hidden custom message on the first agent turn (`pi-memory-md-tape`) |
 | `system-prompt` | Rebuilds tape-selected memory and appends it to the current system prompt on every agent turn |
 
 Keyword-triggered handoff instructions are independent from the main memory payload and may be delivered later as `pi-memory-md-tape-keyword` when a configured keyword matches a user prompt. This remains part of the same agent turn, so it does not trigger an extra LLM request; it only increases the current turn's token usage.
 
 If `settings.tape.anchor.mode === "manual"`, the main tape hint tells the LLM not to create `tape_handoff` anchors proactively, and the tool layer rejects direct `tape_handoff` calls. Keyword-triggered hidden instructions and `/memory-anchor` still authorize handoff creation through runtime binding.
 
-This means tape affects **selection**, while the injection mode controls **delivery frequency and location**.
+This means tape affects **selection**, while the delivery mode controls **delivery frequency and location**.
 
 ### Tape activation rules
 
@@ -376,7 +376,7 @@ Tape runtime is enabled only when all of these checks pass:
 - current `cwd` does not match the built-in system safety exclude list
 - when `settings.tape.onlyGit !== false`, a parent `.git` can be found by walking upward from `cwd`
 
-If any check fails, tape is skipped completely for that turn/session startup: no tape injection, no tape keyword handoff message, and no anchor recording.
+If any check fails, tape is skipped completely for that turn/session startup: no tape delivery, no tape keyword handoff message, and no anchor recording.
 
 **Tape Hint:**
 ```
@@ -418,7 +418,7 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 }
 ```
 
-- `onlyGit` defaults to `true`. When enabled, tape runs only inside a Git repository; otherwise tape inject and anchor recording are skipped.
+- `onlyGit` defaults to `true`. When enabled, tape runs only inside a Git repository; otherwise tape delivery and anchor recording are skipped.
 - `excludeDirs` is a list of absolute directory paths. If `cwd` is equal to or inside any excluded directory, tape is skipped.
 - Built-in system safety excludes are also applied by default and merged with user-defined `excludeDirs`.
 
@@ -608,7 +608,7 @@ tape_read({})
 3. The user prompt length is between 10 and 300 characters
 4. The keyword is actually present in the submitted user message
 
-### Issue: Memory files not injected
+### Issue: Memory files not delivered
 
 **Check:**
 1. `settings.tape.enabled === true`

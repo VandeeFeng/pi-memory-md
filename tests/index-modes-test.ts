@@ -1,4 +1,4 @@
-// Covers injection-mode switching, tape/non-tape exclusivity, keyword handoff queuing, and reload behavior.
+// Covers delivery-mode switching, tape/non-tape exclusivity, keyword handoff queuing, and reload behavior.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -88,7 +88,7 @@ test("before_agent_start uses plain memory context in message-append mode when t
     "pi-memory-md": {
       localPath,
       tape: { enabled: false },
-      injection: "message-append",
+      delivery: "message-append",
     },
   });
 
@@ -122,7 +122,7 @@ test("before_agent_start uses plain memory context in system-prompt mode when ta
     "pi-memory-md": {
       localPath,
       tape: { enabled: false },
-      injection: "system-prompt",
+      delivery: "system-prompt",
     },
   });
 
@@ -149,7 +149,7 @@ test("before_agent_start uses tape context in message-append mode and queues key
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
       localPath,
-      injection: "message-append",
+      delivery: "message-append",
       tape: {
         enabled: true,
         context: { strategy: "recent-only", fileLimit: 5 },
@@ -180,7 +180,7 @@ test("before_agent_start uses tape context in message-append mode and queues key
   assert.equal(extension.sentMessages[1]?.message.customType, "pi-memory-md-tape-keyword");
 });
 
-test("before_agent_start skips tape injection and anchor recording when onlyGit is true outside git repos", async () => {
+test("before_agent_start skips tape delivery and anchor recording when onlyGit is true outside git repos", async () => {
   const homeDir = createTempDir("pi-memory-md-index-mode-home-git-only");
   const projectDir = createTempDir("pi-memory-md-index-mode-project-git-only");
   const localPath = path.join(homeDir, "memory-root");
@@ -189,7 +189,7 @@ test("before_agent_start skips tape injection and anchor recording when onlyGit 
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
       localPath,
-      injection: "message-append",
+      delivery: "message-append",
       tape: {
         enabled: true,
         onlyGit: true,
@@ -217,13 +217,13 @@ test("before_agent_start skips tape injection and anchor recording when onlyGit 
     false,
   );
   assert.equal(
-    ui.notifications.some((item) => item.message.includes("Memory injected:")),
+    ui.notifications.some((item) => item.message.includes("Memory delivered:")),
     false,
   );
   assert.equal(fs.existsSync(path.join(localPath, "TAPE")), false);
 });
 
-test("before_agent_start skips tape injection when cwd matches excluded dirs", async () => {
+test("before_agent_start skips tape delivery when cwd matches excluded dirs", async () => {
   const homeDir = createTempDir("pi-memory-md-index-mode-home-excluded");
   const blockedRoot = createTempDir("pi-memory-md-index-mode-blocked-root");
   const projectDir = path.join(blockedRoot, "project");
@@ -235,7 +235,7 @@ test("before_agent_start skips tape injection when cwd matches excluded dirs", a
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
       localPath,
-      injection: "message-append",
+      delivery: "message-append",
       tape: {
         enabled: true,
         excludeDirs: [blockedRoot],
@@ -265,7 +265,7 @@ test("before_agent_start skips tape injection when cwd matches excluded dirs", a
   assert.equal(fs.existsSync(path.join(localPath, "TAPE")), false);
 });
 
-test("before_agent_start uses tape context in system-prompt mode and keeps injecting on later calls", async () => {
+test("before_agent_start uses tape context in system-prompt mode and keeps delivering on later calls", async () => {
   const homeDir = createTempDir("pi-memory-md-index-mode-home-4");
   const projectDir = createTempDir("pi-memory-md-index-mode-project-4");
   const localPath = path.join(homeDir, "memory-root");
@@ -275,7 +275,7 @@ test("before_agent_start uses tape context in system-prompt mode and keeps injec
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
       localPath,
-      injection: "system-prompt",
+      delivery: "system-prompt",
       tape: {
         enabled: true,
         context: { strategy: "recent-only", fileLimit: 5 },
@@ -312,7 +312,7 @@ test("reloading extension picks up updated settings and switches behavior", asyn
     "pi-memory-md": {
       localPath,
       tape: { enabled: false },
-      injection: "message-append",
+      delivery: "message-append",
     },
   });
 
@@ -329,7 +329,7 @@ test("reloading extension picks up updated settings and switches behavior", asyn
         enabled: true,
         context: { strategy: "recent-only", fileLimit: 5 },
       },
-      injection: "system-prompt",
+      delivery: "system-prompt",
     },
   });
 

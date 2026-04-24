@@ -1,9 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import matter from "gray-matter";
-import { hoursAgoIso, resolveFrom, toRelativeIfInside, toTimestamp } from "../utils.js";
+import { DEFAULT_MEMORY_SCAN, normalizeMemoryScanRange } from "../memory-core.js";
+import { hoursAgoIso, isPathInside, resolveFrom, toRelativeIfInside, toTimestamp } from "../utils.js";
 import {
   analyzePathAccess,
   analyzeRecentLineRanges,
@@ -15,6 +17,7 @@ import {
 import type { TapeService } from "./tape-service.js";
 
 const CHARS_PER_TOKEN = 4;
+const execFileAsync = promisify(execFile);
 
 export interface TapeMessage {
   role: "user" | "assistant" | "system" | "tool";
@@ -123,7 +126,6 @@ export class ConversationSelector {
   }
 }
 
-const DEFAULT_MEMORY_SCAN: [number, number] = [72, 168];
 const MIN_SMART_ACCESS_SAMPLES = 5;
 const ANCHOR_ENTRY_BOOST_WINDOW = 15;
 const DEFAULT_IGNORED_DIRS = new Set([
@@ -159,18 +161,14 @@ const DEFAULT_IGNORED_FILES = new Set([
   "yarn.lock",
 ]);
 
-function isInsideDirectory(parentDir: string, targetPath: string): boolean {
-  const normalizedParent = path.resolve(parentDir);
-  const normalizedTarget = path.resolve(targetPath);
-  return normalizedTarget === normalizedParent || normalizedTarget.startsWith(`${normalizedParent}${path.sep}`);
-}
-
 export function matchesDefaultIgnoredPath(filePath: string, projectRoot?: string): boolean {
   const normalizedPath = path.resolve(filePath);
-  const relativePath =
-    projectRoot && isInsideDirectory(projectRoot, normalizedPath)
-      ? path.relative(projectRoot, normalizedPath)
-      : normalizedPath;
+  let relativePath = normalizedPath;
+
+  if (projectRoot && isPathInside(projectRoot, normalizedPath)) {
+    relativePath = path.relative(projectRoot, normalizedPath);
+  }
+
   const segments = relativePath.split(path.sep).filter(Boolean);
   const baseName = path.basename(normalizedPath);
 
@@ -180,24 +178,24 @@ export function matchesDefaultIgnoredPath(filePath: string, projectRoot?: string
   return segments.some((segment) => DEFAULT_IGNORED_DIRS.has(segment) || segment.startsWith("."));
 }
 
-function getRipgrepVisibleProjectPaths(projectRoot: string): Set<string> | null {
-  const result = spawnSync("rg", ["--files"], {
-    cwd: projectRoot,
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
+async function getRipgrepVisibleProjectPaths(projectRoot: string): Promise<Set<string> | null> {
+  try {
+    const { stdout } = await execFileAsync("rg", ["--files"], {
+      cwd: projectRoot,
+      encoding: "utf-8",
+      windowsHide: true,
+    });
 
-  if (result.error || (result.status !== 0 && result.status !== 1)) {
+    return new Set(
+      stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((filePath) => path.resolve(projectRoot, filePath)),
+    );
+  } catch {
     return null;
   }
-
-  return new Set(
-    result.stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((filePath) => path.resolve(projectRoot, filePath)),
-  );
 }
 
 // Memory file selection.
@@ -218,32 +216,32 @@ export class MemoryFileSelector {
     this.blacklist = [...new Set(options?.blacklist ?? [])];
   }
 
-  selectFilesForContext(
+  async selectFilesForContext(
     strategy: "recent-only" | "smart",
     limit: number,
     options?: { memoryScan?: [number, number] },
-  ): string[] {
+  ): Promise<string[]> {
     if (strategy === "recent-only") {
       this.lastSelectionScanHours = null;
       this.lastSmartLineRanges = new Map();
-      return this.scanMemoryDirectory(limit);
+      return this.scanMemoryDirectoryAsync(limit);
     }
 
-    return this.selectSmart(limit, options?.memoryScan ?? DEFAULT_MEMORY_SCAN);
+    return this.selectSmartAsync(limit, options?.memoryScan ?? DEFAULT_MEMORY_SCAN);
   }
 
-  finalizeContextFiles(filePaths: string[]): string[] {
-    const selectedPaths = this.filterInjectedPaths(filePaths);
+  async finalizeContextFiles(filePaths: string[]): Promise<string[]> {
+    const selectedPaths = await this.filterDeliverablePathsAsync(filePaths);
     const selectedPathSet = new Set(selectedPaths.map((filePath) => path.resolve(this.toAbsolutePath(filePath))));
-    const whitelistedPaths = this.resolveListedPaths(this.whitelist).filter(
+    const whitelistedPaths = (await this.resolveListedPathsAsync(this.whitelist)).filter(
       (filePath) => !selectedPathSet.has(path.resolve(filePath)),
     );
 
     return [...whitelistedPaths, ...selectedPaths];
   }
 
-  private selectSmart(limit: number, memoryScan: [number, number]): string[] {
-    const [startHours, maxHours] = this.normalizeMemoryScan(memoryScan);
+  private async selectSmartAsync(limit: number, memoryScan: [number, number]): Promise<string[]> {
+    const [startHours, maxHours] = normalizeMemoryScanRange(memoryScan);
     let hours = startHours;
     let pathStats = new Map<string, MemoryPathStats>();
     let effectiveHours: number | null = null;
@@ -269,10 +267,10 @@ export class MemoryFileSelector {
     this.lastSelectionScanHours = effectiveHours;
     if (pathStats.size === 0) {
       this.lastSmartLineRanges = new Map();
-      return this.scanMemoryDirectory(limit);
+      return this.scanMemoryDirectoryAsync(limit);
     }
 
-    const selectedPaths = this.filterInjectedPaths(sortPathsByStats(pathStats)).slice(0, limit);
+    const selectedPaths = (await this.filterDeliverablePathsAsync(sortPathsByStats(pathStats))).slice(0, limit);
     this.lastSmartLineRanges = effectiveHours
       ? analyzeRecentLineRanges(this.getEntriesWithinHours(effectiveHours), {
           targetPaths: selectedPaths,
@@ -284,49 +282,68 @@ export class MemoryFileSelector {
     return selectedPaths;
   }
 
-  buildContextFromFiles(
+  async buildContextFromFilesAsync(
     filePaths: string[],
     options?: { highlightedFiles?: string[]; lineRangeHours?: number },
-  ): string {
-    const existingPaths = [...new Set(filePaths.filter((filePath) => this.pathExists(filePath)))];
-    if (existingPaths.length === 0) return "";
+  ): Promise<string> {
+    const { fileEntries, highlightedPaths, rangeMap } = this.prepareContextEntries(filePaths, options);
+    if (fileEntries.length === 0) return "";
+    return this.renderContextFromEntriesAsync(fileEntries, highlightedPaths, rangeMap);
+  }
 
+  private prepareContextEntries(
+    filePaths: string[],
+    options?: { highlightedFiles?: string[]; lineRangeHours?: number },
+  ): {
+    fileEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>;
+    highlightedPaths: Set<string>;
+    rangeMap: Map<string, LineRange[]>;
+  } {
+    const existingPaths = [...new Set(filePaths.filter((filePath) => this.pathExists(filePath)))];
     const highlightedPaths = new Set(
       (options?.highlightedFiles ?? [])
         .filter((filePath) => this.pathExists(filePath))
         .map((filePath) => this.toMemoryRelativePath(filePath) ?? filePath),
     );
-    const fileEntries = existingPaths.map((filePath) => {
-      const absolutePath = path.resolve(this.toAbsolutePath(filePath));
-      return {
-        absolutePath,
-        originalPath: filePath,
-        displayPath: this.toMemoryRelativePath(filePath) ?? filePath,
-      };
+    const fileEntries = existingPaths.map((filePath) => ({
+      absolutePath: path.resolve(this.toAbsolutePath(filePath)),
+      originalPath: filePath,
+      displayPath: this.toMemoryRelativePath(filePath) ?? filePath,
+    }));
+    const rangeMap = this.getContextRangeMap(fileEntries, options?.lineRangeHours);
+
+    return { fileEntries, highlightedPaths, rangeMap };
+  }
+
+  private getContextRangeMap(
+    fileEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>,
+    requestedHours?: number,
+  ): Map<string, LineRange[]> {
+    const lineRangeHours = requestedHours ?? this.lastSelectionScanHours;
+    const shouldReuseLastScan = requestedHours === undefined && lineRangeHours === this.lastSelectionScanHours;
+
+    if (shouldReuseLastScan) {
+      return this.lastSmartLineRanges;
+    }
+
+    if (!lineRangeHours) {
+      return new Map<string, LineRange[]>();
+    }
+
+    return analyzeRecentLineRanges(this.getEntriesWithinHours(lineRangeHours), {
+      targetPaths: fileEntries.map((entry) => entry.originalPath),
+      resolveTrackedPath: (toolName, entryPath) => this.resolveTrackedPath(toolName, entryPath),
+      toAbsolutePath: (filePath) => this.toAbsolutePath(filePath),
     });
-    const lineRangeHours = options?.lineRangeHours ?? this.lastSelectionScanHours;
-    const rangeMap =
-      options?.lineRangeHours === undefined && lineRangeHours === this.lastSelectionScanHours
-        ? this.lastSmartLineRanges
-        : lineRangeHours
-          ? analyzeRecentLineRanges(this.getEntriesWithinHours(lineRangeHours), {
-              targetPaths: fileEntries.map((entry) => entry.originalPath),
-              resolveTrackedPath: (toolName, entryPath) => this.resolveTrackedPath(toolName, entryPath),
-              toAbsolutePath: (filePath) => this.toAbsolutePath(filePath),
-            })
-          : new Map();
-    const memoryEntries = fileEntries.filter((entry) => !path.isAbsolute(entry.displayPath));
-    const projectEntries = fileEntries.filter((entry) => path.isAbsolute(entry.displayPath));
-    const formatPathLabel = (filePath: string): string =>
-      highlightedPaths.has(filePath) ? `${filePath} [high priority]` : filePath;
-    const appendLineRanges = (targetLines: string[], absolutePath: string): void => {
-      const lineRanges = rangeMap.get(absolutePath);
-      if (!lineRanges || lineRanges.length === 0) return;
-      targetLines.push(
-        `  recent focus: ${lineRanges.map((range: LineRange) => `${range.kind} ${range.start}-${range.end}`).join(", ")}`,
-      );
-    };
-    const lines = ["# Project Memory", "", `Memory directory: ${this.memoryDir}`];
+  }
+
+  private async renderContextFromEntriesAsync(
+    fileEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>,
+    highlightedPaths: Set<string>,
+    rangeMap: Map<string, LineRange[]>,
+  ): Promise<string> {
+    const lines = this.createContextHeader();
+    const { memoryEntries, projectEntries } = this.splitContextEntries(fileEntries);
 
     if (memoryEntries.length > 0) {
       lines.push(
@@ -336,30 +353,89 @@ export class MemoryFileSelector {
         "",
       );
 
-      for (const entry of memoryEntries) {
-        const { description, tags } = this.extractFrontmatter(entry.displayPath);
-        lines.push(`- ${formatPathLabel(entry.displayPath)}`);
-        appendLineRanges(lines, entry.absolutePath);
-        lines.push(`  Description: ${description}`, `  Tags: ${tags}`, "");
-      }
-    }
-
-    if (projectEntries.length > 0) {
-      lines.push(
-        ...(memoryEntries.length > 0 ? ["---", ""] : ["", ""]),
-        "Recently active project files (full paths from read/edit/write tool usage):",
-        "",
+      const frontmatters = await Promise.all(
+        memoryEntries.map((entry) => this.extractFrontmatterAsync(entry.displayPath)),
       );
-
-      for (const entry of projectEntries) {
-        lines.push(`- ${formatPathLabel(entry.displayPath)}`);
-        appendLineRanges(lines, entry.absolutePath);
+      for (let index = 0; index < memoryEntries.length; index++) {
+        const entry = memoryEntries[index];
+        const frontmatter = frontmatters[index];
+        if (!entry || !frontmatter) continue;
+        this.appendMemoryEntry(lines, entry, highlightedPaths, rangeMap, frontmatter);
       }
-
-      lines.push("");
     }
 
+    this.appendProjectEntries(lines, projectEntries, highlightedPaths, rangeMap, memoryEntries.length > 0);
     return lines.join("\n");
+  }
+
+  private createContextHeader(): string[] {
+    return ["# Project Memory", "", `Memory directory: ${this.memoryDir}`];
+  }
+
+  private splitContextEntries(
+    fileEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>,
+  ): {
+    memoryEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>;
+    projectEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>;
+  } {
+    return {
+      memoryEntries: fileEntries.filter((entry) => !path.isAbsolute(entry.displayPath)),
+      projectEntries: fileEntries.filter((entry) => path.isAbsolute(entry.displayPath)),
+    };
+  }
+
+  private appendMemoryEntry(
+    lines: string[],
+    entry: { absolutePath: string; originalPath: string; displayPath: string },
+    highlightedPaths: Set<string>,
+    rangeMap: Map<string, LineRange[]>,
+    frontmatter: { description: string; tags: string },
+  ): void {
+    lines.push(`- ${this.formatPathLabel(entry.displayPath, highlightedPaths)}`);
+    this.appendLineRanges(lines, entry.absolutePath, rangeMap);
+    lines.push(`  Description: ${frontmatter.description}`, `  Tags: ${frontmatter.tags}`, "");
+  }
+
+  private appendProjectEntries(
+    lines: string[],
+    projectEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>,
+    highlightedPaths: Set<string>,
+    rangeMap: Map<string, LineRange[]>,
+    hasMemoryEntries: boolean,
+  ): void {
+    if (projectEntries.length === 0) {
+      return;
+    }
+
+    if (hasMemoryEntries) {
+      lines.push("---", "");
+    } else {
+      lines.push("", "");
+    }
+
+    lines.push("Recently active project files (full paths from read/edit/write tool usage):", "");
+
+    for (const entry of projectEntries) {
+      lines.push(`- ${this.formatPathLabel(entry.displayPath, highlightedPaths)}`);
+      this.appendLineRanges(lines, entry.absolutePath, rangeMap);
+    }
+
+    lines.push("");
+  }
+
+  private formatPathLabel(filePath: string, highlightedPaths: Set<string>): string {
+    return highlightedPaths.has(filePath) ? `${filePath} [high priority]` : filePath;
+  }
+
+  private appendLineRanges(lines: string[], absolutePath: string, rangeMap: Map<string, LineRange[]>): void {
+    const lineRanges = rangeMap.get(absolutePath);
+    if (!lineRanges || lineRanges.length === 0) {
+      return;
+    }
+
+    lines.push(
+      `  recent focus: ${lineRanges.map((range: LineRange) => `${range.kind} ${range.start}-${range.end}`).join(", ")}`,
+    );
   }
 
   private resolveTrackedPath(toolName: SupportedPathToolName, entryPath: string): string | null {
@@ -379,13 +455,13 @@ export class MemoryFileSelector {
     return fs.existsSync(fullPath);
   }
 
-  private filterInjectedPaths(filePaths: string[]): string[] {
+  private async filterDeliverablePathsAsync(filePaths: string[]): Promise<string[]> {
     const existingPaths = [...new Set(filePaths.filter((filePath) => this.pathExists(filePath)))];
     const projectPaths = existingPaths.filter(
       (filePath) => path.isAbsolute(filePath) && !this.toMemoryRelativePath(filePath),
     );
-    const ripgrepVisiblePaths = projectPaths.some((filePath) => isInsideDirectory(this.projectRoot, filePath))
-      ? getRipgrepVisibleProjectPaths(this.projectRoot)
+    const ripgrepVisiblePaths = projectPaths.some((filePath) => isPathInside(this.projectRoot, filePath))
+      ? await getRipgrepVisibleProjectPaths(this.projectRoot)
       : new Set<string>();
 
     return existingPaths.filter((filePath) => {
@@ -393,7 +469,7 @@ export class MemoryFileSelector {
       if (this.matchesListedPath(filePath, this.whitelist)) return true;
       if (this.toMemoryRelativePath(filePath)) return true;
       if (matchesDefaultIgnoredPath(filePath, this.projectRoot)) return false;
-      if (!isInsideDirectory(this.projectRoot, this.toAbsolutePath(filePath))) return true;
+      if (!isPathInside(this.projectRoot, this.toAbsolutePath(filePath))) return true;
       return ripgrepVisiblePaths?.has(path.resolve(this.toAbsolutePath(filePath))) ?? true;
     });
   }
@@ -425,36 +501,41 @@ export class MemoryFileSelector {
     return toTimestamp(windowEntries[windowEntries.length - 1].timestamp);
   }
 
-  private normalizeMemoryScan(memoryScan: [number, number]): [number, number] {
-    const [startHours, maxHours] = memoryScan;
-    const normalizedStart =
-      Number.isFinite(startHours) && startHours > 0 ? Math.floor(startHours) : DEFAULT_MEMORY_SCAN[0];
-    const normalizedMax = Number.isFinite(maxHours) && maxHours > 0 ? Math.floor(maxHours) : DEFAULT_MEMORY_SCAN[1];
-    return [normalizedStart, Math.max(normalizedStart, normalizedMax)];
-  }
-
-  private scanMemoryDirectory(limit: number): string[] {
+  private async scanMemoryDirectoryAsync(limit: number): Promise<string[]> {
     const coreDir = path.join(this.memoryDir, "core");
-    if (!fs.existsSync(coreDir)) return [];
+
+    try {
+      await fs.promises.access(coreDir);
+    } catch {
+      return [];
+    }
 
     const paths: Array<{ relPath: string; modifiedAt: number }> = [];
 
-    const scanDir = (dir: string, base: string): void => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name.startsWith(".")) continue;
+    const scanDir = async (dir: string, base: string): Promise<void> => {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
 
-        const fullPath = path.join(dir, entry.name);
-        const relPath = path.join(base, entry.name);
+      await Promise.all(
+        entries.map(async (entry) => {
+          if (entry.name.startsWith(".")) return;
 
-        if (entry.isDirectory()) {
-          scanDir(fullPath, relPath);
-        } else if (entry.isFile() && entry.name.endsWith(".md")) {
-          paths.push({ relPath, modifiedAt: fs.statSync(fullPath).mtimeMs });
-        }
-      }
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.join(base, entry.name);
+
+          if (entry.isDirectory()) {
+            await scanDir(fullPath, relPath);
+            return;
+          }
+
+          if (entry.isFile() && entry.name.endsWith(".md")) {
+            const stat = await fs.promises.stat(fullPath);
+            paths.push({ relPath, modifiedAt: stat.mtimeMs });
+          }
+        }),
+      );
     };
 
-    scanDir(coreDir, "core");
+    await scanDir(coreDir, "core");
 
     return paths
       .sort((left, right) => right.modifiedAt - left.modifiedAt || left.relPath.localeCompare(right.relPath))
@@ -462,15 +543,19 @@ export class MemoryFileSelector {
       .map(({ relPath }) => relPath);
   }
 
-  private extractFrontmatter(relPath: string): { description: string; tags: string } {
+  private parseFrontmatter(content: string): { description: string; tags: string } {
+    const { data } = matter(content);
+    return {
+      description: (data.description as string)?.trim() || "No description",
+      tags: Array.isArray(data.tags) && data.tags.length > 0 ? data.tags.join(", ") : "none",
+    };
+  }
+
+  private async extractFrontmatterAsync(relPath: string): Promise<{ description: string; tags: string }> {
     const fullPath = path.join(this.memoryDir, relPath);
 
     try {
-      const { data } = matter.read(fullPath);
-      return {
-        description: (data.description as string)?.trim() || "No description",
-        tags: Array.isArray(data.tags) && data.tags.length > 0 ? data.tags.join(", ") : "none",
-      };
+      return this.parseFrontmatter(await fs.promises.readFile(fullPath, "utf-8"));
     } catch {
       return { description: "No description", tags: "none" };
     }
@@ -485,23 +570,22 @@ export class MemoryFileSelector {
     return path.resolve(this.projectRoot, filePath);
   }
 
-  private resolveListedPaths(entries: string[]): string[] {
+  private async resolveListedPathsAsync(entries: string[]): Promise<string[]> {
     const resolvedPaths = new Set<string>();
 
-    const collectFiles = (targetPath: string): void => {
-      if (!fs.existsSync(targetPath)) return;
+    const collectFiles = async (targetPath: string): Promise<void> => {
+      try {
+        const stat = await fs.promises.stat(targetPath);
+        if (stat.isFile()) {
+          resolvedPaths.add(targetPath);
+          return;
+        }
 
-      const stat = fs.statSync(targetPath);
-      if (stat.isFile()) {
-        resolvedPaths.add(targetPath);
-        return;
-      }
+        if (!stat.isDirectory()) return;
 
-      if (!stat.isDirectory()) return;
-
-      for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
-        collectFiles(path.join(targetPath, entry.name));
-      }
+        const childEntries = await fs.promises.readdir(targetPath, { withFileTypes: true });
+        await Promise.all(childEntries.map((entry) => collectFiles(path.join(targetPath, entry.name))));
+      } catch {}
     };
 
     for (const entry of entries) {
@@ -510,9 +594,7 @@ export class MemoryFileSelector {
         ? [absoluteEntry]
         : [path.resolve(this.memoryDir, entry), path.resolve(this.projectRoot, entry)];
 
-      for (const candidatePath of candidatePaths) {
-        collectFiles(candidatePath);
-      }
+      await Promise.all(candidatePaths.map((candidatePath) => collectFiles(candidatePath)));
     }
 
     return [...resolvedPaths];

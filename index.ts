@@ -1,9 +1,11 @@
 import fs from "node:fs";
+import { setImmediate as waitForNextTick } from "node:timers/promises";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getHookActions, runHookTrigger } from "./hooks.js";
 import {
-  buildMemoryContext,
+  buildMemoryContextAsync,
   countMemoryContextFiles,
+  DEFAULT_MEMORY_SCAN,
   formatMemoryContext,
   getMemoryCoreDir,
   getMemoryDir,
@@ -26,11 +28,15 @@ import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
 import { getProjectName, getTapeBasePath } from "./utils.js";
 
+type CachedContext = { content: string; fileCount: number };
+
 type ExtensionState = {
   tapeToolsRegistered: boolean;
   sessionStartHookPromise: ReturnType<typeof runHookTrigger> | null;
-  initialMemoryContext: string | null;
-  hasInjectedInitialContext: boolean;
+  contextWarmupPromise: Promise<void> | null;
+  initialMemoryContext: CachedContext | null;
+  initialTapeContext: CachedContext | null;
+  hasDeliveredInitialContext: boolean;
   pendingHandoffMatch: PendingHandoffMatch | null;
   tapeActivation: TapeActivationResult | null;
   activeTapeRuntime: {
@@ -44,8 +50,10 @@ function createExtensionState(): ExtensionState {
   return {
     tapeToolsRegistered: false,
     sessionStartHookPromise: null,
+    contextWarmupPromise: null,
     initialMemoryContext: null,
-    hasInjectedInitialContext: false,
+    initialTapeContext: null,
+    hasDeliveredInitialContext: false,
     pendingHandoffMatch: null,
     tapeActivation: null,
     activeTapeRuntime: null,
@@ -107,6 +115,60 @@ async function runHookAction(pi: ExtensionAPI, settings: MemoryMdSettings, actio
   }
 }
 
+async function cacheInitialContext(
+  settings: MemoryMdSettings,
+  state: ExtensionState,
+  ctx: ExtensionContext,
+): Promise<void> {
+  const baseMemoryContext = settings.enabled ? await buildMemoryContextAsync(settings, ctx.cwd) : null;
+  state.initialMemoryContext = baseMemoryContext
+    ? {
+        content: formatMemoryContext(baseMemoryContext),
+        fileCount: countMemoryContextFiles(baseMemoryContext),
+      }
+    : null;
+
+  const tapeRuntime = state.tapeActivation?.enabled === true ? state.activeTapeRuntime : null;
+  if (!tapeRuntime) {
+    state.initialTapeContext = null;
+    return;
+  }
+
+  const { fileLimit = 10, strategy = "smart", memoryScan = DEFAULT_MEMORY_SCAN } = settings.tape?.context ?? {};
+  const memoryFiles = await tapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
+  const selectedFiles = await tapeRuntime.selector.finalizeContextFiles(memoryFiles);
+  const highlightedFiles = [...new Set(memoryFiles.filter((filePath) => selectedFiles.includes(filePath)))].slice(0, 3);
+
+  state.initialTapeContext = {
+    content:
+      (await tapeRuntime.selector.buildContextFromFilesAsync(selectedFiles, { highlightedFiles })) +
+      buildTapeHint(settings),
+    fileCount: selectedFiles.length,
+  };
+}
+
+function scheduleContextWarmup(
+  settings: MemoryMdSettings,
+  state: ExtensionState,
+  ctx: ExtensionContext,
+  waitFor?: Promise<unknown> | null,
+): void {
+  const warmup = (async () => {
+    if (waitFor) {
+      await waitFor;
+    }
+    await waitForNextTick();
+    await cacheInitialContext(settings, state, ctx);
+  })();
+
+  const trackedWarmup = warmup.finally(() => {
+    if (state.contextWarmupPromise === trackedWarmup) {
+      state.contextWarmupPromise = null;
+    }
+  });
+  state.contextWarmupPromise = trackedWarmup;
+}
+
 function initMemoryContext(
   pi: ExtensionAPI,
   settings: MemoryMdSettings,
@@ -121,8 +183,15 @@ function initMemoryContext(
     if (options.showNotification) {
       ctx.ui.notify("Memory-md not initialized. Use /memory-init to set up project memory.", "info");
     }
+    state.initialMemoryContext = null;
+    state.initialTapeContext = null;
+    state.contextWarmupPromise = null;
     return false;
   }
+
+  state.hasDeliveredInitialContext = false;
+  state.initialMemoryContext = null;
+  state.initialTapeContext = null;
 
   if (options.runSessionStartHooks && settings.localPath && getHookActions(settings, "sessionStart").length > 0) {
     state.sessionStartHookPromise = runHookTrigger(settings, "sessionStart", (action) =>
@@ -136,10 +205,11 @@ function initMemoryContext(
       }
       return results;
     });
+  } else {
+    state.sessionStartHookPromise = null;
   }
 
-  state.initialMemoryContext = buildMemoryContext(settings, ctx.cwd);
-  state.hasInjectedInitialContext = false;
+  scheduleContextWarmup(settings, state, ctx, state.sessionStartHookPromise);
   return true;
 }
 
@@ -202,19 +272,25 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
   pi.on("before_agent_start", async (event, ctx) => {
     ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
 
+    if (!state.initialMemoryContext && !state.initialTapeContext && !state.contextWarmupPromise) {
+      initMemoryContext(pi, settings, state, ctx, { showNotification: true, runSessionStartHooks: false });
+    }
+
+    if (state.contextWarmupPromise) {
+      await state.contextWarmupPromise;
+    }
+
     if (state.sessionStartHookPromise) {
       await state.sessionStartHookPromise;
       state.sessionStartHookPromise = null;
     }
 
-    if (!settings.tape?.enabled) {
-      state.initialMemoryContext = settings.enabled ? buildMemoryContext(settings, ctx.cwd) : null;
-    }
-
-    const mode = settings.injection || "message-append";
+    const mode = settings.delivery ?? settings.injection ?? "message-append";
+    const shouldDeliverInitialContext = mode === "system-prompt" || !state.hasDeliveredInitialContext;
     const tapeEnabled = settings.tape?.enabled;
     const tapeActive = state.tapeActivation?.enabled === true && state.activeTapeRuntime !== null;
     const keywordHandoff = tapeActive ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
+
     if (state.pendingHandoffMatch?.trigger !== "manual") {
       state.pendingHandoffMatch = keywordHandoff ? { trigger: "keyword", instruction: keywordHandoff } : null;
     }
@@ -223,58 +299,44 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       ctx.ui.notify(`Tape keyword detected: ${keywordHandoff.primary}`, "info");
     }
 
-    if (tapeActive && state.activeTapeRuntime && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
-      const { fileLimit = 10, strategy = "smart", memoryScan = [72, 168] } = settings.tape?.context ?? {};
-      const memoryFiles = state.activeTapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
-      const selectedFiles = state.activeTapeRuntime.selector.finalizeContextFiles(memoryFiles);
-      const highlightedFiles = [...new Set(memoryFiles.filter((filePath) => selectedFiles.includes(filePath)))].slice(
-        0,
-        3,
-      );
-      const memoryContext = state.activeTapeRuntime.selector.buildContextFromFiles(selectedFiles, {
-        highlightedFiles,
-      });
-      const tapeHint = buildTapeHint(settings);
-      const fileCount = selectedFiles.length;
+    queueKeywordHandoffMessage(pi, keywordHandoff);
+
+    if (tapeActive && state.initialTapeContext && shouldDeliverInitialContext) {
+      const { content, fileCount } = state.initialTapeContext;
+
+      ctx.ui.notify(`Tape mode: ${fileCount} memory files delivered (${mode})`, "info");
 
       if (mode === "system-prompt") {
-        queueKeywordHandoffMessage(pi, keywordHandoff);
-        const injectedPrompt = [memoryContext + tapeHint].filter(Boolean).join("\n\n");
-        ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (system-prompt)`, "info");
-        return { systemPrompt: `${event.systemPrompt}\n\n${injectedPrompt}` };
+        return { systemPrompt: `${event.systemPrompt}\n\n${content}` };
       }
 
-      queueKeywordHandoffMessage(pi, keywordHandoff);
-      state.hasInjectedInitialContext = true;
-      const injectedMessage = [memoryContext + tapeHint].filter(Boolean).join("\n\n");
-      ctx.ui.notify(`Tape mode: ${fileCount} memory files injected (message-append)`, "info");
-      return { message: { customType: "pi-memory-md-tape", content: injectedMessage, display: false } };
-    }
-
-    if (keywordHandoff) {
-      queueKeywordHandoffMessage(pi, keywordHandoff);
+      state.hasDeliveredInitialContext = true;
+      return {
+        message: { customType: "pi-memory-md-tape", content, display: false },
+      };
     }
 
     if (tapeEnabled && !tapeActive) {
       return;
     }
 
-    if (state.initialMemoryContext && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
-      const fileCount = countMemoryContextFiles(state.initialMemoryContext);
-      ctx.ui.notify(`Memory injected: ${fileCount} files (${mode})`, "info");
+    if (state.initialMemoryContext && shouldDeliverInitialContext) {
+      const { content, fileCount } = state.initialMemoryContext;
+
+      ctx.ui.notify(`Memory delivered: ${fileCount} files (${mode})`, "info");
 
       if (mode === "message-append") {
-        state.hasInjectedInitialContext = true;
+        state.hasDeliveredInitialContext = true;
         return {
           message: {
             customType: "pi-memory-md",
-            content: formatMemoryContext(state.initialMemoryContext),
+            content,
             display: false,
           },
         };
       }
 
-      return { systemPrompt: `${event.systemPrompt}\n\n${formatMemoryContext(state.initialMemoryContext)}` };
+      return { systemPrompt: `${event.systemPrompt}\n\n${content}` };
     }
 
     return undefined;
@@ -371,30 +433,30 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
   pi.registerCommand("memory-refresh", {
     description: "Refresh memory context from files",
     handler: async (_args, ctx) => {
-      const memoryContext = buildMemoryContext(settings, ctx.cwd);
+      await cacheInitialContext(settings, state, ctx);
 
-      if (!memoryContext) {
+      if (!state.initialMemoryContext) {
         ctx.ui.notify("No memory files found to refresh", "warning");
         return;
       }
 
-      state.initialMemoryContext = memoryContext;
-      state.hasInjectedInitialContext = false;
+      state.hasDeliveredInitialContext = false;
 
-      const mode = settings.injection || "message-append";
-      const fileCount = countMemoryContextFiles(memoryContext);
+      const mode = settings.delivery ?? settings.injection ?? "message-append";
+
+      const { content, fileCount } = state.initialMemoryContext;
 
       if (mode === "message-append") {
         pi.sendMessage({
           customType: "pi-memory-md-refresh",
-          content: formatMemoryContext(memoryContext),
+          content,
           display: false,
         });
-        ctx.ui.notify(`Memory refreshed: ${fileCount} files injected (${mode})`, "info");
+        ctx.ui.notify(`Memory refreshed: ${fileCount} files delivered (${mode})`, "info");
         return;
       }
 
-      ctx.ui.notify(`Memory cache refreshed: ${fileCount} files (will be injected on next prompt)`, "info");
+      ctx.ui.notify(`Memory cache refreshed: ${fileCount} files (will be delivered on next prompt)`, "info");
     },
   });
 

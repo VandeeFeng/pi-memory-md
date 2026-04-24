@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import { nowIso, toTimestamp } from "../utils.js";
 import { AnchorStore, type TapeAnchor, type TapeAnchorKind, type TapeAnchorMeta } from "./tape-anchor.js";
@@ -83,6 +84,7 @@ export class TapeService {
   private sessionManager: TapeSessionManager | null = null;
   private anchorLabelPrefix = DEFAULT_ANCHOR_LABEL_PREFIX;
   private labelWriter: TapeLabelSetter | null = null;
+  private entryCache = new Map<"session" | "project", { signature: string; entries: SessionEntry[] }>();
 
   constructor(tapeBasePath: string, projectName: string, sessionId: string, cwd: string) {
     this.sessionId = sessionId;
@@ -141,22 +143,51 @@ export class TapeService {
     return this.anchorStore.findByName(name);
   }
 
+  private buildEntryCacheSignature(filePaths: string[]): string {
+    return filePaths
+      .map((filePath) => {
+        try {
+          const stat = fs.statSync(filePath);
+          return `${filePath}:${stat.mtimeMs}:${stat.size}`;
+        } catch {
+          return `${filePath}:missing`;
+        }
+      })
+      .join("|");
+  }
+
   private loadEntries(scope: "session" | "project"): SessionEntry[] {
+    const filePaths =
+      scope === "session"
+        ? (() => {
+            const sessionFile = getSessionFilePath(this.cwd, this.sessionId);
+            return sessionFile ? [sessionFile] : [];
+          })()
+        : getSessionFilePaths(this.cwd);
+
+    const signature = this.buildEntryCacheSignature(filePaths);
+    const cached = this.entryCache.get(scope);
+    if (cached && cached.signature === signature) {
+      return cached.entries;
+    }
+
     if (scope === "session") {
-      const sessionFile = getSessionFilePath(this.cwd, this.sessionId);
-      if (!sessionFile) return [];
-      const parsed = parseSessionFile(sessionFile);
-      return parsed?.entries ?? [];
+      const parsed = filePaths[0] ? parseSessionFile(filePaths[0]) : null;
+      const entries = parsed?.entries ?? [];
+      this.entryCache.set(scope, { signature, entries });
+      return entries;
     }
 
     const entries: SessionEntry[] = [];
-    for (const sessionFile of getSessionFilePaths(this.cwd)) {
+    for (const sessionFile of filePaths) {
       const parsed = parseSessionFile(sessionFile);
       if (!parsed) continue;
       entries.push(...parsed.entries);
     }
 
-    return entries.sort((left, right) => toTimestamp(left.timestamp) - toTimestamp(right.timestamp));
+    const sortedEntries = entries.sort((left, right) => toTimestamp(left.timestamp) - toTimestamp(right.timestamp));
+    this.entryCache.set(scope, { signature, entries: sortedEntries });
+    return sortedEntries;
   }
 
   query(options: TapeQueryOptions & { since?: string }): SessionEntry[] {
@@ -374,15 +405,15 @@ export class TapeService {
   } {
     const sessionAnchors = this.anchorStore.findBySession(this.sessionId);
     const lastAnchor = sessionAnchors[sessionAnchors.length - 1] ?? null;
+    const sessionEntries = this.loadEntries("session");
 
     let entriesSinceLastAnchor = 0;
     if (lastAnchor) {
-      const entries = this.query({ sinceAnchor: lastAnchor.name, scope: "session", anchorScope: "current-session" });
-      entriesSinceLastAnchor = entries.length;
+      entriesSinceLastAnchor = getEntriesAfterTimestamp(sessionEntries, lastAnchor.timestamp).length;
     }
 
     return {
-      totalEntries: this.query({ scope: "session" }).length,
+      totalEntries: sessionEntries.length,
       anchorCount: sessionAnchors.length,
       lastAnchor,
       entriesSinceLastAnchor,
@@ -400,6 +431,7 @@ export class TapeService {
   clear(): void {
     this.clearAnchorTreeLabels();
     this.anchorStore.clear();
+    this.entryCache.clear();
   }
 }
 

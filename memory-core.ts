@@ -10,11 +10,23 @@ import { DEFAULT_LOCAL_PATH, DEFAULT_TAPE_EXCLUDE_DIRS, expandHomePath, getCurre
 export * from "./types.js";
 export { DEFAULT_LOCAL_PATH, getCurrentDate } from "./utils.js";
 
+export const DEFAULT_MEMORY_SCAN: [number, number] = [72, 168];
+
+export function normalizeMemoryScanRange(memoryScan?: [number, number]): [number, number] {
+  const [startHours, maxHours] = memoryScan ?? DEFAULT_MEMORY_SCAN;
+  const normalizedStart =
+    Number.isFinite(startHours) && startHours > 0 ? Math.floor(startHours) : DEFAULT_MEMORY_SCAN[0];
+  const normalizedMax = Number.isFinite(maxHours) && maxHours > 0 ? Math.floor(maxHours) : DEFAULT_MEMORY_SCAN[1];
+  return [normalizedStart, Math.max(normalizedStart, normalizedMax)];
+}
+
 export const DEFAULT_SETTINGS: MemoryMdSettings = {
   enabled: true,
   repoUrl: "",
   localPath: DEFAULT_LOCAL_PATH,
   hooks: DEFAULT_HOOKS,
+  delivery: "message-append",
+  /** @deprecated Use `delivery` instead. */
   injection: "message-append",
   tape: {
     enabled: false,
@@ -23,7 +35,7 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
     context: {
       strategy: "smart",
       fileLimit: 10,
-      memoryScan: [72, 168],
+      memoryScan: DEFAULT_MEMORY_SCAN,
       whitelist: [],
       blacklist: [],
     },
@@ -85,7 +97,8 @@ function normalizePathList(value: string[] | undefined): string[] {
 }
 
 function normalizeAbsolutePathList(value: string[] | undefined): string[] {
-  return [...new Set((value ?? []).map((entry) => expandPath(entry.trim())).filter((entry) => path.isAbsolute(entry)))];
+  const entries = (value ?? []).map((entry) => expandPath(entry.trim()));
+  return [...new Set(entries.filter((entry) => path.isAbsolute(entry)))];
 }
 
 function mergePathLists(...lists: Array<string[] | undefined>): string[] {
@@ -122,6 +135,9 @@ function normalizeSettings(
   },
 ): MemoryMdSettings {
   const loadedSettings = deepMergeSettings(DEFAULT_SETTINGS, rawSettings);
+  const delivery = rawSettings.delivery ?? rawSettings.injection ?? loadedSettings.delivery ?? loadedSettings.injection;
+  loadedSettings.delivery = delivery;
+  loadedSettings.injection = delivery;
   loadedSettings.hooks = normalizeHooks(rawSettings.hooks ?? rawSettings.autoSync ?? loadedSettings.hooks);
 
   if (rawSettings.tape) {
@@ -133,14 +149,10 @@ function normalizeSettings(
     loadedSettings.localPath = expandPath(loadedSettings.localPath);
   }
 
-  const memoryScan = loadedSettings.tape?.context?.memoryScan;
-  if (memoryScan) {
-    const [startHours, maxHours] = memoryScan;
-    const normalizedStart = Number.isFinite(startHours) && startHours > 0 ? Math.floor(startHours) : 72;
-    const normalizedMax = Number.isFinite(maxHours) && maxHours > 0 ? Math.floor(maxHours) : 168;
+  if (loadedSettings.tape?.context?.memoryScan) {
     loadedSettings.tape ??= {};
     loadedSettings.tape.context ??= {};
-    loadedSettings.tape.context.memoryScan = [normalizedStart, Math.max(normalizedStart, normalizedMax)];
+    loadedSettings.tape.context.memoryScan = normalizeMemoryScanRange(loadedSettings.tape.context.memoryScan);
   }
 
   if (loadedSettings.tape) {
@@ -225,53 +237,60 @@ function validateFrontmatter(data: ParsedFrontmatter): { valid: boolean; error?:
   return { valid: true };
 }
 
-export function readMemoryFile(filePath: string): MemoryFile | null {
-  try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    const parsed = matter(content);
+function parseMemoryFileContent(filePath: string, content: string): MemoryFile {
+  const parsed = matter(content);
 
-    if (!parsed.data || Object.keys(parsed.data).length === 0 || !validateFrontmatter(parsed.data).valid) {
-      return {
-        path: filePath,
-        frontmatter: { description: "No description" },
-        content,
-      };
-    }
-
+  if (!parsed.data || Object.keys(parsed.data).length === 0 || !validateFrontmatter(parsed.data).valid) {
     return {
       path: filePath,
-      frontmatter: parsed.data as MemoryFrontmatter,
-      content: parsed.content,
+      frontmatter: { description: "No description" },
+      content,
     };
+  }
+
+  return {
+    path: filePath,
+    frontmatter: parsed.data as MemoryFrontmatter,
+    content: parsed.content,
+  };
+}
+
+export async function readMemoryFileAsync(filePath: string): Promise<MemoryFile | null> {
+  try {
+    return parseMemoryFileContent(filePath, await fs.promises.readFile(filePath, "utf-8"));
   } catch (error) {
     console.error(`Failed to read memory file ${filePath}:`, error instanceof Error ? error.message : error);
     return null;
   }
 }
 
-export function listMemoryFiles(memoryDir: string): string[] {
+export async function listMemoryFilesAsync(memoryDir: string): Promise<string[]> {
   const files: string[] = [];
 
-  function walkDir(dir: string) {
-    if (!fs.existsSync(dir)) {
+  async function walkDir(dir: string): Promise<void> {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
       return;
     }
 
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walkDir(fullPath);
-        continue;
-      }
+    await Promise.all(
+      entries.map(async (entry) => {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walkDir(fullPath);
+          return;
+        }
 
-      if (entry.isFile() && entry.name.endsWith(".md")) {
-        files.push(fullPath);
-      }
-    }
+        if (entry.isFile() && entry.name.endsWith(".md")) {
+          files.push(fullPath);
+        }
+      }),
+    );
   }
 
-  walkDir(memoryDir);
+  await walkDir(memoryDir);
   return files;
 }
 
@@ -329,19 +348,7 @@ export function countMemoryContextFiles(context: string): number {
   return context.split("\n").filter((line) => line.startsWith("-")).length;
 }
 
-export function buildMemoryContext(settings: MemoryMdSettings, cwd: string): string {
-  const memoryDir = getMemoryDir(settings, cwd);
-  const coreDir = getMemoryCoreDir(memoryDir);
-
-  if (!fs.existsSync(coreDir)) {
-    return "";
-  }
-
-  const files = listMemoryFiles(coreDir);
-  if (files.length === 0) {
-    return "";
-  }
-
+function buildMemoryContextLines(memoryDir: string, files: string[], memories: Array<MemoryFile | null>): string[] {
   const lines: string[] = [
     "# Project Memory",
     "",
@@ -352,9 +359,10 @@ export function buildMemoryContext(settings: MemoryMdSettings, cwd: string): str
     "",
   ];
 
-  for (const filePath of files) {
-    const memory = readMemoryFile(filePath);
-    if (!memory) {
+  for (let index = 0; index < files.length; index++) {
+    const filePath = files[index];
+    const memory = memories[index];
+    if (!filePath || !memory) {
       continue;
     }
 
@@ -366,5 +374,27 @@ export function buildMemoryContext(settings: MemoryMdSettings, cwd: string): str
     lines.push("");
   }
 
-  return lines.join("\n");
+  return lines;
+}
+
+export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: string): Promise<string> {
+  const memoryDir = getMemoryDir(settings, cwd);
+  const coreDir = getMemoryCoreDir(memoryDir);
+
+  try {
+    const stat = await fs.promises.stat(coreDir);
+    if (!stat.isDirectory()) {
+      return "";
+    }
+  } catch {
+    return "";
+  }
+
+  const files = await listMemoryFilesAsync(coreDir);
+  if (files.length === 0) {
+    return "";
+  }
+
+  const memories = await Promise.all(files.map((filePath) => readMemoryFileAsync(filePath)));
+  return buildMemoryContextLines(memoryDir, files, memories).join("\n");
 }

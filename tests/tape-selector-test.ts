@@ -107,7 +107,7 @@ test("ConversationSelector builds formatted context from visible entry lines", (
   assert.match(context, /---/);
 });
 
-test("MemoryFileSelector recent-only returns newest core markdown files", () => {
+test("MemoryFileSelector recent-only returns newest core markdown files", async () => {
   const tempDir = createTempDir("pi-memory-md-selector-recent");
   const memoryDir = path.join(tempDir, "memory");
   const projectRoot = path.join(tempDir, "project");
@@ -129,7 +129,7 @@ test("MemoryFileSelector recent-only returns newest core markdown files", () => 
   fs.utimesSync(olderFile, oldTime, oldTime);
   fs.utimesSync(newerFile, newTime, newTime);
 
-  const files = selector.selectFilesForContext("recent-only", 2);
+  const files = await selector.selectFilesForContext("recent-only", 2);
 
   assert.deepEqual(files, ["core/project/roadmap.md", "core/user/identity.md"]);
 });
@@ -141,7 +141,7 @@ test("matchesDefaultIgnoredPath ignores common noise files and directories", () 
   assert.equal(matchesDefaultIgnoredPath("/tmp/project/src/index.ts", "/tmp/project"), false);
 });
 
-test("MemoryFileSelector smart mode prioritizes frequently accessed memory files", () => {
+test("MemoryFileSelector smart mode prioritizes frequently accessed memory files", async () => {
   const tempDir = createTempDir("pi-memory-md-selector-smart");
   const memoryDir = path.join(tempDir, "memory");
   const projectRoot = path.join(tempDir, "project");
@@ -173,12 +173,12 @@ test("MemoryFileSelector smart mode prioritizes frequently accessed memory files
   ];
   const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
 
-  const files = selector.selectFilesForContext("smart", 2, { memoryScan: [6, 6] });
+  const files = await selector.selectFilesForContext("smart", 2, { memoryScan: [6, 6] });
 
   assert.deepEqual(files, [hotFile, coldFile]);
 });
 
-test("MemoryFileSelector smart mode filters common ignored project files", () => {
+test("MemoryFileSelector smart mode filters common ignored project files", async () => {
   const tempDir = createTempDir("pi-memory-md-selector-ignore");
   const memoryDir = path.join(tempDir, "memory");
   const projectRoot = path.join(tempDir, "project");
@@ -211,12 +211,12 @@ test("MemoryFileSelector smart mode filters common ignored project files", () =>
   ];
 
   const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
-  const files = selector.selectFilesForContext("smart", 5, { memoryScan: [6, 6] });
+  const files = await selector.selectFilesForContext("smart", 5, { memoryScan: [6, 6] });
 
   assert.deepEqual(files, [srcFile]);
 });
 
-test("MemoryFileSelector finalizeContextFiles applies whitelist and blacklist", () => {
+test("MemoryFileSelector finalizeContextFiles applies whitelist and blacklist", async () => {
   const tempDir = createTempDir("pi-memory-md-selector-lists");
   const memoryDir = path.join(tempDir, "memory");
   const projectRoot = path.join(tempDir, "project");
@@ -234,12 +234,12 @@ test("MemoryFileSelector finalizeContextFiles applies whitelist and blacklist", 
     whitelist: ["docs"],
     blacklist: ["dist"],
   });
-  const files = selector.finalizeContextFiles([memoryFile, blacklistedFile]);
+  const files = await selector.finalizeContextFiles([memoryFile, blacklistedFile]);
 
   assert.deepEqual(files, [whitelistedFile, memoryFile]);
 });
 
-test("MemoryFileSelector buildContextFromFiles renders memory and project files with highlights and line ranges", () => {
+test("MemoryFileSelector buildContextFromFilesAsync renders memory and project files with highlights and line ranges", async () => {
   const tempDir = createTempDir("pi-memory-md-selector-context");
   const memoryDir = path.join(tempDir, "memory");
   const projectRoot = path.join(tempDir, "project");
@@ -268,7 +268,7 @@ test("MemoryFileSelector buildContextFromFiles renders memory and project files 
   ];
 
   const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
-  const context = selector.buildContextFromFiles([memoryPath, projectFile], {
+  const context = await selector.buildContextFromFilesAsync([memoryPath, projectFile], {
     highlightedFiles: [memoryPath, projectFile],
     lineRangeHours: 6,
   });
@@ -284,7 +284,7 @@ test("MemoryFileSelector buildContextFromFiles renders memory and project files 
   assert.match(context, /\[high priority\]/);
 });
 
-test("MemoryFileSelector line ranges follow the effective smart scan window", () => {
+test("MemoryFileSelector line ranges follow the effective smart scan window", async () => {
   const tempDir = createTempDir("pi-memory-md-selector-scan-window");
   const memoryDir = path.join(tempDir, "memory");
   const projectRoot = path.join(tempDir, "project");
@@ -315,8 +315,8 @@ test("MemoryFileSelector line ranges follow the effective smart scan window", ()
   ];
 
   const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
-  const files = selector.selectFilesForContext("smart", 1, { memoryScan: [24, 120] });
-  const context = selector.buildContextFromFiles(files, { highlightedFiles: files });
+  const files = await selector.selectFilesForContext("smart", 1, { memoryScan: [24, 120] });
+  const context = await selector.buildContextFromFilesAsync(files, { highlightedFiles: files });
 
   assert.deepEqual(files, [projectFile]);
   assert.match(context, /recent focus: read 50-51, read 40-41, read 30-31, read 20-21, read 10-11/);
