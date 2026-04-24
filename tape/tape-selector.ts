@@ -214,8 +214,6 @@ export function detectKeywordHandoff(prompt: string, config?: TapeKeywordConfig)
     "",
     "Before continuing, call tape_handoff with:",
     `- name: "${anchorName}"`,
-    '- trigger: "keyword"',
-    `- keywords: ${JSON.stringify(matched)}`,
     "- summary: \"<brief intent summary of the user's current prompt in the user's language>\"",
     '- purpose: "<1-2 word label for the anchor\'s purpose>"',
     "",
@@ -289,6 +287,12 @@ type MemoryPathStats = {
 };
 
 type SupportedPathToolName = "memory_read" | "memory_write" | "read" | "edit" | "write";
+type RangeToolName = "memory_read" | "read" | "edit";
+type LineRange = {
+  kind: "read" | "edit";
+  start: number;
+  end: number;
+};
 
 function createEmptyMemoryPathStats(): MemoryPathStats {
   return {
@@ -306,6 +310,7 @@ function createEmptyMemoryPathStats(): MemoryPathStats {
 export class MemoryFileSelector {
   private readonly whitelist: string[];
   private readonly blacklist: string[];
+  private lastSelectionScanHours: number | null = null;
 
   constructor(
     private tapeService: TapeService,
@@ -323,6 +328,7 @@ export class MemoryFileSelector {
     options?: { memoryScan?: [number, number] },
   ): string[] {
     if (strategy === "recent-only") {
+      this.lastSelectionScanHours = null;
       return this.scanMemoryDirectory(limit);
     }
 
@@ -343,11 +349,13 @@ export class MemoryFileSelector {
     const [startHours, maxHours] = this.normalizeMemoryScan(memoryScan);
     let hours = startHours;
     let pathStats = new Map<string, MemoryPathStats>();
+    let effectiveHours: number | null = null;
 
     while (hours <= maxHours) {
       const stats = this.analyzePathAccess(this.getEntriesWithinHours(hours), hours);
       if (stats.paths.size > 0) {
         pathStats = stats.paths;
+        effectiveHours = hours;
         if (stats.totalAccesses >= MIN_SMART_ACCESS_SAMPLES) {
           break;
         }
@@ -355,12 +363,16 @@ export class MemoryFileSelector {
       hours += 24;
     }
 
+    this.lastSelectionScanHours = effectiveHours;
     if (pathStats.size === 0) return this.scanMemoryDirectory(limit);
 
     return this.filterInjectedPaths(this.sortPathsByStats(pathStats)).slice(0, limit);
   }
 
-  buildContextFromFiles(filePaths: string[], options?: { highlightedFiles?: string[] }): string {
+  buildContextFromFiles(
+    filePaths: string[],
+    options?: { highlightedFiles?: string[]; lineRangeHours?: number },
+  ): string {
     const existingPaths = [...new Set(filePaths.filter((filePath) => this.pathExists(filePath)))];
     if (existingPaths.length === 0) return "";
 
@@ -369,19 +381,32 @@ export class MemoryFileSelector {
         .filter((filePath) => this.pathExists(filePath))
         .map((filePath) => this.toMemoryRelativePath(filePath) ?? filePath),
     );
-    const memoryPaths = [
-      ...new Set(
-        existingPaths
-          .map((filePath) => this.toMemoryRelativePath(filePath))
-          .filter((filePath): filePath is string => filePath !== null),
-      ),
-    ];
-    const projectPaths = existingPaths.filter((filePath) => !this.toMemoryRelativePath(filePath));
+    const fileEntries = existingPaths.map((filePath) => {
+      const absolutePath = path.resolve(this.toAbsolutePath(filePath));
+      return {
+        absolutePath,
+        originalPath: filePath,
+        displayPath: this.toMemoryRelativePath(filePath) ?? filePath,
+      };
+    });
+    const rangeMap = this.collectRecentLineRanges(
+      fileEntries.map((entry) => entry.originalPath),
+      options?.lineRangeHours ?? this.lastSelectionScanHours,
+    );
+    const memoryEntries = fileEntries.filter((entry) => !path.isAbsolute(entry.displayPath));
+    const projectEntries = fileEntries.filter((entry) => path.isAbsolute(entry.displayPath));
     const formatPathLabel = (filePath: string): string =>
       highlightedPaths.has(filePath) ? `${filePath} [high priority]` : filePath;
+    const appendLineRanges = (targetLines: string[], absolutePath: string): void => {
+      const lineRanges = rangeMap.get(absolutePath);
+      if (!lineRanges || lineRanges.length === 0) return;
+      targetLines.push(
+        `  recent focus: ${lineRanges.map((range) => `${range.kind} ${range.start}-${range.end}`).join(", ")}`,
+      );
+    };
     const lines = ["# Project Memory", "", `Memory directory: ${this.memoryDir}`];
 
-    if (memoryPaths.length > 0) {
+    if (memoryEntries.length > 0) {
       lines.push(
         "Paths below are relative to that directory.",
         "",
@@ -389,21 +414,24 @@ export class MemoryFileSelector {
         "",
       );
 
-      for (const relPath of memoryPaths) {
-        const { description, tags } = this.extractFrontmatter(relPath);
-        lines.push(`- ${formatPathLabel(relPath)}`, `  Description: ${description}`, `  Tags: ${tags}`, "");
+      for (const entry of memoryEntries) {
+        const { description, tags } = this.extractFrontmatter(entry.displayPath);
+        lines.push(`- ${formatPathLabel(entry.displayPath)}`);
+        appendLineRanges(lines, entry.absolutePath);
+        lines.push(`  Description: ${description}`, `  Tags: ${tags}`, "");
       }
     }
 
-    if (projectPaths.length > 0) {
+    if (projectEntries.length > 0) {
       lines.push(
-        ...(memoryPaths.length > 0 ? ["---", ""] : ["", ""]),
+        ...(memoryEntries.length > 0 ? ["---", ""] : ["", ""]),
         "Recently active project files (full paths from read/edit/write tool usage):",
         "",
       );
 
-      for (const fullPath of projectPaths) {
-        lines.push(`- ${formatPathLabel(fullPath)}`);
+      for (const entry of projectEntries) {
+        lines.push(`- ${formatPathLabel(entry.displayPath)}`);
+        appendLineRanges(lines, entry.absolutePath);
       }
 
       lines.push("");
@@ -492,8 +520,7 @@ export class MemoryFileSelector {
     }
 
     if (toolName === "read" || toolName === "edit" || toolName === "write") {
-      const fullPath = resolveFrom(this.projectRoot, entryPath);
-      return toRelativeIfInside(this.memoryDir, fullPath);
+      return resolveFrom(this.projectRoot, entryPath);
     }
 
     return null;
@@ -642,6 +669,133 @@ export class MemoryFileSelector {
       Number.isFinite(startHours) && startHours > 0 ? Math.floor(startHours) : DEFAULT_MEMORY_SCAN[0];
     const normalizedMax = Number.isFinite(maxHours) && maxHours > 0 ? Math.floor(maxHours) : DEFAULT_MEMORY_SCAN[1];
     return [normalizedStart, Math.max(normalizedStart, normalizedMax)];
+  }
+
+  private collectRecentLineRanges(filePaths: string[], scanHours?: number | null): Map<string, LineRange[]> {
+    if (!scanHours || scanHours <= 0) return new Map();
+
+    const targetPaths = new Set(filePaths.map((filePath) => path.resolve(this.toAbsolutePath(filePath))));
+    const pendingEditPaths = new Map<string, string>();
+    const rangeMap = new Map<string, LineRange[]>();
+    const entries = this.getEntriesWithinHours(scanHours);
+
+    for (const entry of entries) {
+      if (entry.type !== "message") continue;
+
+      const messageEntry = entry as SessionMessageEntry & {
+        message: {
+          role: string;
+          toolCallId?: string;
+          toolName?: string;
+          details?: { firstChangedLine?: number; diff?: string };
+          content?: Array<{
+            type: string;
+            id?: string;
+            name?: string;
+            arguments?: { path?: string; offset?: number; limit?: number };
+          }>;
+        };
+      };
+
+      if (messageEntry.message.role === "assistant" && Array.isArray(messageEntry.message.content)) {
+        for (const block of messageEntry.message.content) {
+          if (block.type !== "toolCall") continue;
+
+          const toolName = block.name as RangeToolName;
+          const entryPath = block.arguments?.path;
+          const trackedPath = entryPath ? this.resolveTrackedPath(toolName, entryPath) : null;
+          if (!trackedPath) continue;
+
+          const resolvedPath = path.resolve(this.toAbsolutePath(trackedPath));
+          if (!targetPaths.has(resolvedPath)) continue;
+
+          if (toolName === "read" || toolName === "memory_read") {
+            const range = this.createReadRange(block.arguments?.offset, block.arguments?.limit);
+            if (range) this.pushLineRange(rangeMap, resolvedPath, range);
+          }
+
+          if (toolName === "edit" && block.id) {
+            pendingEditPaths.set(block.id, resolvedPath);
+          }
+        }
+      }
+
+      if (messageEntry.message.role !== "toolResult" || messageEntry.message.toolName !== "edit") {
+        continue;
+      }
+
+      const toolCallId = messageEntry.message.toolCallId;
+      const trackedPath = toolCallId ? pendingEditPaths.get(toolCallId) : null;
+      if (!trackedPath) continue;
+
+      for (const range of this.extractEditRanges(messageEntry.message.details)) {
+        this.pushLineRange(rangeMap, trackedPath, range);
+      }
+      pendingEditPaths.delete(toolCallId!);
+    }
+
+    for (const [filePath, ranges] of rangeMap) {
+      rangeMap.set(filePath, this.mergeLineRanges(ranges).slice(0, 5));
+    }
+
+    return rangeMap;
+  }
+
+  private createReadRange(offset: number | undefined, limit: number | undefined): LineRange | null {
+    const start = Number.isFinite(offset) && (offset ?? 0) > 0 ? Math.floor(offset!) : 1;
+    if (!Number.isFinite(limit) || (limit ?? 0) <= 0) return null;
+    return { kind: "read", start, end: start + Math.floor(limit!) - 1 };
+  }
+
+  private extractEditRanges(details: { firstChangedLine?: number; diff?: string } | undefined): LineRange[] {
+    const firstChangedLine = details?.firstChangedLine;
+    if (!details?.diff) {
+      return typeof firstChangedLine === "number"
+        ? [{ kind: "edit", start: firstChangedLine, end: firstChangedLine }]
+        : [];
+    }
+
+    const sections = details.diff.split(/\n\s*\.\.\.\s*\n/g);
+    const ranges: LineRange[] = [];
+
+    for (const section of sections) {
+      const lineNumbers = [...section.matchAll(/^\s*[+\- ]?\s*(\d+)\s/gm)]
+        .map((match) => match[1])
+        .filter((lineNumber): lineNumber is string => lineNumber !== undefined)
+        .map((lineNumber) => Number.parseInt(lineNumber, 10));
+      if (lineNumbers.length === 0) continue;
+      ranges.push({
+        kind: "edit",
+        start: Math.min(...lineNumbers),
+        end: Math.max(...lineNumbers),
+      });
+    }
+
+    if (ranges.length > 0) return ranges;
+    if (typeof firstChangedLine !== "number") return [];
+    return [{ kind: "edit", start: firstChangedLine, end: firstChangedLine }];
+  }
+
+  private pushLineRange(rangeMap: Map<string, LineRange[]>, filePath: string, range: LineRange): void {
+    const ranges = rangeMap.get(filePath) ?? [];
+    ranges.push(range);
+    rangeMap.set(filePath, ranges);
+  }
+
+  private mergeLineRanges(ranges: LineRange[]): LineRange[] {
+    const merged: LineRange[] = [];
+
+    for (const range of ranges) {
+      const previous = merged[merged.length - 1];
+      if (!previous || previous.kind !== range.kind || range.start > previous.end + 1) {
+        merged.push({ ...range });
+        continue;
+      }
+
+      previous.end = Math.max(previous.end, range.end);
+    }
+
+    return merged.reverse();
   }
 
   private scanMemoryDirectory(limit: number): string[] {

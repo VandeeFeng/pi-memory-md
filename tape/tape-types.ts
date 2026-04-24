@@ -70,7 +70,7 @@ export interface TapeKeywordConfig {
 export type TapeHandoffMode = "auto" | "manual";
 
 export interface TapeConfig {
-  /** Enable tape mode */
+  /** Enable tape mode. If the tape block exists, tape is on unless this is false. */
   enabled?: boolean;
   /** Custom anchor store path (optional, default: {localPath}/TAPE) */
   tapePath?: string;

@@ -95,6 +95,11 @@ function normalizeSettings(
   const loadedSettings = deepMergeSettings(DEFAULT_SETTINGS, rawSettings);
   loadedSettings.hooks = normalizeHooks(rawSettings.hooks ?? rawSettings.autoSync ?? loadedSettings.hooks);
 
+  if (rawSettings.tape) {
+    loadedSettings.tape ??= {};
+    loadedSettings.tape.enabled = rawSettings.tape.enabled !== false;
+  }
+
   if (loadedSettings.localPath) {
     loadedSettings.localPath = expandPath(loadedSettings.localPath);
   }

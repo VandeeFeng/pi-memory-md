@@ -15,6 +15,7 @@ import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import type { KeywordHandoffInstruction } from "./tape/tape-selector.js";
 import { detectKeywordHandoff, MemoryFileSelector } from "./tape/tape-selector.js";
 import { TapeService } from "./tape/tape-service.js";
+import type { PendingHandoffMatch } from "./tape/tape-tools.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
@@ -25,7 +26,7 @@ type ExtensionState = {
   sessionStartHookPromise: ReturnType<typeof runHookTrigger> | null;
   initialMemoryContext: string | null;
   hasInjectedInitialContext: boolean;
-  pendingKeywordHandoff: KeywordHandoffInstruction | null;
+  pendingHandoffMatch: PendingHandoffMatch | null;
   activeTapeRuntime: {
     service: TapeService;
     selector: MemoryFileSelector;
@@ -39,7 +40,7 @@ function createExtensionState(): ExtensionState {
     sessionStartHookPromise: null,
     initialMemoryContext: null,
     hasInjectedInitialContext: false,
-    pendingKeywordHandoff: null,
+    pendingHandoffMatch: null,
     activeTapeRuntime: null,
   };
 }
@@ -170,9 +171,9 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
         () => state.activeTapeRuntime?.service ?? null,
         () => settings,
         () => {
-          const keywordHandoff = state.pendingKeywordHandoff;
-          state.pendingKeywordHandoff = null;
-          return keywordHandoff;
+          const handoffMatch = state.pendingHandoffMatch;
+          state.pendingHandoffMatch = null;
+          return handoffMatch;
         },
       );
       state.tapeToolsRegistered = true;
@@ -202,7 +203,9 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
     const mode = settings.injection || "message-append";
     const tapeEnabled = settings.tape?.enabled;
     const keywordHandoff = tapeEnabled ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
-    state.pendingKeywordHandoff = keywordHandoff;
+    if (state.pendingHandoffMatch?.trigger !== "manual") {
+      state.pendingHandoffMatch = keywordHandoff ? { trigger: "keyword", instruction: keywordHandoff } : null;
+    }
 
     if (keywordHandoff) {
       ctx.ui.notify(`Tape keyword detected: ${keywordHandoff.primary}`, "info");
@@ -288,7 +291,6 @@ function buildManualAnchorMessage(prompt: string): string {
     "The user explicitly requested a manual tape anchor via /memory-anchor.",
     "",
     "Before continuing, call tape_handoff with:",
-    '- trigger: "manual"',
     '- name: "<hierarchical anchor name derived from the user request>"',
     '- summary: "<brief intent summary in the user\'s language, under 18 words>"',
     '- purpose: "<1-2 word label>"',
@@ -424,6 +426,8 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
           ctx.ui.notify("Tape runtime is unavailable.", "error");
           return;
         }
+
+        state.pendingHandoffMatch = { trigger: "manual" };
 
         pi.sendMessage(
           {

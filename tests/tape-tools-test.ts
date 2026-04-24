@@ -24,7 +24,10 @@ async function runHandoff(
   settings: Record<string, unknown>,
   params: Record<string, unknown>,
   tapeService?: { createAnchor: (...args: unknown[]) => unknown },
-  consumeKeywordHandoff: () => { matched: string[] } | null = () => null,
+  consumeHandoffMatch: () =>
+    | { trigger: "keyword"; instruction: { anchorName: string; matched: string[] } }
+    | { trigger: "manual" }
+    | null = () => null,
 ) {
   const harness = createToolHarness();
   const createdAnchors: unknown[] = [];
@@ -48,7 +51,7 @@ async function runHandoff(
     harness.pi as never,
     () => service as never,
     () => settings as never,
-    consumeKeywordHandoff as never,
+    consumeHandoffMatch as never,
   );
   const tool = harness.tools.get("tape_handoff");
   assert.ok(tool);
@@ -69,16 +72,18 @@ test("tape_handoff blocks direct calls when handoff mode is manual", async () =>
   assert.equal(createdAnchors.length, 0);
 });
 
-test("tape_handoff allows keyword and manual triggers in manual mode", async () => {
+test("tape_handoff allows keyword and manual matches in manual mode", async () => {
   const keywordCall = await runHandoff(
     { tape: { anchor: { mode: "manual" } } },
-    { name: "task/keyword", trigger: "keyword", keywords: [" tape ", "tape"], summary: "kw", purpose: "test" },
+    { name: "task/keyword", summary: "kw", purpose: "test" },
     undefined,
-    () => ({ matched: ["tape"] }),
+    () => ({ trigger: "keyword", instruction: { anchorName: "task/keyword", matched: ["tape"] } }),
   );
   const manualCall = await runHandoff(
     { tape: { anchor: { mode: "manual" } } },
-    { name: "task/manual", trigger: "manual", summary: "manual", purpose: "test" },
+    { name: "task/manual", summary: "manual", purpose: "test" },
+    undefined,
+    () => ({ trigger: "manual" }),
   );
 
   assert.equal(keywordCall.createdAnchors.length, 1);
@@ -96,7 +101,7 @@ test("tape_handoff allows keyword and manual triggers in manual mode", async () 
 test("tape_handoff allows direct calls in auto mode and defaults trigger to direct", async () => {
   const { result, createdAnchors } = await runHandoff(
     { tape: { anchor: { mode: "auto" } } },
-    { name: "task/direct", summary: "ship it", purpose: "deploy", keywords: [" alpha ", "", "alpha"] },
+    { name: "task/direct", summary: "ship it", purpose: "deploy" },
   );
 
   assert.equal(createdAnchors.length, 1);
@@ -105,15 +110,17 @@ test("tape_handoff allows direct calls in auto mode and defaults trigger to dire
     timestamp: "2026-04-23T12:00:00.000Z",
     name: "task/direct",
     kind: "handoff",
-    meta: { summary: "ship it", purpose: "deploy", trigger: "direct", keywords: ["alpha"] },
+    meta: { summary: "ship it", purpose: "deploy", trigger: "direct" },
   });
   assert.equal((result as any).details.name, "task/direct");
 });
 
-test("tape_handoff downgrades unauthorized keyword trigger to direct", async () => {
+test("tape_handoff downgrades mismatched keyword handoff match to direct", async () => {
   const { result, createdAnchors } = await runHandoff(
     { tape: { anchor: { mode: "auto" } } },
-    { name: "task/fake-keyword", trigger: "keyword", keywords: ["tape"], summary: "kw", purpose: "test" },
+    { name: "task/fake-keyword", summary: "kw", purpose: "test" },
+    undefined,
+    () => ({ trigger: "keyword", instruction: { anchorName: "task/keyword", matched: ["tape"] } }),
   );
 
   assert.equal(createdAnchors.length, 1);
@@ -122,18 +129,18 @@ test("tape_handoff downgrades unauthorized keyword trigger to direct", async () 
     timestamp: "2026-04-23T12:00:00.000Z",
     name: "task/fake-keyword",
     kind: "handoff",
-    meta: { summary: "kw", purpose: "test", trigger: "direct", keywords: ["tape"] },
+    meta: { summary: "kw", purpose: "test", trigger: "direct" },
   });
-  assert.equal((result as any).details.unauthorizedKeywordTrigger, true);
-  assert.equal((result as any).details.effectiveTrigger, "direct");
+  assert.equal((result as any).details.matchedKeywordHandoff, false);
+  assert.equal((result as any).details.finalTrigger, "direct");
 });
 
-test("tape_handoff only accepts keyword trigger when authorized for this turn", async () => {
+test("tape_handoff only accepts keyword handoff match when the anchor name matches this turn", async () => {
   const { createdAnchors } = await runHandoff(
     { tape: { anchor: { mode: "manual" } } },
-    { name: "task/keyword", trigger: "keyword", keywords: ["wrong"], summary: "kw", purpose: "test" },
+    { name: "task/keyword", summary: "kw", purpose: "test" },
     undefined,
-    () => ({ matched: ["tape", "memory"] }),
+    () => ({ trigger: "keyword", instruction: { anchorName: "task/keyword", matched: ["tape", "memory"] } }),
   );
 
   assert.deepEqual(createdAnchors[0], {

@@ -11,8 +11,12 @@ import type { TapeService } from "./tape-service.js";
 import type { RenderState } from "./tape-types.js";
 
 export type TapeServiceGetter = () => TapeService | null;
+export type PendingHandoffMatch =
+  | { trigger: "keyword"; instruction: KeywordHandoffInstruction }
+  | { trigger: "manual" };
+
 type TapeSettingsGetter = () => MemoryMdSettings;
-type ConsumeKeywordHandoff = () => KeywordHandoffInstruction | null;
+type ConsumeHandoffMatch = () => PendingHandoffMatch | null;
 
 type EntryQueryParams = {
   types?: SessionEntry["type"][];
@@ -194,7 +198,7 @@ export function registerTapeHandoff(
   pi: ExtensionAPI,
   getTapeService: TapeServiceGetter,
   getSettings: TapeSettingsGetter,
-  consumeKeywordHandoff: ConsumeKeywordHandoff = () => null,
+  consumeHandoffMatch: ConsumeHandoffMatch = () => null,
 ): void {
   pi.registerTool({
     name: "tape_handoff",
@@ -204,52 +208,45 @@ export function registerTapeHandoff(
       name: Type.String({ description: "Anchor name (e.g., 'task/begin', 'task/complete', 'handoff')" }),
       summary: Type.Optional(Type.String({ description: "Brief intent summary of current task (under 18 words)" })),
       purpose: Type.Optional(Type.String({ description: "1-2 word label for the anchor's purpose" })),
-      trigger: Type.Optional(
-        Type.Union([Type.Literal("direct"), Type.Literal("keyword"), Type.Literal("manual")], {
-          description: "Anchor trigger source",
-        }),
-      ),
-      keywords: Type.Optional(Type.Array(Type.String(), { description: "Matched keywords when trigger is 'keyword'" })),
     }),
 
     async execute(_toolCallId, params) {
       const tapeService = getTapeService();
       if (!tapeService) return getTapeUnavailableResult();
 
-      const { name, summary, purpose, trigger, keywords } = params as {
+      const { name, summary, purpose } = params as {
         name: string;
         summary?: string;
         purpose?: string;
-        trigger?: "direct" | "keyword" | "manual";
-        keywords?: string[];
       };
       const handoffMode = getSettings().tape?.anchor?.mode ?? "auto";
-      const keywordHandoff = trigger === "keyword" ? consumeKeywordHandoff() : null;
-      const normalizedRequestedKeywords = normalizeKeywords(keywords);
-      const effectiveTrigger = trigger === "keyword" && !keywordHandoff ? "direct" : trigger;
-      const effectiveKeywords =
-        effectiveTrigger === "keyword" ? normalizeKeywords(keywordHandoff?.matched) : normalizedRequestedKeywords;
+      const handoffMatch = consumeHandoffMatch();
+      const keywordHandoffMatch = handoffMatch?.trigger === "keyword" ? handoffMatch : null;
+      const matchedKeywordHandoff = keywordHandoffMatch?.instruction.anchorName === name;
+      const finalTrigger = handoffMatch?.trigger === "manual" ? "manual" : matchedKeywordHandoff ? "keyword" : "direct";
+      const finalKeywords =
+        finalTrigger === "keyword" ? normalizeKeywords(keywordHandoffMatch?.instruction.matched) : undefined;
 
-      if (handoffMode === "manual" && effectiveTrigger !== "keyword" && effectiveTrigger !== "manual") {
+      if (handoffMode === "manual" && finalTrigger !== "keyword" && finalTrigger !== "manual") {
         return {
           content: [
             {
               type: "text",
-              text: 'tape_handoff is disabled when tape.anchor.mode="manual" unless trigger="keyword".',
+              text: 'tape_handoff is disabled when tape.anchor.mode="manual" unless a keyword or manual handoff match is present.',
             },
           ],
           details: {
             disabled: true,
             handoffMode,
             allowedTriggers: ["keyword", "manual"],
-            requestedTrigger: trigger ?? "direct",
-            effectiveTrigger,
-            unauthorizedKeywordTrigger: trigger === "keyword",
+            finalTrigger,
+            hasHandoffMatch: handoffMatch !== null,
+            matchedKeywordHandoff: false,
           },
         };
       }
 
-      const mergedMeta = normalizeHandoffMeta(summary, purpose, effectiveTrigger, effectiveKeywords);
+      const mergedMeta = normalizeHandoffMeta(summary, purpose, finalTrigger, finalKeywords);
       const anchor = tapeService.createAnchor(name, "handoff", mergedMeta);
 
       return {
@@ -258,9 +255,9 @@ export function registerTapeHandoff(
           anchorId: anchor.id,
           name,
           meta: { ...mergedMeta, timestamp: anchor.timestamp },
-          requestedTrigger: trigger ?? "direct",
-          effectiveTrigger: effectiveTrigger ?? "direct",
-          unauthorizedKeywordTrigger: trigger === "keyword" && !keywordHandoff,
+          finalTrigger,
+          hasHandoffMatch: handoffMatch !== null,
+          matchedKeywordHandoff: handoffMatch?.trigger === "keyword" ? matchedKeywordHandoff : false,
         },
       };
     },
@@ -807,9 +804,9 @@ export function registerAllTapeTools(
   pi: ExtensionAPI,
   getTapeService: TapeServiceGetter,
   getSettings: TapeSettingsGetter,
-  consumeKeywordHandoff?: ConsumeKeywordHandoff,
+  consumeHandoffMatch?: ConsumeHandoffMatch,
 ): void {
-  registerTapeHandoff(pi, getTapeService, getSettings, consumeKeywordHandoff);
+  registerTapeHandoff(pi, getTapeService, getSettings, consumeHandoffMatch);
   registerTapeAnchors(pi, getTapeService);
   registerTapeAnchorDelete(pi, getTapeService);
   registerTapeInfo(pi, getTapeService);

@@ -1,11 +1,23 @@
 # Changelog
 
+The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
+
 ## [Unreleased]
+
+### Features
+
+- **Recent focus hints**: Tape context can now attach concise `recent focus` line ranges to selected memory files and recently active project files, based on recent `memory_read` / `read` offsets and parsed `edit` diffs from session history within the effective smart-scan window. The injected summary keeps the latest merged ranges (up to five per file), for example `read 340-420` or `edit 390-399`, so the agent can see which parts of each file were actually touched most recently.
 
 ### Changes
 
+- **Tape config is now opt-out**: If a `"tape"` block exists, tape is enabled by default. Only `"enabled": false` disables it, while existing `"enabled": true` configs continue to work unchanged.
 - **Tape context include/exclude overhaul**: In tape config, `"alwaysInclude": [...]` is replaced by `"whitelist": [...]`, and you can now also add `"blacklist": [...]`. Smart project-file injection prefers `rg --files` ignore behavior when available, falls back to a built-in default ignore list for common noise, keeps `"blacklist"` as a hard exclude, and treats `"whitelist"` as a force-include override.
 - **Deprecated legacy tape include setting**: If your config still uses `"alwaysInclude": [...]`, it will keep working for now, but please move it to `"whitelist": [...]`.
+
+### Fix
+
+- **Tape handoff match flow**: `tape_handoff` now resolves keyword and manual handoffs internally instead of exposing `trigger` or `keywords` to the model. The model only provides `name`, `summary`, and `purpose`, and keyword handoffs only apply when the created anchor name matches the hidden keyword instruction for the current turn.
+- **Smart project file tracking**: Smart tape selection now keeps `read` / `edit` / `write` project file paths as full project paths, so active non-memory files are ranked and injected correctly.
 
 ## [0.1.30] - 2026-04-23
 
@@ -19,7 +31,7 @@ There’s still a lot of logic problems in the code I need to tidy up before nex
 
 After more than half a month of daily use and iteration, tape-mode is much more stable now.
 
-The npm version may remain unchanged for quite a while. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
+The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
 ### Features
 
@@ -41,9 +53,9 @@ The npm version may remain unchanged for quite a while. To get the latest update
 - **Anchor config simplification**: Removed threshold-based auto-anchor settings; `settings.tape.anchor` now only controls display options such as `labelPrefix` and `keywords`.
 - **Tape docs relocation**: The old `skills/tape-mode/SKILL.md` guide was moved into `docs/tape-design.md`, and the package no longer registers tape mode as a skill.
 - **Git sync noise reduction**: Session-start pull and session-end push now skip redundant syncs, and successful no-op syncs no longer notify the user.
-- **Tape memory summary reuse**: Tape smart-mode injection now normalizes selected paths under the memory directory and reuses the traditional memory summary output (`Description`/`Tags`) for them, even when selected via absolute paths.
 
   This was really annoying!
+- **Tape memory summary reuse**: Tape smart-mode injection now normalizes selected paths under the memory directory and reuses the traditional memory summary output (`Description`/`Tags`) for them, even when selected via absolute paths.
 
 ### Fix
 

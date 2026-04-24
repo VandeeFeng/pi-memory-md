@@ -95,6 +95,41 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
   }
 });
 
+test("loadSettings enables tape when tape config exists unless explicitly disabled", () => {
+  const tempHome = createTempDir("pi-memory-md-home-tape-default");
+  const projectDir = createTempDir("pi-memory-md-project-tape-default");
+
+  writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": {
+      tape: {
+        context: {
+          fileLimit: 3,
+        },
+      },
+    },
+  });
+
+  const homedirMock = mock.method(os, "homedir", () => tempHome);
+
+  try {
+    const enabledSettings = loadSettings(projectDir);
+    assert.equal(enabledSettings.tape?.enabled, true);
+
+    writeJson(path.join(projectDir, ".pi", "settings.json"), {
+      "pi-memory-md": {
+        tape: {
+          enabled: false,
+        },
+      },
+    });
+
+    const disabledSettings = loadSettings(projectDir);
+    assert.equal(disabledSettings.tape?.enabled, false);
+  } finally {
+    homedirMock.mock.restore();
+  }
+});
+
 test("readMemoryFile returns fallback frontmatter for missing frontmatter", () => {
   const tempDir = createTempDir("pi-memory-md-read-no-frontmatter");
   const filePath = path.join(tempDir, "note.md");

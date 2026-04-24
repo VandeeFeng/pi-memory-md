@@ -47,9 +47,7 @@ test("memoryMdExtension registers memory-anchor when tape is enabled", () => {
 
   writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
-      tape: {
-        enabled: true,
-      },
+      tape: {},
     },
   });
 

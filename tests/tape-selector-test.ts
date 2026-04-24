@@ -32,8 +32,28 @@ function createMessageEntry(timestamp: string, role: "user" | "assistant", conte
     type: "message",
     timestamp,
     id: crypto.randomUUID(),
+    parentId: null,
     message: { role, content },
   } as SessionEntry;
+}
+
+function createToolResultEntry(
+  timestamp: string,
+  toolCallId: string,
+  toolName: string,
+  details?: Record<string, unknown>,
+): SessionEntry {
+  return {
+    type: "message",
+    timestamp,
+    id: crypto.randomUUID(),
+    parentId: null,
+    message: { role: "toolResult", toolCallId, toolName, details, content: [] },
+  } as unknown as SessionEntry;
+}
+
+function hoursAgo(hours: number): string {
+  return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 }
 
 function createMockTapeService(entries: SessionEntry[], anchors: MockAnchor[] = []): MockTapeService {
@@ -92,7 +112,8 @@ test("buildKeywordHandoffMessage returns the generated instruction text", () => 
   const message = buildKeywordHandoffMessage("Please fix this bug today", { global: ["bug"] });
 
   assert.match(message ?? "", /Before continuing, call tape_handoff/);
-  assert.match(message ?? "", /- trigger: "keyword"/);
+  assert.doesNotMatch(message ?? "", /- trigger: "keyword"/);
+  assert.doesNotMatch(message ?? "", /- keywords:/);
 });
 
 test("ConversationSelector respects maxEntries and token budget", () => {
@@ -176,22 +197,22 @@ test("MemoryFileSelector smart mode prioritizes frequently accessed memory files
   writeMemoryFile(path.join(memoryDir, coldFile), "# Cold", { description: "Cold", tags: ["cold"] });
 
   const entries = [
-    createMessageEntry("2026-04-23T10:00:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(5.5), "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
     ]),
-    createMessageEntry("2026-04-23T10:10:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(5), "assistant", [
       { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
     ]),
-    createMessageEntry("2026-04-23T10:20:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(4.5), "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
     ]),
-    createMessageEntry("2026-04-23T10:30:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(4), "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
     ]),
-    createMessageEntry("2026-04-23T10:40:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(3.5), "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: coldFile } },
     ]),
-    createMessageEntry("2026-04-23T10:50:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(3), "assistant", [
       { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
     ]),
   ];
@@ -217,19 +238,19 @@ test("MemoryFileSelector smart mode filters common ignored project files", () =>
   spawnSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
 
   const entries = [
-    createMessageEntry("2026-04-23T10:00:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(5), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "src/index.ts" } },
     ]),
-    createMessageEntry("2026-04-23T10:05:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(4.5), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "node_modules/pkg/index.js" } },
     ]),
-    createMessageEntry("2026-04-23T10:10:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(4), "assistant", [
       { type: "toolCall", name: "edit", arguments: { path: "src/index.ts" } },
     ]),
-    createMessageEntry("2026-04-23T10:15:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(3.5), "assistant", [
       { type: "toolCall", name: "edit", arguments: { path: "node_modules/pkg/index.js" } },
     ]),
-    createMessageEntry("2026-04-23T10:20:00.000Z", "assistant", [
+    createMessageEntry(hoursAgo(3), "assistant", [
       { type: "toolCall", name: "write", arguments: { path: "src/index.ts" } },
     ]),
   ];
@@ -263,7 +284,7 @@ test("MemoryFileSelector finalizeContextFiles applies whitelist and blacklist", 
   assert.deepEqual(files, [whitelistedFile, memoryFile]);
 });
 
-test("MemoryFileSelector buildContextFromFiles renders memory and project files with highlights", () => {
+test("MemoryFileSelector buildContextFromFiles renders memory and project files with highlights and line ranges", () => {
   const tempDir = createTempDir("pi-memory-md-selector-context");
   const memoryDir = path.join(tempDir, "memory");
   const projectRoot = path.join(tempDir, "project");
@@ -274,16 +295,75 @@ test("MemoryFileSelector buildContextFromFiles renders memory and project files 
   const memoryPath = path.join(memoryDir, "core", "user", "identity.md");
   writeMemoryFile(memoryPath, "# Identity", { description: "Identity", tags: ["user", "profile"] });
 
-  const selector = new MemoryFileSelector(createMockTapeService([]) as never, memoryDir, projectRoot);
+  const editToolCallId = crypto.randomUUID();
+  const entries = [
+    createMessageEntry(hoursAgo(5), "assistant", [
+      { type: "toolCall", name: "memory_read", arguments: { path: "core/user/identity.md", offset: 3, limit: 4 } },
+    ]),
+    createMessageEntry(hoursAgo(4), "assistant", [
+      { type: "toolCall", id: editToolCallId, name: "edit", arguments: { path: "src/index.ts" } },
+    ]),
+    createToolResultEntry(hoursAgo(3.5), editToolCallId, "edit", {
+      firstChangedLine: 12,
+      diff: "      ...\n  12 \tconst before = true;\n+ 13 \tconst after = true;\n  14 \treturn after;\n      ...",
+    }),
+    createMessageEntry(hoursAgo(3), "assistant", [
+      { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 20, limit: 3 } },
+    ]),
+  ];
+
+  const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
   const context = selector.buildContextFromFiles([memoryPath, projectFile], {
     highlightedFiles: [memoryPath, projectFile],
+    lineRangeHours: 6,
   });
 
   assert.match(context, /# Project Memory/);
   assert.match(context, /core\/user\/identity\.md \[high priority\]/);
+  assert.match(context, / {2}recent focus: read 3-6/);
   assert.match(context, /Description: Identity/);
   assert.match(context, /Tags: user, profile/);
   assert.match(context, /Recently active project files/);
   assert.match(context, new RegExp(projectFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(context, / {2}recent focus: read 20-22, edit 12-14/);
   assert.match(context, /\[high priority\]/);
+});
+
+test("MemoryFileSelector line ranges follow the effective smart scan window", () => {
+  const tempDir = createTempDir("pi-memory-md-selector-scan-window");
+  const memoryDir = path.join(tempDir, "memory");
+  const projectRoot = path.join(tempDir, "project");
+  const projectFile = path.join(projectRoot, "src", "index.ts");
+
+  fs.mkdirSync(path.dirname(projectFile), { recursive: true });
+  fs.writeFileSync(projectFile, "export const ok = true;\n");
+
+  const entries = [
+    createMessageEntry(hoursAgo(20), "assistant", [
+      { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 10, limit: 2 } },
+    ]),
+    createMessageEntry(hoursAgo(19), "assistant", [
+      { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 20, limit: 2 } },
+    ]),
+    createMessageEntry(hoursAgo(18), "assistant", [
+      { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 30, limit: 2 } },
+    ]),
+    createMessageEntry(hoursAgo(17), "assistant", [
+      { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 40, limit: 2 } },
+    ]),
+    createMessageEntry(hoursAgo(16), "assistant", [
+      { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 50, limit: 2 } },
+    ]),
+    createMessageEntry(hoursAgo(100), "assistant", [
+      { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 90, limit: 2 } },
+    ]),
+  ];
+
+  const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
+  const files = selector.selectFilesForContext("smart", 1, { memoryScan: [24, 120] });
+  const context = selector.buildContextFromFiles(files, { highlightedFiles: files });
+
+  assert.deepEqual(files, [projectFile]);
+  assert.match(context, /recent focus: read 50-51, read 40-41, read 30-31, read 20-21, read 10-11/);
+  assert.doesNotMatch(context, /90-91/);
 });

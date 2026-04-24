@@ -24,7 +24,6 @@ pi install git:github.com/VandeeFeng/pi-memory-md
 # Add to ~/.pi/agent/settings.json:
 {
   "pi-memory-md": {
-    "enabled": true,
     "repoUrl": "git@github.com:username/repo.git", // or HTTPS format
     "localPath": "~/.pi/memory-md"
   }
@@ -111,7 +110,7 @@ Markdown content...
 ```json
 {
   "pi-memory-md": {
-    "enabled": true,
+    // "enabled": false,
     "repoUrl": "git@github.com:username/repo.git", // Or HTTPS format
     "injection": "message-append",
     "hooks": {
@@ -221,9 +220,9 @@ The LLM automatically:
 ## Tape Mode (Dynamic Context Injection)
 
 > **Experimental**: This mode is under active development. APIs and behavior may change.
-
+>
 > For the latest, install via GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
-
+>
 > **Note**: This mode may consume more tokens. Adjust parameters based on your model's context window and your API quota.
 
 More details [tape-design](docs/tape-design.md) / [中文版](docs/tape-design.zh.md)
@@ -235,10 +234,12 @@ Minimal setting:
   "pi-memory-md": {
     ...
     "tape": {
-      "enabled": true,
-       "keywords": {
+      // "enabled": false,
+      "anchor": {
+        "keywords": {
           "global": ["refactor", "migration"],
           "project": ["tape", "Emacs"]
+        }
       }
     }
   }
@@ -262,13 +263,44 @@ It does not change the delivery mechanism; it changes **which memory files** are
 | Enabled | `message-append` | Sends tape-selected memory once as a hidden custom message on the first agent turn |
 | Enabled | `system-prompt` | Rebuilds tape-selected memory and appends it to the system prompt on every agent turn |
 
-With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the injected list can also include recently active project file paths inferred from tool usage. Stale paths from old tape history are ignored when the file no longer exists.
+With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the injected list can also include recently active project file paths inferred from tool usage, plus a `recent focus` summary for each selected file showing the most recently attended `read` / `edit` ranges inside the same effective smart-scan window. Stale paths from old tape history are ignored when the file no longer exists.
+
+Tape now follows an opt-out rule: if a `tape` block exists, tape is on unless you set `"enabled": false`.
+
+A tape hidden message injected looks like this:
+
+```md
+# Project Memory
+
+Memory directory: /home/user/.pi/memory-md/my-project
+
+Paths below are relative to that directory.
+
+Available memory files (use memory_read to view full content):
+
+- core/user/identity.md [high priority]
+  recent focus: read 12-28
+  Description: User preferences and identity
+  Tags: user, profile
+
+---
+
+Recently active project files (full paths from read/edit/write tool usage):
+
+- /path/to/project/tape/tape-selector.ts [high priority]
+  recent focus: read 340-420, read 590-677, edit 340-399
+
+---
+💡 Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.
+```
 
 Tape also:
 - Uses pi session entries as the source of truth, with anchors attached directly to points in the session
 - **Anchor-based context**: Selects relevant memory files and recently active project files based on recent usage and configured strategy
+- **Recent focus hints**: Selected files can include concise `recent focus` ranges such as `read 340-420` or `edit 390-399`
 - Creates `session/*` lifecycle anchors automatically and `handoff` anchors via `tape_handoff` or `/memory-anchor`
-- Supports `anchor.mode: "manual"` to hard-block `tape_handoff` unless the tool call uses `trigger: "keyword"` or `trigger: "manual"`
+- Supports `anchor.mode: "manual"` to hard-block direct `tape_handoff`; keyword-matched hidden instructions and `/memory-anchor` still authorize handoff creation
+- Keyword detection can send a hidden message that guides the agent to create a keyword anchor, while still allowing the agent to refuse when such an anchor is unnecessary
 - Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale labels
 - **Pros**: Better context selection with checkpoint management, recent project file awareness, and handoff-aware prioritization
 - **Cons**: Slightly more complex configuration and more token costs
@@ -279,7 +311,6 @@ Tape also:
     ...
     "localPath": "~/.pi/memory-md",
     "tape": {
-      "enabled": true,
       "context": {
         // "smart": ranks memory files plus recent project file activity from session history (default)
         //          repeated accesses get diminishing returns, edit/write outrank plain reads,
@@ -313,8 +344,8 @@ Tape also:
       },
       "anchor": {
         // "auto": LLM may create handoff anchors when it decides they are useful
-        // "manual": tape_handoff is hard-blocked unless trigger="keyword" or trigger="manual" (via /memory-anchor)
-        // which means keywords and /memory-anchor still work in manual mode
+        // "manual": direct tape_handoff is hard-blocked
+        // hidden keyword instructions and /memory-anchor still work in manual mode
         "mode": "auto", // default
 
         // Prefix mirrored into pi /tree labels for anchor nodes
@@ -322,7 +353,8 @@ Tape also:
 
         "keywords": {
           // Match against user prompts with length in [10, 300]
-          // When matched, inject a hidden instruction telling the model to call tape_handoff, thencreate an anchor  automatically
+          // When matched, send a hidden instruction about the tape_handoff tool call
+          // This gives the agent room to refuse when creating a keyword anchor is not necessary at all
           // Strongly recommended! Keywords make anchor creation much smarter - customize based on your focus areas
           "global": ["refactor", "migration"],
           "project": ["tape", "Emacs"]
@@ -358,21 +390,14 @@ Each anchor has:
 - **`timestamp`**: ISO timestamp of when the anchor was created
 - **`meta`**: Optional metadata including `summary`, `trigger`, `keywords`, etc. `direct` means created by the agent automatically, `keyword` means created because configured keywords matched, and `manual` means created explicitly by the user or tool call
 
-Example workflow:
-```
-1. Create anchor: tape_handoff({name: "task/begin", summary: "Working on feature X"})
-2. Work with memory files and project files (reads/edits/writes recorded to tape)
-3. Create anchor: tape_handoff({name: "task/complete", meta: {summary: "Feature X complete"}})
-4. Check status: tape_info() or tape_list({limit: 10})
-```
 more details: https://tape.systems/
 
 ### Tape Tools (Anchor-based Context)
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `/memory-anchor` | `<prompt>` | Slash command that asks the LLM to derive and create a handoff anchor with `meta.trigger = "manual"` |
-| `tape_handoff` | `{name, summary?, meta?}` | Create a handoff anchor checkpoint in the tape |
+| `/memory-anchor` | `<prompt>` | Slash command that asks the LLM to derive and create a manually authorized handoff anchor |
+| `tape_handoff` | `{name, summary?, purpose?}` | Create a handoff anchor checkpoint in the tape |
 | `tape_list` | `{limit?: number}` | List all anchor checkpoints |
 | `tape_delete` | `{id}` | Delete an anchor checkpoint by id |
 | `tape_info` | `{}` | Get tape statistics and information |

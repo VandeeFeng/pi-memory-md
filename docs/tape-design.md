@@ -125,6 +125,7 @@ class TapeService {
 
 **MemoryFileSelector**: Intelligently selects memory and project files
 - **Smart strategy**: Scans recent project history within a configurable time window (`memoryScan`), expands up to the max window when samples are too small, and ranks files with handoff-first weighting
+- **Recent focus extraction**: After smart selection picks files, extracts up to 5 concise `recent focus` ranges per selected file from recent `read` / `memory_read` / `edit` activity within the same effective smart-scan window
 - **Keyword handoff helper**: Normalizes configured keywords and builds a hidden handoff instruction when a user prompt in the `[10, 300]` character range matches a keyword
 - **Recent-only strategy**: Scans memory files and returns the most recently modified files
 
@@ -155,11 +156,12 @@ tape_handoff(
 // Phase transition
 tape_handoff(name="task/begin", summary="Starting database migration")
 
-// Keyword-style metadata
+// Keyword-authorized handoff generated from a hidden instruction
+// The model only supplies name / summary / purpose.
 tape_handoff(
   name="handoff/keyword-migration",
-  summary="Keyword-triggered handoff: migration",
-  meta={ trigger: "keyword", keywords: ["migration"] }
+  summary="Continue the database migration work",
+  purpose="migration"
 )
 ```
 
@@ -344,9 +346,11 @@ The injected content is a memory index/summary plus the tape hint.
 - Memory file list with descriptions/tags
 - Files under the memory directory still get descriptions/tags even when selected via absolute paths
 - Recently active project file paths when smart mode detects read/edit/write activity
+- `recent focus` summaries for selected memory and project files, for example `recent focus: read 340-420, edit 390-399`
+- Recent focus ranges are derived after file selection and are limited to the same effective smart-scan window that produced the selected files
 - Smart-mode filtering that skips stale tape paths whose files no longer exist
 - Hidden keyword-triggered handoff instruction when configured keywords match
-- Optional `anchor.mode: "manual"` guard that hard-blocks `tape_handoff` unless the tool call uses `trigger: "keyword"` or `trigger: "manual"`
+- Optional `anchor.mode: "manual"` guard that hard-blocks direct `tape_handoff`, while keyword-matched hidden instructions and `/memory-anchor` remain allowed
 - Tape hint with tool usage instructions
 ```
 
@@ -359,7 +363,7 @@ The injected content is a memory index/summary plus the tape hint.
 
 Keyword-triggered handoff instructions are independent from the main memory payload and may be delivered later as `pi-memory-md-tape-keyword` when a configured keyword matches a user prompt.
 
-If `settings.tape.anchor.mode === "manual"`, the main tape hint tells the LLM not to create `tape_handoff` anchors proactively, and the tool layer also rejects `tape_handoff` unless the call uses `trigger: "keyword"` or `trigger: "manual"`. Keyword-triggered handoff instructions still override that guard for matching prompts, and `/memory-anchor` injects a dedicated hidden instruction for `trigger: "manual"`.
+If `settings.tape.anchor.mode === "manual"`, the main tape hint tells the LLM not to create `tape_handoff` anchors proactively, and the tool layer rejects direct `tape_handoff` calls. Keyword-triggered hidden instructions and `/memory-anchor` still authorize handoff creation through runtime binding.
 
 This means tape affects **selection**, while the injection mode controls **delivery frequency and location**.
 
@@ -379,7 +383,6 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 {
   "pi-memory-md": {
     "tape": {
-      "enabled": true,
       "context": {
         "strategy": "smart",
         "fileLimit": 10,
@@ -431,13 +434,20 @@ Your conversation history is recorded in tape with anchors (checkpoints).
   - within 72 hours: `+4`
 - Repeated single-file activity also gets a small repeat penalty when total accesses greatly exceed distinct tool kinds
 - Initial scan window is `memoryScan[0]` hours
-- If total assistant tool-call accesses in that window are fewer than `MIN_SMART_ACCESS_SAMPLES` (hardcoded `5`), expand to `memoryScan[1]` and rescan
+- If total assistant tool-call accesses in that window are fewer than `MIN_SMART_ACCESS_SAMPLES` (hardcoded `5`), expand by 24-hour steps until enough samples are found or `memoryScan[1]` is reached
+- Once file selection stops, `recent focus` ranges are collected only from that same effective scan window; they are not allowed to look further back than the file-selection result
 - Final ordering:
   1. final score (`weighted score + recency bonus - repeat penalty`)
   2. raw accumulated score
   3. last access time
   3. last access time
 - Falls back to directory scan if no history
+
+**Recent focus formatting:**
+- `read` / `memory_read` ranges come from `offset + limit`
+- `edit` ranges come from the linked edit tool result (`diff` / `firstChangedLine`)
+- Adjacent or overlapping ranges of the same kind are merged
+- Each selected file shows at most 5 recent focus ranges, ordered from most recent to older
 
 **Recent-only**:
 - Scans memory directory directly
@@ -529,7 +539,7 @@ tape_handoff(name="checkpoint")
 tape_handoff(
   name="migration/checkpoint",
   summary="Users table migration checkpoint",
-  meta={ trigger: "direct", keywords: ["migration", "users"] }
+  purpose="migration"
 )
 ```
 
