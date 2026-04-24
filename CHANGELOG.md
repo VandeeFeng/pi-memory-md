@@ -7,9 +7,9 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 ### Features
 
 - **Recent focus hints**: Tape context can now attach concise `recent focus` line ranges to selected memory files and recently active project files, based on recent `memory_read` / `read` offsets and parsed `edit` diffs from session history within the effective smart-scan window. The injected summary keeps the latest merged ranges (up to five per file), for example `read 340-420` or `edit 390-399`, so the agent can see which parts of each file were actually touched most recently.
+- **Tape activation rules**: Tape now uses `"onlyGit": true` by default, so tape runs only inside a Git repository. If no `.git` is found, tape inject and anchor recording are skipped. You can also add absolute `"excludeDirs"` paths, and built-in system/temp directories are excluded by default for safety.
 
 ### Changes
-
 - **Tape config is now opt-out**: If a `"tape"` block exists, tape is enabled by default. Only `"enabled": false` disables it, while existing `"enabled": true` configs continue to work unchanged.
 - **Tape context include/exclude overhaul**: In tape config, `"alwaysInclude": [...]` is replaced by `"whitelist": [...]`, and you can now also add `"blacklist": [...]`. Smart project-file injection prefers `rg --files` ignore behavior when available, falls back to a built-in default ignore list for common noise, keeps `"blacklist"` as a hard exclude, and treats `"whitelist"` as a force-include override.
 - **Deprecated legacy tape include setting**: If your config still uses `"alwaysInclude": [...]`, it will keep working for now, but please move it to `"whitelist": [...]`.

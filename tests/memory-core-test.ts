@@ -16,7 +16,7 @@ import {
   readMemoryFile,
   writeMemoryFile,
 } from "../memory-core.js";
-import { resolvePathWithin } from "../utils.js";
+import { DEFAULT_TAPE_EXCLUDE_DIRS, resolvePathWithin } from "../utils.js";
 import { createTempDir, writeJson, writeText } from "./test-helpers.js";
 
 test("loadSettings merges defaults, global/project settings, and normalizes values", () => {
@@ -51,6 +51,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
         sessionEnd: ["push"],
       },
       tape: {
+        excludeDirs: ["~/blocked", "relative/path"],
         context: {
           fileLimit: 3,
           memoryScan: [10.9, 5.1],
@@ -81,8 +82,10 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
       sessionEnd: ["push"],
     });
     assert.equal(settings.tape?.enabled, true);
+    assert.equal(settings.tape?.onlyGit, true);
     assert.equal(settings.tape?.context?.fileLimit, 3);
     assert.deepEqual(settings.tape?.context?.memoryScan, [10, 10]);
+    assert.deepEqual(settings.tape?.excludeDirs, [...DEFAULT_TAPE_EXCLUDE_DIRS, path.join(tempHome, "blocked")]);
     assert.deepEqual(settings.tape?.context?.whitelist, ["docs/tape-design.md", "core/user/identity.md"]);
     assert.deepEqual(settings.tape?.context?.blacklist, ["node_modules"]);
     assert.equal(settings.tape?.anchor?.mode, "auto");
@@ -119,12 +122,14 @@ test("loadSettings enables tape when tape config exists unless explicitly disabl
       "pi-memory-md": {
         tape: {
           enabled: false,
+          onlyGit: false,
         },
       },
     });
 
     const disabledSettings = loadSettings(projectDir);
     assert.equal(disabledSettings.tape?.enabled, false);
+    assert.equal(disabledSettings.tape?.onlyGit, false);
   } finally {
     homedirMock.mock.restore();
   }

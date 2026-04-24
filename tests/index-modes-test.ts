@@ -143,6 +143,7 @@ test("before_agent_start uses tape context in message-append mode and queues key
   const projectDir = createTempDir("pi-memory-md-index-mode-project-3");
   const localPath = path.join(homeDir, "memory-root");
   const memoryDir = createProjectMemory(projectDir, localPath);
+  fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
   fs.mkdirSync(path.join(memoryDir, "reference"), { recursive: true });
 
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
@@ -179,11 +180,97 @@ test("before_agent_start uses tape context in message-append mode and queues key
   assert.equal(extension.sentMessages[1]?.message.customType, "pi-memory-md-tape-keyword");
 });
 
+test("before_agent_start skips tape injection and anchor recording when onlyGit is true outside git repos", async () => {
+  const homeDir = createTempDir("pi-memory-md-index-mode-home-git-only");
+  const projectDir = createTempDir("pi-memory-md-index-mode-project-git-only");
+  const localPath = path.join(homeDir, "memory-root");
+  createProjectMemory(projectDir, localPath);
+
+  writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": {
+      localPath,
+      injection: "message-append",
+      tape: {
+        enabled: true,
+        onlyGit: true,
+        context: { strategy: "recent-only", fileLimit: 5 },
+        anchor: { keywords: { global: ["tape"] } },
+      },
+    },
+  });
+
+  const extension = bootExtension(homeDir, projectDir);
+  const sessionStart = extension.handlers.get("session_start");
+  const beforeAgentStart = extension.handlers.get("before_agent_start");
+  const ui = createUi();
+
+  await sessionStart?.({ reason: "new" }, { cwd: projectDir, ui, sessionManager: createSessionManager() });
+  const result = await beforeAgentStart?.(
+    { prompt: "please help with tape labels", systemPrompt: "SYSTEM" },
+    { cwd: projectDir, ui, sessionManager: createSessionManager() },
+  );
+
+  assert.equal(result, undefined);
+  assert.equal(extension.sentMessages.length, 0);
+  assert.equal(
+    ui.notifications.some((item) => item.message.includes("Tape mode:")),
+    false,
+  );
+  assert.equal(
+    ui.notifications.some((item) => item.message.includes("Memory injected:")),
+    false,
+  );
+  assert.equal(fs.existsSync(path.join(localPath, "TAPE")), false);
+});
+
+test("before_agent_start skips tape injection when cwd matches excluded dirs", async () => {
+  const homeDir = createTempDir("pi-memory-md-index-mode-home-excluded");
+  const blockedRoot = createTempDir("pi-memory-md-index-mode-blocked-root");
+  const projectDir = path.join(blockedRoot, "project");
+  const localPath = path.join(homeDir, "memory-root");
+  fs.mkdirSync(projectDir, { recursive: true });
+  createProjectMemory(projectDir, localPath);
+  fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+
+  writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": {
+      localPath,
+      injection: "message-append",
+      tape: {
+        enabled: true,
+        excludeDirs: [blockedRoot],
+        context: { strategy: "recent-only", fileLimit: 5 },
+        anchor: { keywords: { global: ["tape"] } },
+      },
+    },
+  });
+
+  const extension = bootExtension(homeDir, projectDir);
+  const sessionStart = extension.handlers.get("session_start");
+  const beforeAgentStart = extension.handlers.get("before_agent_start");
+  const ui = createUi();
+
+  await sessionStart?.({ reason: "new" }, { cwd: projectDir, ui, sessionManager: createSessionManager() });
+  const result = await beforeAgentStart?.(
+    { prompt: "please help with tape labels", systemPrompt: "SYSTEM" },
+    { cwd: projectDir, ui, sessionManager: createSessionManager() },
+  );
+
+  assert.equal(result, undefined);
+  assert.equal(extension.sentMessages.length, 0);
+  assert.equal(
+    ui.notifications.some((item) => item.message.includes("Tape mode:")),
+    false,
+  );
+  assert.equal(fs.existsSync(path.join(localPath, "TAPE")), false);
+});
+
 test("before_agent_start uses tape context in system-prompt mode and keeps injecting on later calls", async () => {
   const homeDir = createTempDir("pi-memory-md-index-mode-home-4");
   const projectDir = createTempDir("pi-memory-md-index-mode-project-4");
   const localPath = path.join(homeDir, "memory-root");
   createProjectMemory(projectDir, localPath);
+  fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
 
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
@@ -218,6 +305,7 @@ test("reloading extension picks up updated settings and switches behavior", asyn
   const projectDir = createTempDir("pi-memory-md-index-mode-project-5");
   const localPath = path.join(homeDir, "memory-root");
   createProjectMemory(projectDir, localPath);
+  fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
 
   const settingsPath = path.join(homeDir, ".pi", "agent", "settings.json");
   writeJson(settingsPath, {

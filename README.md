@@ -254,8 +254,6 @@ If you want to jump to the conversation around an anchor and restart from there,
 **Tape** is an independent feature that can be enabled alongside either injection mode.
 It does not change the delivery mechanism; it changes **which memory files** are selected.
 
-#### Behavior matrix
-
 | Tape | Injection mode | Behavior |
 |------|----------------|----------|
 | Disabled | `message-append` | Sends memory once as a hidden custom message on the first agent turn |
@@ -265,7 +263,7 @@ It does not change the delivery mechanism; it changes **which memory files** are
 
 With tape enabled, the injected content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the injected list can also include recently active project file paths inferred from tool usage, plus a `recent focus` summary for each selected file showing the most recently attended `read` / `edit` ranges inside the same effective smart-scan window. Stale paths from old tape history are ignored when the file no longer exists.
 
-Tape now follows an opt-out rule: if a `tape` block exists, tape is on unless you set `"enabled": false`.
+Tape follows an opt-out rule: if a `tape` block exists, tape is on unless you set `"enabled": false`.
 
 A tape hidden message injected looks like this:
 
@@ -305,12 +303,24 @@ Tape also:
 - **Pros**: Better context selection with checkpoint management, recent project file awareness, and handoff-aware prioritization
 - **Cons**: Slightly more complex configuration and more token costs
 
+### Config Guide
+
 ```json
 {
   "pi-memory-md": {
     ...
     "localPath": "~/.pi/memory-md",
     "tape": {
+      // Run tape only inside a Git repository by default
+      // Without .git, tape inject and anchors are skipped
+      "onlyGit": true, // default
+
+      // Absolute directory paths where tape is always disabled
+      // Built-in system/temp directories are also excluded by default
+      "excludeDirs": [
+        "/absolute/path/to/sandbox"
+      ],
+
       "context": {
         // "smart": ranks memory files plus recent project file activity from session history (default)
         //          repeated accesses get diminishing returns, edit/write outrank plain reads,

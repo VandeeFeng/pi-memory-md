@@ -1,8 +1,16 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 export const DEFAULT_LOCAL_PATH = path.join(os.homedir(), ".pi", "memory-md");
 export const DEFAULT_TAPE_DIRNAME = "TAPE";
+const DEFAULT_TAPE_EXCLUDE_DIRS_BY_PLATFORM: Record<string, string[]> = {
+  darwin: ["/System"],
+  linux: ["/proc", "/sys", "/dev", "/run", "/nix/store", "/snap"],
+  win32: ["C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)", "C:\\ProgramData"],
+};
+
+export const DEFAULT_TAPE_EXCLUDE_DIRS = DEFAULT_TAPE_EXCLUDE_DIRS_BY_PLATFORM[process.platform] ?? [];
 
 export function nowIso(date = new Date()): string {
   return date.toISOString();
@@ -43,6 +51,17 @@ export function resolveFrom(root: string, filePath: string): string {
   return path.isAbsolute(filePath) ? filePath : path.resolve(root, filePath);
 }
 
+function normalizePathForComparison(filePath: string): string {
+  const resolvedPath = path.resolve(filePath);
+  return process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
+}
+
+export function isPathInside(parentDir: string, targetPath: string): boolean {
+  const normalizedParent = normalizePathForComparison(parentDir);
+  const normalizedTarget = normalizePathForComparison(targetPath);
+  return normalizedTarget === normalizedParent || normalizedTarget.startsWith(`${normalizedParent}${path.sep}`);
+}
+
 export function resolvePathWithin(baseDir: string, relPath: string): string | null {
   const normalizedBaseDir = path.resolve(baseDir);
   const resolvedPath = path.resolve(normalizedBaseDir, relPath);
@@ -58,9 +77,25 @@ export function toRelativeIfInside(parentDir: string, targetPath: string): strin
   const normalizedParent = path.resolve(parentDir);
   const normalizedTarget = path.resolve(targetPath);
 
-  return normalizedTarget.startsWith(`${normalizedParent}${path.sep}`)
+  return isPathInside(normalizedParent, normalizedTarget)
     ? path.relative(normalizedParent, normalizedTarget)
     : normalizedTarget;
+}
+
+export function findGitTopLevel(cwd: string): string | null {
+  let currentDir = path.resolve(cwd);
+
+  while (true) {
+    if (fs.existsSync(path.join(currentDir, ".git"))) {
+      return currentDir;
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      return null;
+    }
+    currentDir = parentDir;
+  }
 }
 
 export function getProjectName(cwd: string): string {

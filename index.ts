@@ -12,6 +12,7 @@ import {
   loadSettings,
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
+import { resolveTapeActivation, type TapeActivationResult } from "./tape/tape-activation.js";
 import type { KeywordHandoffInstruction } from "./tape/tape-selector.js";
 import { detectKeywordHandoff, MemoryFileSelector } from "./tape/tape-selector.js";
 import { TapeService } from "./tape/tape-service.js";
@@ -27,6 +28,7 @@ type ExtensionState = {
   initialMemoryContext: string | null;
   hasInjectedInitialContext: boolean;
   pendingHandoffMatch: PendingHandoffMatch | null;
+  tapeActivation: TapeActivationResult | null;
   activeTapeRuntime: {
     service: TapeService;
     selector: MemoryFileSelector;
@@ -41,6 +43,7 @@ function createExtensionState(): ExtensionState {
     initialMemoryContext: null,
     hasInjectedInitialContext: false,
     pendingHandoffMatch: null,
+    tapeActivation: null,
     activeTapeRuntime: null,
   };
 }
@@ -51,13 +54,17 @@ function ensureTapeRuntime(
   ctx: ExtensionContext,
   options: { recordSessionStart: boolean; sessionStartReason?: "startup" | "reload" | "new" | "resume" | "fork" },
 ): void {
-  if (!settings.tape?.enabled || !settings.localPath) {
+  const activation = resolveTapeActivation(ctx.cwd, settings.tape);
+  state.tapeActivation = activation;
+
+  if (!activation.enabled || !settings.localPath || !activation.projectName) {
     state.activeTapeRuntime = null;
     return;
   }
 
   const memoryDir = getMemoryDir(settings, ctx.cwd);
-  const projectName = getProjectName(ctx.cwd);
+  const projectName = activation.projectName;
+
   const sessionId = ctx.sessionManager.getSessionId();
   const tapeBasePath = getTapeBasePath(settings.localPath, settings.tape?.tapePath);
   const runtimeKey = [tapeBasePath, projectName, sessionId].join("::");
@@ -202,7 +209,8 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
 
     const mode = settings.injection || "message-append";
     const tapeEnabled = settings.tape?.enabled;
-    const keywordHandoff = tapeEnabled ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
+    const tapeActive = state.tapeActivation?.enabled === true && state.activeTapeRuntime !== null;
+    const keywordHandoff = tapeActive ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
     if (state.pendingHandoffMatch?.trigger !== "manual") {
       state.pendingHandoffMatch = keywordHandoff ? { trigger: "keyword", instruction: keywordHandoff } : null;
     }
@@ -211,7 +219,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       ctx.ui.notify(`Tape keyword detected: ${keywordHandoff.primary}`, "info");
     }
 
-    if (tapeEnabled && state.activeTapeRuntime && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
+    if (tapeActive && state.activeTapeRuntime && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {
       const { fileLimit = 10, strategy = "smart", memoryScan = [72, 168] } = settings.tape?.context ?? {};
       const memoryFiles = state.activeTapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
       const selectedFiles = state.activeTapeRuntime.selector.finalizeContextFiles(memoryFiles);
@@ -241,6 +249,10 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
 
     if (keywordHandoff) {
       queueKeywordHandoffMessage(pi, keywordHandoff);
+    }
+
+    if (tapeEnabled && !tapeActive) {
+      return;
     }
 
     if (state.initialMemoryContext && (mode === "system-prompt" || !state.hasInjectedInitialContext)) {

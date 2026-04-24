@@ -101,7 +101,12 @@ export class ConversationSelector {
     for (let index = entries.length - 1; index >= 0; index--) {
       const entry = entries[index];
       const tokens = Math.ceil(JSON.stringify(entry).length / CHARS_PER_TOKEN);
-      if (totalTokens + tokens > this.maxTokens) break;
+      if (totalTokens + tokens > this.maxTokens) {
+        if (filtered.length === 0) {
+          filtered.push(entry);
+        }
+        break;
+      }
 
       totalTokens += tokens;
       filtered.push(entry);

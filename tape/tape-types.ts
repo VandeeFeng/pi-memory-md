@@ -72,6 +72,10 @@ export type TapeHandoffMode = "auto" | "manual";
 export interface TapeConfig {
   /** Enable tape mode. If the tape block exists, tape is on unless this is false. */
   enabled?: boolean;
+  /** Run tape only inside a Git repository by default; otherwise skip tape inject and anchors (default: true) */
+  onlyGit?: boolean;
+  /** Absolute directory paths where tape is always disabled */
+  excludeDirs?: string[];
   /** Custom anchor store path (optional, default: {localPath}/TAPE) */
   tapePath?: string;
   /** Memory file selection configuration */

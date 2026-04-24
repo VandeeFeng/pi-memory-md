@@ -367,6 +367,16 @@ If `settings.tape.anchor.mode === "manual"`, the main tape hint tells the LLM no
 
 This means tape affects **selection**, while the injection mode controls **delivery frequency and location**.
 
+### Tape activation rules
+
+Tape runtime is enabled only when all of these checks pass:
+- `settings.tape.enabled !== false`
+- current `cwd` does not match any absolute path in `settings.tape.excludeDirs`
+- current `cwd` does not match the built-in system safety exclude list
+- when `settings.tape.onlyGit !== false`, a parent `.git` can be found by walking upward from `cwd`
+
+If any check fails, tape is skipped completely for that turn/session startup: no tape injection, no tape keyword handoff message, and no anchor recording.
+
 **Tape Hint:**
 ```
 💡 Tape Context Management:
@@ -383,6 +393,10 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 {
   "pi-memory-md": {
     "tape": {
+      "onlyGit": true,
+      "excludeDirs": [
+        "/absolute/path/to/sandbox"
+      ],
       "context": {
         "strategy": "smart",
         "fileLimit": 10,
@@ -402,6 +416,10 @@ Your conversation history is recorded in tape with anchors (checkpoints).
   }
 }
 ```
+
+- `onlyGit` defaults to `true`. When enabled, tape runs only inside a Git repository; otherwise tape inject and anchor recording are skipped.
+- `excludeDirs` is a list of absolute directory paths. If `cwd` is equal to or inside any excluded directory, tape is skipped.
+- Built-in system safety excludes are also applied by default and merged with user-defined `excludeDirs`.
 
 ### Context Strategy
 

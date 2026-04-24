@@ -5,7 +5,7 @@ import matter from "gray-matter";
 import { DEFAULT_HOOKS, normalizeHooks } from "./hooks.js";
 import { normalizeTapeKeywords } from "./tape/tape-selector.js";
 import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, ParsedFrontmatter } from "./types.js";
-import { DEFAULT_LOCAL_PATH, expandHomePath, getCurrentDate } from "./utils.js";
+import { DEFAULT_LOCAL_PATH, DEFAULT_TAPE_EXCLUDE_DIRS, expandHomePath, getCurrentDate } from "./utils.js";
 
 export * from "./types.js";
 export { DEFAULT_LOCAL_PATH, getCurrentDate } from "./utils.js";
@@ -18,6 +18,8 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
   injection: "message-append",
   tape: {
     enabled: false,
+    onlyGit: true,
+    excludeDirs: DEFAULT_TAPE_EXCLUDE_DIRS,
     context: {
       strategy: "smart",
       fileLimit: 10,
@@ -82,6 +84,10 @@ function normalizePathList(value: string[] | undefined): string[] {
   return [...new Set((value ?? []).map((entry) => entry.trim()).filter(Boolean))];
 }
 
+function normalizeAbsolutePathList(value: string[] | undefined): string[] {
+  return [...new Set((value ?? []).map((entry) => expandPath(entry.trim())).filter((entry) => path.isAbsolute(entry)))];
+}
+
 function mergePathLists(...lists: Array<string[] | undefined>): string[] {
   return normalizePathList(lists.flatMap((list) => list ?? []));
 }
@@ -112,6 +118,14 @@ function normalizeSettings(
     loadedSettings.tape ??= {};
     loadedSettings.tape.context ??= {};
     loadedSettings.tape.context.memoryScan = [normalizedStart, Math.max(normalizedStart, normalizedMax)];
+  }
+
+  if (loadedSettings.tape) {
+    loadedSettings.tape.onlyGit = loadedSettings.tape.onlyGit !== false;
+    loadedSettings.tape.excludeDirs = normalizeAbsolutePathList([
+      ...(DEFAULT_TAPE_EXCLUDE_DIRS ?? []),
+      ...(loadedSettings.tape.excludeDirs ?? []),
+    ]);
   }
 
   if (loadedSettings.tape?.context) {
