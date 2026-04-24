@@ -3,7 +3,7 @@ import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { MemoryMdSettings } from "../types.js";
-import { toLocaleDateTime, toLocaleTime } from "../utils.js";
+import { toLocaleDateTime, toLocaleTime, toTimestamp } from "../utils.js";
 import type { TapeAnchorKind, TapeAnchorMeta } from "./tape-anchor.js";
 import type { KeywordHandoffInstruction } from "./tape-gate.js";
 import { extractMessageContent } from "./tape-selector.js";
@@ -128,8 +128,8 @@ function getAnchorSearchBounds(
 }
 
 function getAnchorContext(entries: SessionEntry[], anchorTimestamp: string, contextLines: number): string[][] {
-  const anchorTime = new Date(anchorTimestamp).getTime();
-  const anchorIndex = entries.findIndex((entry) => new Date(entry.timestamp).getTime() >= anchorTime);
+  const anchorTime = toTimestamp(anchorTimestamp);
+  const anchorIndex = entries.findIndex((entry) => toTimestamp(entry.timestamp) >= anchorTime);
 
   if (anchorIndex === -1) {
     return [entries.slice(-contextLines).map(formatEntrySummary), []];

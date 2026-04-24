@@ -92,6 +92,29 @@ function mergePathLists(...lists: Array<string[] | undefined>): string[] {
   return normalizePathList(lists.flatMap((list) => list ?? []));
 }
 
+function sanitizeProjectSettings(
+  rawSettings: Partial<MemoryMdSettings> & {
+    autoSync?: { onSessionStart?: boolean };
+  },
+): Partial<MemoryMdSettings> & { autoSync?: { onSessionStart?: boolean } } {
+  const sanitized: Partial<MemoryMdSettings> & { autoSync?: { onSessionStart?: boolean } } = {
+    ...rawSettings,
+    repoUrl: undefined,
+    localPath: undefined,
+    hooks: undefined,
+    autoSync: undefined,
+  };
+
+  if (sanitized.tape) {
+    sanitized.tape = {
+      ...sanitized.tape,
+      tapePath: undefined,
+    };
+  }
+
+  return sanitized;
+}
+
 function normalizeSettings(
   rawSettings: MemoryMdSettings & {
     hooks?: MemoryMdSettings["hooks"];
@@ -150,7 +173,11 @@ export function loadSettings(cwd = process.cwd()): MemoryMdSettings {
   const globalSettings = readSettingsFile(globalSettingsPath);
   const projectSettings = readSettingsFile(projectSettingsPath);
   const globalMemorySettings = (globalSettings["pi-memory-md"] ?? {}) as MemoryMdSettings;
-  const projectMemorySettings = (projectSettings["pi-memory-md"] ?? {}) as Partial<MemoryMdSettings>;
+  const projectMemorySettings = sanitizeProjectSettings(
+    (projectSettings["pi-memory-md"] ?? {}) as Partial<MemoryMdSettings> & {
+      autoSync?: { onSessionStart?: boolean };
+    },
+  );
   const rawSettings = deepMergeSettings(globalMemorySettings, projectMemorySettings) as MemoryMdSettings & {
     hooks?: MemoryMdSettings["hooks"];
     autoSync?: { onSessionStart?: boolean };

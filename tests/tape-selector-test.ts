@@ -7,6 +7,7 @@ import { test } from "node:test";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import { writeMemoryFile } from "../memory-core.js";
 import { ConversationSelector, MemoryFileSelector, matchesDefaultIgnoredPath } from "../tape/tape-selector.js";
+import { hoursAgoIso, toTimestamp } from "../utils.js";
 import { createTempDir } from "./test-helpers.js";
 
 type MockAnchor = {
@@ -45,10 +46,6 @@ function createToolResultEntry(
   } as unknown as SessionEntry;
 }
 
-function hoursAgo(hours: number): string {
-  return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-}
-
 function createMockTapeService(entries: SessionEntry[], anchors: MockAnchor[] = []): MockTapeService {
   return {
     query(options) {
@@ -57,8 +54,8 @@ function createMockTapeService(entries: SessionEntry[], anchors: MockAnchor[] = 
       }
 
       if (typeof options.since === "string") {
-        const sinceTime = new Date(options.since).getTime();
-        return entries.filter((entry) => new Date(entry.timestamp).getTime() >= sinceTime);
+        const sinceTime = toTimestamp(options.since);
+        return entries.filter((entry) => toTimestamp(entry.timestamp) >= sinceTime);
       }
 
       return entries;
@@ -66,8 +63,8 @@ function createMockTapeService(entries: SessionEntry[], anchors: MockAnchor[] = 
     getAnchorStore() {
       return {
         search(options) {
-          const sinceTime = typeof options.since === "string" ? new Date(options.since).getTime() : -Infinity;
-          return anchors.filter((anchor) => new Date(anchor.timestamp).getTime() >= sinceTime);
+          const sinceTime = typeof options.since === "string" ? toTimestamp(options.since) : -Infinity;
+          return anchors.filter((anchor) => toTimestamp(anchor.timestamp) >= sinceTime);
         },
       };
     },
@@ -155,22 +152,22 @@ test("MemoryFileSelector smart mode prioritizes frequently accessed memory files
   writeMemoryFile(path.join(memoryDir, coldFile), "# Cold", { description: "Cold", tags: ["cold"] });
 
   const entries = [
-    createMessageEntry(hoursAgo(5.5), "assistant", [
+    createMessageEntry(hoursAgoIso(5.5), "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
     ]),
-    createMessageEntry(hoursAgo(5), "assistant", [
+    createMessageEntry(hoursAgoIso(5), "assistant", [
       { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
     ]),
-    createMessageEntry(hoursAgo(4.5), "assistant", [
+    createMessageEntry(hoursAgoIso(4.5), "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
     ]),
-    createMessageEntry(hoursAgo(4), "assistant", [
+    createMessageEntry(hoursAgoIso(4), "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
     ]),
-    createMessageEntry(hoursAgo(3.5), "assistant", [
+    createMessageEntry(hoursAgoIso(3.5), "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: coldFile } },
     ]),
-    createMessageEntry(hoursAgo(3), "assistant", [
+    createMessageEntry(hoursAgoIso(3), "assistant", [
       { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
     ]),
   ];
@@ -196,19 +193,19 @@ test("MemoryFileSelector smart mode filters common ignored project files", () =>
   spawnSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
 
   const entries = [
-    createMessageEntry(hoursAgo(5), "assistant", [
+    createMessageEntry(hoursAgoIso(5), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "src/index.ts" } },
     ]),
-    createMessageEntry(hoursAgo(4.5), "assistant", [
+    createMessageEntry(hoursAgoIso(4.5), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "node_modules/pkg/index.js" } },
     ]),
-    createMessageEntry(hoursAgo(4), "assistant", [
+    createMessageEntry(hoursAgoIso(4), "assistant", [
       { type: "toolCall", name: "edit", arguments: { path: "src/index.ts" } },
     ]),
-    createMessageEntry(hoursAgo(3.5), "assistant", [
+    createMessageEntry(hoursAgoIso(3.5), "assistant", [
       { type: "toolCall", name: "edit", arguments: { path: "node_modules/pkg/index.js" } },
     ]),
-    createMessageEntry(hoursAgo(3), "assistant", [
+    createMessageEntry(hoursAgoIso(3), "assistant", [
       { type: "toolCall", name: "write", arguments: { path: "src/index.ts" } },
     ]),
   ];
@@ -255,17 +252,17 @@ test("MemoryFileSelector buildContextFromFiles renders memory and project files 
 
   const editToolCallId = crypto.randomUUID();
   const entries = [
-    createMessageEntry(hoursAgo(5), "assistant", [
+    createMessageEntry(hoursAgoIso(5), "assistant", [
       { type: "toolCall", name: "memory_read", arguments: { path: "core/user/identity.md", offset: 3, limit: 4 } },
     ]),
-    createMessageEntry(hoursAgo(4), "assistant", [
+    createMessageEntry(hoursAgoIso(4), "assistant", [
       { type: "toolCall", id: editToolCallId, name: "edit", arguments: { path: "src/index.ts" } },
     ]),
-    createToolResultEntry(hoursAgo(3.5), editToolCallId, "edit", {
+    createToolResultEntry(hoursAgoIso(3.5), editToolCallId, "edit", {
       firstChangedLine: 12,
       diff: "      ...\n  12 \tconst before = true;\n+ 13 \tconst after = true;\n  14 \treturn after;\n      ...",
     }),
-    createMessageEntry(hoursAgo(3), "assistant", [
+    createMessageEntry(hoursAgoIso(3), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 20, limit: 3 } },
     ]),
   ];
@@ -297,22 +294,22 @@ test("MemoryFileSelector line ranges follow the effective smart scan window", ()
   fs.writeFileSync(projectFile, "export const ok = true;\n");
 
   const entries = [
-    createMessageEntry(hoursAgo(20), "assistant", [
+    createMessageEntry(hoursAgoIso(20), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 10, limit: 2 } },
     ]),
-    createMessageEntry(hoursAgo(19), "assistant", [
+    createMessageEntry(hoursAgoIso(19), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 20, limit: 2 } },
     ]),
-    createMessageEntry(hoursAgo(18), "assistant", [
+    createMessageEntry(hoursAgoIso(18), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 30, limit: 2 } },
     ]),
-    createMessageEntry(hoursAgo(17), "assistant", [
+    createMessageEntry(hoursAgoIso(17), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 40, limit: 2 } },
     ]),
-    createMessageEntry(hoursAgo(16), "assistant", [
+    createMessageEntry(hoursAgoIso(16), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 50, limit: 2 } },
     ]),
-    createMessageEntry(hoursAgo(100), "assistant", [
+    createMessageEntry(hoursAgoIso(100), "assistant", [
       { type: "toolCall", name: "read", arguments: { path: "src/index.ts", offset: 90, limit: 2 } },
     ]),
   ];

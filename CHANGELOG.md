@@ -14,10 +14,13 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 - **Tape context include/exclude overhaul**: In tape config, `"alwaysInclude": [...]` is replaced by `"whitelist": [...]`, and you can now also add `"blacklist": [...]`. Smart project-file injection prefers `rg --files` ignore behavior when available, falls back to a built-in default ignore list for common noise, keeps `"blacklist"` as a hard exclude, and treats `"whitelist"` as a force-include override.
 - **Deprecated legacy tape include setting**: If your config still uses `"alwaysInclude": [...]`, it will keep working for now, but please move it to `"whitelist": [...]`.
 
-### Fix
+### Fixed
 
 - **Tape handoff match flow**: `tape_handoff` now resolves keyword and manual handoffs internally instead of exposing `trigger` or `keywords` to the model. The model only provides `name`, `summary`, and `purpose`, and keyword handoffs only apply when the created anchor name matches the hidden keyword instruction for the current turn.
 - **Smart project file tracking**: Smart tape selection now keeps `read` / `edit` / `write` project file paths as full project paths, so active non-memory files are ranked and injected correctly.
+- **Project settings trust boundary**: Project-level `.pi/settings.json` no longer overrides high-trust memory settings like `repoUrl`, `localPath`, sync hooks, legacy `autoSync`, or `tape.tapePath`. Those values now remain controlled by global user settings.
+- **Symlink escape protection**: `memory_read`, `memory_write`, and `memory_list` now reject memory paths that traverse symbolic links inside the memory directory, preventing reads and writes from escaping the memory root through symlinked entries.
+- **Bounded memory search execution**: `memory_search` now applies a timeout to `grep` / `rg`, caps custom pattern length, and limits search matches per command to reduce runaway regex and heavy search abuse.
 
 ## [0.1.30] - 2026-04-23
 
@@ -57,7 +60,7 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
   This was really annoying!
 - **Tape memory summary reuse**: Tape smart-mode injection now normalizes selected paths under the memory directory and reuses the traditional memory summary output (`Description`/`Tags`) for them, even when selected via absolute paths.
 
-### Fix
+### Fixed
 
 - **Smart selector ranking refinement**: Smart tape selection now applies diminishing returns to repeated accesses, gives stronger weight to `edit` / `write` activity than plain `read`, adds a recency bonus to recently touched files, ignores stale paths whose files no longer exist, and limits handoff boosts to the first 15 entries after the latest matching anchor with time decay.
 - **Runtime state simplification**: Removed the unused repo initialization ref and reshaped `index.ts` state around the current extension behavior: tape tool registration, session-start hook coordination, initial memory injection, and active tape runtime.
@@ -79,7 +82,7 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 - **Hooks-based session actions**: Replaced the old `autoSync` model with `hooks.sessionStart` and `hooks.sessionEnd`, allowing multiple actions per trigger and future custom hook actions.
 
-### Fix
+### Fixed
 
 - **Settings reload semantics**: Aligned `pi-memory-md` settings behavior with native pi runtime semantics. Settings are now loaded on extension initialization and applied on runtime reload.
 
@@ -95,7 +98,7 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 - **Cross-session tape reads**: `TapeService` can now load entries from all sessions of the current project when using `scope: "project"`
 - **Session-aware anchor resolution**: Anchor lookup now prefers current-session matches when requested, then falls back to project scope
 
-### Fix
+### Fixed
 
 - **Path traversal hardening**: Added safe path resolution for `memory_read`, `memory_write`, and `memory_list`
 - **Memory status init check**: `memory_sync(status)` now validates both `core/user` and `.git` on disk instead of relying on runtime flag state
@@ -130,7 +133,7 @@ Major architectural changes to tape mode:
 
 ## [0.1.24] - 2026-04-11
 
-### Fix
+### Fixed
 
 - Fixed `scanDir` base path handling
 - Return actual git error messages instead of generic ones

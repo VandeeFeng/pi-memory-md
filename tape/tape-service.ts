@@ -1,12 +1,7 @@
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import { nowIso, toTimestamp } from "../utils.js";
 import { AnchorStore, type TapeAnchor, type TapeAnchorKind, type TapeAnchorMeta } from "./tape-anchor.js";
-import {
-  getEntriesAfterTimestamp,
-  getSessionFilePath,
-  getSessionFilePaths,
-  parseSessionFile,
-} from "./tape-session-reader.js";
+import { getEntriesAfterTimestamp, getSessionFilePath, getSessionFilePaths, parseSessionFile } from "./tape-reader.js";
 import type { TapeQueryOptions } from "./tape-types.js";
 
 const DEFAULT_ANCHOR_LABEL_PREFIX = "⚓ ";

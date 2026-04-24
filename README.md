@@ -33,6 +33,14 @@ pi install git:github.com/VandeeFeng/pi-memory-md
 # type /memory-init slash command to initialize the memory files
 ```
 
+> **Security recommendation**
+>
+> Configure `pi-memory-md` in global settings (`~/.pi/agent/settings.json`) instead of project settings (`.pi/settings.json`).
+>
+> If project settings could override these options, a repository could redirect your memory to another local path, point sync at a different remote repo, or enable automatic pull/push behavior you did not intend.
+>
+> For this reason, project-level `.pi/settings.json` does not override these `pi-memory-md` options: `repoUrl`, `localPath`, sync hooks, and `tape.tapePath`.
+
 ## How It Works
 
 ```

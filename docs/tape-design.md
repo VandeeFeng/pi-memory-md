@@ -40,7 +40,7 @@ For pi TUI compatibility, anchors are also mirrored into `/tree` as inline label
 
 ## Core Components
 
-### 1. Session Reader (`tape/tape-session-reader.ts`)
+### 1. Session Reader (`tape/tape-reader.ts`)
 
 Reads entries directly from pi session files:
 

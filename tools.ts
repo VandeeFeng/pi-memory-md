@@ -16,11 +16,15 @@ import {
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
-import { getGitDir, getProjectName, resolvePathWithin } from "./utils.js";
+import { getGitDir, getProjectName, hasSymlinkInPath, resolvePathWithin } from "./utils.js";
 
 // Re-export types for convenience
 export type { ToolRenderResultOptions } from "@mariozechner/pi-coding-agent";
 export type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
+
+const MEMORY_SEARCH_TIMEOUT_MS = 5000;
+const MAX_SEARCH_PATTERN_LENGTH = 200;
+const MAX_SEARCH_RESULTS = 50;
 
 // ============================================================================
 // Render Utilities - Inline for simplicity
@@ -217,7 +221,7 @@ export function registerMemoryRead(pi: ExtensionAPI, settings: MemoryMdSettings)
       const memoryDir = getMemoryDir(settings, ctx.cwd);
       const fullPath = resolvePathWithin(memoryDir, relPath);
 
-      if (!fullPath) {
+      if (!fullPath || hasSymlinkInPath(memoryDir, fullPath)) {
         return {
           content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
           details: { error: true },
@@ -273,7 +277,7 @@ export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings
       const memoryDir = getMemoryDir(settings, ctx.cwd);
       const fullPath = resolvePathWithin(memoryDir, relPath);
 
-      if (!fullPath) {
+      if (!fullPath || hasSymlinkInPath(memoryDir, fullPath)) {
         return {
           content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
           details: { error: true },
@@ -322,7 +326,7 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
       const memoryDir = getMemoryDir(settings, ctx.cwd);
       const listDir = directory ? resolvePathWithin(memoryDir, directory) : memoryDir;
 
-      if (!listDir) {
+      if (!listDir || hasSymlinkInPath(memoryDir, listDir)) {
         return {
           content: [{ type: "text", text: `Invalid memory directory: ${directory}` }],
           details: { files: [], count: 0, error: true },
@@ -380,11 +384,27 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         };
       }
 
+      const customPattern = grep ?? rg;
+      if (customPattern && customPattern.length > MAX_SEARCH_PATTERN_LENGTH) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Search pattern too long (${customPattern.length}). Max length is ${MAX_SEARCH_PATTERN_LENGTH}.`,
+            },
+          ],
+          details: { files: [], count: 0, error: true },
+        };
+      }
+
       const escapedQuery = query ? query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : null;
       const searchLabel = query ?? grep ?? rg ?? "search";
 
       async function runTool(tool: string, args: string[]): Promise<string[]> {
-        const { stdout } = await pi.exec(tool, args).catch(() => ({ stdout: "" }));
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), MEMORY_SEARCH_TIMEOUT_MS);
+        const { stdout } = await pi.exec(tool, args, { signal: controller.signal }).catch(() => ({ stdout: "" }));
+        clearTimeout(timeoutId);
         const results: string[] = [];
 
         for (const line of (stdout || "").trim().split("\n")) {
@@ -405,7 +425,15 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
       }
 
       if (escapedQuery) {
-        const tagResults = await runTool("grep", ["-rn", "--include=*.md", "-E", `^\\s*-\\s*${escapedQuery}`, coreDir]);
+        const tagResults = await runTool("grep", [
+          "-rn",
+          "--include=*.md",
+          "-m",
+          String(MAX_SEARCH_RESULTS),
+          "-E",
+          `^\\s*-\\s*${escapedQuery}`,
+          coreDir,
+        ]);
         if (tagResults.length > 0) {
           sections.push(`## Tags matching: ${query}`, ...tagResults.slice(0, 20));
         }
@@ -413,6 +441,8 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         const descResults = await runTool("grep", [
           "-rn",
           "--include=*.md",
+          "-m",
+          String(MAX_SEARCH_RESULTS),
           "-E",
           `^description:\\s*.*${escapedQuery}`,
           coreDir,
@@ -423,14 +453,22 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
       }
 
       if (grep) {
-        const grepResults = await runTool("grep", ["-rn", "--include=*.md", "-E", grep, coreDir]);
+        const grepResults = await runTool("grep", [
+          "-rn",
+          "--include=*.md",
+          "-m",
+          String(MAX_SEARCH_RESULTS),
+          "-E",
+          grep,
+          coreDir,
+        ]);
         if (grepResults.length > 0) {
           sections.push("", `## Custom grep: ${grep}`, ...grepResults.slice(0, 50));
         }
       }
 
       if (rg) {
-        const rgResults = await runTool("rg", ["-t", "md", rg, coreDir]);
+        const rgResults = await runTool("rg", ["-t", "md", "-m", String(MAX_SEARCH_RESULTS), rg, coreDir]);
         if (rgResults.length > 0) {
           sections.push("", `## Custom ripgrep: ${rg}`, ...rgResults.slice(0, 50));
         }

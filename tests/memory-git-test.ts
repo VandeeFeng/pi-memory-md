@@ -207,5 +207,5 @@ test("pushRepository adds, commits, and pushes when there are local changes", as
     ["status", "add", "commit", "push"],
   );
   assert.equal(pi.calls[2]?.args[1], "-m");
-  assert.match(pi.calls[2]?.args[2] ?? "", /^Update memory - /);
+  assert.match(pi.calls[2]?.args[2] ?? "", /^Update memory - \d{4}-\d{2}-\d{2}-\d{4}$/);
 });

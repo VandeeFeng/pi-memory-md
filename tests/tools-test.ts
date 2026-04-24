@@ -1,5 +1,6 @@
 // Covers memory tool read, write, list, and search behavior plus invalid-path handling.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { readMemoryFile, writeMemoryFile } from "../memory-core.js";
@@ -14,11 +15,15 @@ type RegisteredTool = {
 type MockPi = {
   tools: Map<string, RegisteredTool>;
   registerTool: (tool: RegisteredTool) => void;
-  exec: (command: string, args: string[]) => Promise<{ stdout?: string }>;
+  exec: (command: string, args: string[], options?: { signal?: AbortSignal }) => Promise<{ stdout?: string }>;
 };
 
 function createMockPi(
-  execHandler?: (command: string, args: string[]) => Promise<{ stdout?: string }> | { stdout?: string },
+  execHandler?: (
+    command: string,
+    args: string[],
+    options?: { signal?: AbortSignal },
+  ) => Promise<{ stdout?: string }> | { stdout?: string },
 ): MockPi {
   const tools = new Map<string, RegisteredTool>();
 
@@ -27,12 +32,12 @@ function createMockPi(
     registerTool(tool) {
       tools.set(tool.name, tool);
     },
-    async exec(command, args) {
+    async exec(command, args, options) {
       if (!execHandler) {
         return { stdout: "" };
       }
 
-      return execHandler(command, args);
+      return execHandler(command, args, options);
     },
   };
 }
@@ -86,6 +91,30 @@ test("memory_read rejects invalid traversal paths", async () => {
   registerMemoryRead(pi as never, { localPath: path.join(tempDir, "memory-root") });
 
   const result = (await executeTool(pi, "memory_read", { path: "../escape.md" }, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { error?: boolean };
+  };
+
+  assert.match(result.content[0]?.text ?? "", /Invalid memory path/);
+  assert.equal(result.details?.error, true);
+});
+
+test("memory_read rejects symlink paths", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-read-symlink");
+  const projectDir = path.join(tempDir, "project");
+  const settings = { localPath: path.join(tempDir, "memory-root") };
+  const memoryDir = path.join(settings.localPath, path.basename(projectDir));
+  const outsideFile = path.join(tempDir, "outside.md");
+  const linkPath = path.join(memoryDir, "core", "user", "linked.md");
+
+  writeMemoryFile(outsideFile, "outside", { description: "Outside" });
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  fs.symlinkSync(outsideFile, linkPath);
+
+  const pi = createMockPi();
+  registerMemoryRead(pi as never, settings);
+
+  const result = (await executeTool(pi, "memory_read", { path: "core/user/linked.md" }, projectDir)) as {
     content: Array<{ text?: string }>;
     details?: { error?: boolean };
   };
@@ -157,6 +186,35 @@ test("memory_write rejects invalid traversal paths", async () => {
   assert.equal(result.details?.error, true);
 });
 
+test("memory_write rejects symlink paths", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-write-symlink");
+  const projectDir = path.join(tempDir, "project");
+  const settings = { localPath: path.join(tempDir, "memory-root") };
+  const memoryDir = path.join(settings.localPath, path.basename(projectDir));
+  const outsideFile = path.join(tempDir, "outside.md");
+  const linkPath = path.join(memoryDir, "core", "user", "linked.md");
+
+  writeMemoryFile(outsideFile, "outside", { description: "Outside" });
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  fs.symlinkSync(outsideFile, linkPath);
+
+  const pi = createMockPi();
+  registerMemoryWrite(pi as never, settings);
+
+  const result = (await executeTool(
+    pi,
+    "memory_write",
+    { path: "core/user/linked.md", content: "x", description: "bad" },
+    projectDir,
+  )) as {
+    content: Array<{ text?: string }>;
+    details?: { error?: boolean };
+  };
+
+  assert.match(result.content[0]?.text ?? "", /Invalid memory path/);
+  assert.equal(result.details?.error, true);
+});
+
 test("memory_list returns relative paths and supports directory filtering", async () => {
   const tempDir = createTempDir("pi-memory-md-tools-list");
   const projectDir = path.join(tempDir, "project");
@@ -184,6 +242,51 @@ test("memory_list returns relative paths and supports directory filtering", asyn
   assert.match(allFiles.content[0]?.text ?? "", /Memory files \(2\):/);
 });
 
+test("memory_list rejects symlink directories", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-list-symlink");
+  const projectDir = path.join(tempDir, "project");
+  const settings = { localPath: path.join(tempDir, "memory-root") };
+  const memoryDir = path.join(settings.localPath, path.basename(projectDir));
+  const outsideDir = path.join(tempDir, "outside-dir");
+  const linkDir = path.join(memoryDir, "core", "linked");
+
+  fs.mkdirSync(outsideDir, { recursive: true });
+  fs.mkdirSync(path.dirname(linkDir), { recursive: true });
+  fs.symlinkSync(outsideDir, linkDir);
+
+  const pi = createMockPi();
+  registerMemoryList(pi as never, settings);
+
+  const result = (await executeTool(pi, "memory_list", { directory: "core/linked" }, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { error?: boolean };
+  };
+
+  assert.match(result.content[0]?.text ?? "", /Invalid memory directory/);
+  assert.equal(result.details?.error, true);
+});
+
+test("memory_search rejects overly long custom patterns", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-search-long");
+  const projectDir = path.join(tempDir, "project");
+  const settings = { localPath: path.join(tempDir, "memory-root") };
+  const memoryDir = path.join(settings.localPath, path.basename(projectDir));
+
+  writeMemoryFile(path.join(memoryDir, "core", "user", "identity.md"), "# Identity", { description: "Identity" });
+
+  const pi = createMockPi();
+  registerMemorySearch(pi as never, settings);
+
+  const result = (await executeTool(pi, "memory_search", { grep: "x".repeat(201) }, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { error?: boolean; count?: number };
+  };
+
+  assert.match(result.content[0]?.text ?? "", /Search pattern too long/);
+  assert.equal(result.details?.error, true);
+  assert.equal(result.details?.count, 0);
+});
+
 test("memory_search handles query, grep, rg, and empty results", async () => {
   const tempDir = createTempDir("pi-memory-md-tools-search");
   const projectDir = path.join(tempDir, "project");
@@ -198,7 +301,7 @@ test("memory_search handles query, grep, rg, and empty results", async () => {
 
   const pi = createMockPi((command, args) => {
     if (command === "grep") {
-      const pattern = args[3];
+      const pattern = args[5];
       if (pattern === "^\\s*-\\s*release") {
         return { stdout: `${roadmapPath}:3:- release\n` };
       }
@@ -210,7 +313,7 @@ test("memory_search handles query, grep, rg, and empty results", async () => {
       }
     }
 
-    if (command === "rg" && args[2] === "identity") {
+    if (command === "rg" && args[4] === "identity") {
       return { stdout: `${identityPath}:4:# Identity\n` };
     }
 
@@ -250,4 +353,31 @@ test("memory_search handles query, grep, rg, and empty results", async () => {
 
   assert.equal(emptyResult.details?.count, 0);
   assert.match(emptyResult.content[0]?.text ?? "", /No results found for "missing"/);
+});
+
+test("memory_search passes timeout and max-result limits to grep and rg", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-search-timeout");
+  const projectDir = path.join(tempDir, "project");
+  const settings = { localPath: path.join(tempDir, "memory-root") };
+  const memoryDir = path.join(settings.localPath, path.basename(projectDir));
+  const calls: Array<{ command: string; args: string[]; hasSignal: boolean }> = [];
+
+  writeMemoryFile(path.join(memoryDir, "core", "user", "identity.md"), "# Identity", { description: "Identity" });
+
+  const pi = createMockPi((command, args, options) => {
+    calls.push({ command, args, hasSignal: Boolean(options?.signal) });
+    return { stdout: "" };
+  });
+
+  registerMemorySearch(pi as never, settings);
+
+  await executeTool(pi, "memory_search", { grep: "identity" }, projectDir);
+  await executeTool(pi, "memory_search", { rg: "identity" }, projectDir);
+
+  assert.equal(calls[0]?.command, "grep");
+  assert.deepEqual(calls[0]?.args.slice(0, 6), ["-rn", "--include=*.md", "-m", "50", "-E", "identity"]);
+  assert.equal(calls[0]?.hasSignal, true);
+  assert.equal(calls[1]?.command, "rg");
+  assert.deepEqual(calls[1]?.args.slice(0, 5), ["-t", "md", "-m", "50", "identity"]);
+  assert.equal(calls[1]?.hasSignal, true);
 });

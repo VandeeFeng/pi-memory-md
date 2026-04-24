@@ -16,7 +16,7 @@ import {
   readMemoryFile,
   writeMemoryFile,
 } from "../memory-core.js";
-import { DEFAULT_TAPE_EXCLUDE_DIRS, resolvePathWithin } from "../utils.js";
+import { DEFAULT_TAPE_EXCLUDE_DIRS, hasSymlinkInPath, resolvePathWithin } from "../utils.js";
 import { createTempDir, writeJson, writeText } from "./test-helpers.js";
 
 test("loadSettings merges defaults, global/project settings, and normalizes values", () => {
@@ -26,6 +26,11 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
   writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
       repoUrl: "https://github.com/acme/global-memory.git",
+      localPath: "~/global-memory",
+      hooks: {
+        sessionStart: ["pull"],
+        sessionEnd: [],
+      },
       injection: "system-prompt",
       tape: {
         enabled: true,
@@ -45,12 +50,14 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
 
   writeJson(path.join(projectDir, ".pi", "settings.json"), {
     "pi-memory-md": {
+      repoUrl: "https://github.com/acme/project-memory.git",
       localPath: "~/custom-memory",
       hooks: {
         sessionStart: ["push", "", "pull"],
         sessionEnd: ["push"],
       },
       tape: {
+        tapePath: "~/project-tape",
         excludeDirs: ["~/blocked", "relative/path"],
         context: {
           fileLimit: 3,
@@ -76,15 +83,16 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
     assert.equal(settings.enabled, DEFAULT_SETTINGS.enabled);
     assert.equal(settings.repoUrl, "https://github.com/acme/global-memory.git");
     assert.equal(settings.injection, "system-prompt");
-    assert.equal(settings.localPath, path.join(tempHome, "custom-memory"));
+    assert.equal(settings.localPath, path.join(tempHome, "global-memory"));
     assert.deepEqual(settings.hooks, {
-      sessionStart: ["push", "pull"],
-      sessionEnd: ["push"],
+      sessionStart: ["pull"],
+      sessionEnd: [],
     });
     assert.equal(settings.tape?.enabled, true);
     assert.equal(settings.tape?.onlyGit, true);
     assert.equal(settings.tape?.context?.fileLimit, 3);
     assert.deepEqual(settings.tape?.context?.memoryScan, [10, 10]);
+    assert.equal(settings.tape?.tapePath, undefined);
     assert.deepEqual(settings.tape?.excludeDirs, [...DEFAULT_TAPE_EXCLUDE_DIRS, path.join(tempHome, "blocked")]);
     assert.deepEqual(settings.tape?.context?.whitelist, ["docs/tape-design.md", "core/user/identity.md"]);
     assert.deepEqual(settings.tape?.context?.blacklist, ["node_modules"]);
@@ -243,4 +251,17 @@ test("resolvePathWithin blocks path traversal outside memory directory", () => {
 
   assert.equal(resolvePathWithin(baseDir, "core/user/identity.md"), path.join(baseDir, "core", "user", "identity.md"));
   assert.equal(resolvePathWithin(baseDir, "../escape.md"), null);
+});
+
+test("hasSymlinkInPath detects symlink escapes inside memory directory", () => {
+  const tempDir = createTempDir("pi-memory-md-paths-symlink");
+  const baseDir = path.join(tempDir, "memory");
+  const outsideFile = path.join(tempDir, "outside.md");
+  const linkPath = path.join(baseDir, "core", "user", "linked.md");
+
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  writeText(outsideFile, "outside");
+  fs.symlinkSync(outsideFile, linkPath);
+
+  assert.equal(hasSymlinkInPath(baseDir, linkPath), true);
 });
