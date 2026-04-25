@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { gitExec, pushRepository, syncRepository } from "../memory-git.js";
-import { createTempDir } from "./test-helpers.js";
+import { createTempDir, initGitRepo } from "./test-helpers.js";
 
 type ExecCall = {
   command: string;
@@ -98,7 +98,7 @@ test("syncRepository fails when local directory exists but is not a git repo", a
 
 test("syncRepository returns already latest when HEAD matches upstream", async () => {
   const localPath = createTempDir("pi-memory-md-sync-latest");
-  fs.mkdirSync(path.join(localPath, ".git"));
+  initGitRepo(localPath);
   const pi = createMockPi((call) => {
     const command = call.args.join(" ");
     if (command === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
@@ -159,7 +159,7 @@ test("pushRepository fails when git repository is not initialized", async () => 
 
 test("pushRepository returns already up to date when there are no changes and nothing to push", async () => {
   const localPath = createTempDir("pi-memory-md-push-clean");
-  fs.mkdirSync(path.join(localPath, ".git"));
+  initGitRepo(localPath);
   const pi = createMockPi((call) => {
     const command = call.args.join(" ");
     if (command === "status --porcelain") return { stdout: "" };
@@ -182,7 +182,7 @@ test("pushRepository returns already up to date when there are no changes and no
 
 test("pushRepository adds, commits, and pushes when there are local changes", async () => {
   const localPath = createTempDir("pi-memory-md-push-dirty");
-  fs.mkdirSync(path.join(localPath, ".git"));
+  initGitRepo(localPath);
   const pi = createMockPi((call) => {
     const command = call.args.join(" ");
     if (command === "status --porcelain") return { stdout: " M core/user/identity.md\n" };

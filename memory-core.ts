@@ -5,7 +5,13 @@ import matter from "gray-matter";
 import { DEFAULT_HOOKS, normalizeHooks } from "./hooks.js";
 import { normalizeTapeKeywords } from "./tape/tape-gate.js";
 import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, ParsedFrontmatter } from "./types.js";
-import { DEFAULT_LOCAL_PATH, DEFAULT_TAPE_EXCLUDE_DIRS, expandHomePath, getCurrentDate } from "./utils.js";
+import {
+  DEFAULT_LOCAL_PATH,
+  DEFAULT_TAPE_EXCLUDE_DIRS,
+  expandHomePath,
+  getCurrentDate,
+  getProjectMeta,
+} from "./utils.js";
 
 export * from "./types.js";
 export { DEFAULT_LOCAL_PATH, getCurrentDate } from "./utils.js";
@@ -200,7 +206,7 @@ export function loadSettings(cwd = process.cwd()): MemoryMdSettings {
 
 export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
   const localPath = settings.localPath || DEFAULT_LOCAL_PATH;
-  return path.join(localPath, path.basename(cwd));
+  return path.join(localPath, getProjectMeta(cwd).name);
 }
 
 export function getMemoryCoreDir(memoryDir: string): string {

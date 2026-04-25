@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { mock, test } from "node:test";
 import memoryMdExtension from "../index.js";
-import { createTempDir, writeJson } from "./test-helpers.js";
+import { createTempDir, initGitRepo, writeJson } from "./test-helpers.js";
 
 type HandlerMap = Map<string, (event: any, ctx: any) => Promise<unknown> | unknown>;
 
@@ -90,7 +90,7 @@ test("session_start registers tape tools only once and skips start hooks for new
   const homeDir = createTempDir("pi-memory-md-lifecycle-home-1");
   const projectDir = createTempDir("pi-memory-md-lifecycle-project-1");
   const { localPath } = setupMemoryProject(homeDir, projectDir);
-  fs.mkdirSync(path.join(localPath, ".git"), { recursive: true });
+  initGitRepo(localPath);
 
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
@@ -118,7 +118,7 @@ test("session_start runs start hooks for resume-like sessions and before_agent_s
   const homeDir = createTempDir("pi-memory-md-lifecycle-home-2");
   const projectDir = createTempDir("pi-memory-md-lifecycle-project-2");
   const { localPath } = setupMemoryProject(homeDir, projectDir);
-  fs.mkdirSync(path.join(localPath, ".git"), { recursive: true });
+  initGitRepo(localPath);
 
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
@@ -162,7 +162,7 @@ test("session_shutdown runs end hooks only when memory is initialized", async ()
   const homeDir = createTempDir("pi-memory-md-lifecycle-home-3");
   const projectDir = createTempDir("pi-memory-md-lifecycle-project-3");
   const { localPath, memoryDir } = setupMemoryProject(homeDir, projectDir);
-  fs.mkdirSync(path.join(localPath, ".git"), { recursive: true });
+  initGitRepo(localPath);
 
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {

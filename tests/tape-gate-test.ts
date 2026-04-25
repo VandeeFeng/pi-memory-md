@@ -6,26 +6,25 @@ import {
   buildKeywordHandoffMessage,
   detectKeywordHandoff,
   normalizeTapeKeywords,
-  resolveTapeActivation,
+  resolveTapeGate,
 } from "../tape/tape-gate.js";
-import { createTempDir } from "./test-helpers.js";
+import { createTempDir, initGitRepo } from "./test-helpers.js";
 
-test("resolveTapeActivation returns disabled when tape is off", () => {
+test("resolveTapeGate returns disabled when tape is off", () => {
   const cwd = createTempDir("pi-memory-md-activation-disabled");
-  const result = resolveTapeActivation(cwd, { enabled: false });
+  const result = resolveTapeGate(cwd, { enabled: false });
 
   assert.equal(result.enabled, false);
   assert.equal(result.reason, "disabled");
-  assert.equal(result.projectRoot, null);
-  assert.equal(result.projectName, null);
+  assert.equal(result.project, null);
 });
 
-test("resolveTapeActivation returns excluded-dir when cwd matches excludedDirs", () => {
+test("resolveTapeGate returns excluded-dir when cwd matches excludedDirs", () => {
   const rootDir = createTempDir("pi-memory-md-activation-excluded");
   const cwd = path.join(rootDir, "project", "nested");
   fs.mkdirSync(cwd, { recursive: true });
 
-  const result = resolveTapeActivation(cwd, {
+  const result = resolveTapeGate(cwd, {
     enabled: true,
     excludeDirs: [rootDir],
   });
@@ -35,38 +34,54 @@ test("resolveTapeActivation returns excluded-dir when cwd matches excludedDirs",
   assert.equal(result.matchedExcludeDir, rootDir);
 });
 
-test("resolveTapeActivation returns missing-git when onlyGit is true outside git repos", () => {
+test("resolveTapeGate returns missing-git when onlyGit is true outside git repos", () => {
   const cwd = createTempDir("pi-memory-md-activation-no-git");
-  const result = resolveTapeActivation(cwd, { enabled: true, onlyGit: true });
+  const result = resolveTapeGate(cwd, { enabled: true, onlyGit: true });
 
   assert.equal(result.enabled, false);
   assert.equal(result.reason, "missing-git");
 });
 
-test("resolveTapeActivation resolves the nearest git root when onlyGit is true", () => {
+test("resolveTapeGate resolves the nearest git root when onlyGit is true", () => {
   const tempDir = createTempDir("pi-memory-md-activation-git-root");
   const repoDir = path.join(tempDir, "repo");
   const cwd = path.join(repoDir, "packages", "feature");
 
-  fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
+  initGitRepo(repoDir);
   fs.mkdirSync(cwd, { recursive: true });
 
-  const result = resolveTapeActivation(cwd, { enabled: true, onlyGit: true });
+  const result = resolveTapeGate(cwd, { enabled: true, onlyGit: true });
 
   assert.equal(result.enabled, true);
   assert.equal(result.reason, "enabled");
-  assert.equal(result.projectRoot, repoDir);
-  assert.equal(result.projectName, "repo");
+  assert.equal(result.project?.root, repoDir);
+  assert.equal(result.project?.name, "repo");
 });
 
-test("resolveTapeActivation uses cwd when onlyGit is false", () => {
+test("resolveTapeGate uses cwd when onlyGit is false outside git repos", () => {
   const cwd = createTempDir("pi-memory-md-activation-cwd-root");
-  const result = resolveTapeActivation(cwd, { enabled: true, onlyGit: false });
+  const result = resolveTapeGate(cwd, { enabled: true, onlyGit: false });
 
   assert.equal(result.enabled, true);
   assert.equal(result.reason, "enabled");
-  assert.equal(result.projectRoot, cwd);
-  assert.equal(result.projectName, path.basename(cwd));
+  assert.equal(result.project?.root, cwd);
+  assert.equal(result.project?.name, path.basename(cwd));
+});
+
+test("resolveTapeGate still uses git root when onlyGit is false inside a repo", () => {
+  const tempDir = createTempDir("pi-memory-md-activation-git-root-optional");
+  const repoDir = path.join(tempDir, "repo");
+  const cwd = path.join(repoDir, "docs");
+
+  initGitRepo(repoDir);
+  fs.mkdirSync(cwd, { recursive: true });
+
+  const result = resolveTapeGate(cwd, { enabled: true, onlyGit: false });
+
+  assert.equal(result.enabled, true);
+  assert.equal(result.reason, "enabled");
+  assert.equal(result.project?.root, repoDir);
+  assert.equal(result.project?.name, "repo");
 });
 
 test("normalizeTapeKeywords trims, lowercases, and de-duplicates keywords", () => {

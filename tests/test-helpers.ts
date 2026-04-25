@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -19,6 +20,11 @@ export function writeJson(filePath: string, value: unknown): void {
 export function writeText(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content);
+}
+
+export function initGitRepo(repoPath: string): void {
+  fs.mkdirSync(repoPath, { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: repoPath, stdio: "ignore" });
 }
 
 afterEach(() => {

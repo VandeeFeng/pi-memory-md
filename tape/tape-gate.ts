@@ -1,16 +1,14 @@
 import path from "node:path";
-import { findGitTopLevel, formatTimeSuffix, isPathInside } from "../utils.js";
+import { formatTimeSuffix, getProjectMeta, isPathInside, type ProjectMeta } from "../utils.js";
 import type { TapeConfig, TapeKeywordConfig } from "./tape-types.js";
 
-// Gate tape usage by checking whether the current cwd should activate tape.
-export type TapeActivationReason = "disabled" | "excluded-dir" | "missing-git" | "enabled";
+// Resolve tape gate state from cwd and settings.
+export type TapeGateReason = "disabled" | "excluded-dir" | "missing-git" | "enabled";
 
-export interface TapeActivationResult {
+export interface TapeGateResult {
   enabled: boolean;
-  reason: TapeActivationReason;
-  cwd: string;
-  projectRoot: string | null;
-  projectName: string | null;
+  reason: TapeGateReason;
+  project: ProjectMeta | null;
   matchedExcludeDir?: string;
 }
 
@@ -21,70 +19,41 @@ export type KeywordHandoffInstruction = {
   message: string;
 };
 
-export function findMatchedExcludeDir(cwd: string, excludeDirs: string[]): string | null {
-  const currentDir = path.resolve(cwd);
-
-  for (const excludedDir of excludeDirs) {
-    if (isPathInside(excludedDir, currentDir)) {
-      return path.resolve(excludedDir);
-    }
-  }
-
-  return null;
-}
-
-export function resolveTapeActivation(cwd: string, tape?: TapeConfig): TapeActivationResult {
-  const normalizedCwd = path.resolve(cwd);
+export function resolveTapeGate(cwd: string, tape?: TapeConfig): TapeGateResult {
+  const absoluteCwd = path.resolve(cwd);
 
   if (!tape?.enabled) {
     return {
       enabled: false,
       reason: "disabled",
-      cwd: normalizedCwd,
-      projectRoot: null,
-      projectName: null,
+      project: null,
     };
   }
 
-  const matchedExcludeDir = findMatchedExcludeDir(normalizedCwd, tape.excludeDirs ?? []);
-  if (matchedExcludeDir) {
-    return {
-      enabled: false,
-      reason: "excluded-dir",
-      cwd: normalizedCwd,
-      projectRoot: null,
-      projectName: null,
-      matchedExcludeDir,
-    };
-  }
-
-  if (tape.onlyGit !== false) {
-    const projectRoot = findGitTopLevel(normalizedCwd);
-    if (!projectRoot) {
+  for (const excludedDir of tape.excludeDirs ?? []) {
+    if (isPathInside(excludedDir, absoluteCwd)) {
       return {
         enabled: false,
-        reason: "missing-git",
-        cwd: normalizedCwd,
-        projectRoot: null,
-        projectName: null,
+        reason: "excluded-dir",
+        project: null,
+        matchedExcludeDir: path.resolve(excludedDir),
       };
     }
+  }
 
+  const project = getProjectMeta(absoluteCwd);
+  if (tape.onlyGit !== false && !project.gitRoot) {
     return {
-      enabled: true,
-      reason: "enabled",
-      cwd: normalizedCwd,
-      projectRoot,
-      projectName: path.basename(projectRoot),
+      enabled: false,
+      reason: "missing-git",
+      project: null,
     };
   }
 
   return {
     enabled: true,
     reason: "enabled",
-    cwd: normalizedCwd,
-    projectRoot: normalizedCwd,
-    projectName: path.basename(normalizedCwd),
+    project,
   };
 }
 

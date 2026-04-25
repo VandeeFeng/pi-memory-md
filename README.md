@@ -324,7 +324,7 @@ Tape also:
     "localPath": "~/.pi/memory-md",
     "tape": {
       // Run tape only inside a Git repository by default
-      // Without .git, tape delivery and anchors are skipped
+      // Uses `git rev-parse --show-toplevel`; if it fails, tape is skipped
       "onlyGit": true, // default
 
       // Absolute directory paths where tape is always disabled

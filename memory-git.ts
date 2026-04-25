@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { GitResult, MemoryMdSettings, SyncResult } from "./types.js";
-import { DEFAULT_LOCAL_PATH, formatCommitTimestamp, getGitDir } from "./utils.js";
+import { DEFAULT_LOCAL_PATH, formatCommitTimestamp, getProjectMeta } from "./utils.js";
 
 const TIMEOUT_MS = 10000;
 const TIMEOUT_MESSAGE =
@@ -76,8 +76,8 @@ export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSetting
   const repoName = getRepoName(settings);
 
   if (fs.existsSync(localPath)) {
-    const gitDir = getGitDir(localPath);
-    if (!fs.existsSync(gitDir)) {
+    const project = getProjectMeta(localPath);
+    if (project.gitRoot !== project.cwd) {
       return { success: false, message: `Directory exists but is not a git repo: ${localPath}` };
     }
 
@@ -120,7 +120,8 @@ export async function pushRepository(pi: ExtensionAPI, settings: MemoryMdSetting
     return { success: false, message: "GitHub repo URL or local path not configured" };
   }
 
-  if (!fs.existsSync(getGitDir(localPath))) {
+  const project = getProjectMeta(localPath);
+  if (project.gitRoot !== project.cwd) {
     return { success: false, message: `Git repository not initialized: ${localPath}` };
   }
 

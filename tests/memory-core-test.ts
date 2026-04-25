@@ -17,7 +17,7 @@ import {
   writeMemoryFile,
 } from "../memory-core.js";
 import { DEFAULT_TAPE_EXCLUDE_DIRS, hasSymlinkInPath, resolvePathWithin } from "../utils.js";
-import { createTempDir, writeJson, writeText } from "./test-helpers.js";
+import { createTempDir, initGitRepo, writeJson, writeText } from "./test-helpers.js";
 
 test("loadSettings merges defaults, global/project settings, and normalizes values", () => {
   const tempHome = createTempDir("pi-memory-md-home");
@@ -225,6 +225,20 @@ test("initializeMemoryDirectory creates required directories and default files",
   assert.equal(fs.existsSync(path.join(memoryDir, "core", "project")), true);
   assert.equal(fs.existsSync(path.join(memoryDir, "core", "user", "identity.md")), true);
   assert.equal(fs.existsSync(path.join(memoryDir, "core", "user", "prefer.md")), true);
+});
+
+test("getMemoryDir uses git root name when cwd is inside a repository subdirectory", () => {
+  const tempDir = createTempDir("pi-memory-md-memory-dir-git-root");
+  const projectRoot = path.join(tempDir, "project-a");
+  const nestedCwd = path.join(projectRoot, "docs");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+  };
+
+  initGitRepo(projectRoot);
+  fs.mkdirSync(nestedCwd, { recursive: true });
+
+  assert.equal(getMemoryDir(settings, nestedCwd), path.join(settings.localPath, "project-a"));
 });
 
 test("buildMemoryContextAsync lists only core markdown files with relative paths", async () => {

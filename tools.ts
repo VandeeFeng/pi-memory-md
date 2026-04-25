@@ -16,7 +16,7 @@ import {
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
-import { getGitDir, getProjectName, hasSymlinkInPath, resolvePathWithin } from "./utils.js";
+import { getProjectMeta, hasSymlinkInPath, resolvePathWithin } from "./utils.js";
 
 // Re-export types for convenience
 export type { ToolRenderResultOptions } from "@mariozechner/pi-coding-agent";
@@ -157,7 +157,8 @@ export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings)
       const localPath = settings.localPath!;
       const memoryDir = getMemoryDir(settings, ctx.cwd);
       if (action === "status") {
-        const initialized = isMemoryInitialized(memoryDir) && fs.existsSync(getGitDir(localPath));
+        const memoryRepo = getProjectMeta(localPath);
+        const initialized = isMemoryInitialized(memoryDir) && memoryRepo.gitRoot === memoryRepo.cwd;
         if (!initialized) {
           return {
             content: [{ type: "text", text: "Memory repository not initialized. Use memory_init to set up." }],
@@ -597,7 +598,7 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
         content: [
           {
             type: "text",
-            text: `Memory directory structure for project: ${getProjectName(ctx.cwd)}\n\nPath: ${memoryDir}\n\n${treeOutput}\n\nMemory files (${relPaths.length}):\n${relPaths.map((p) => `  ${p}`).join("\n")}`,
+            text: `Memory directory structure for project: ${getProjectMeta(ctx.cwd).name}\n\nPath: ${memoryDir}\n\n${treeOutput}\n\nMemory files (${relPaths.length}):\n${relPaths.map((p) => `  ${p}`).join("\n")}`,
           },
         ],
         details: { path: memoryDir, fileCount: relPaths.length },

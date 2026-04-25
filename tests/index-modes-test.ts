@@ -7,7 +7,7 @@ import { mock, test } from "node:test";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import memoryMdExtension from "../index.js";
 import { writeMemoryFile } from "../memory-core.js";
-import { createTempDir, writeJson } from "./test-helpers.js";
+import { createTempDir, initGitRepo, writeJson } from "./test-helpers.js";
 
 type HandlerMap = Map<string, (event: any, ctx: any) => Promise<unknown> | unknown>;
 
@@ -143,7 +143,7 @@ test("before_agent_start uses tape context in message-append mode and queues key
   const projectDir = createTempDir("pi-memory-md-index-mode-project-3");
   const localPath = path.join(homeDir, "memory-root");
   const memoryDir = createProjectMemory(projectDir, localPath);
-  fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+  initGitRepo(projectDir);
   fs.mkdirSync(path.join(memoryDir, "reference"), { recursive: true });
 
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
@@ -230,7 +230,7 @@ test("before_agent_start skips tape delivery when cwd matches excluded dirs", as
   const localPath = path.join(homeDir, "memory-root");
   fs.mkdirSync(projectDir, { recursive: true });
   createProjectMemory(projectDir, localPath);
-  fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+  initGitRepo(projectDir);
 
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
@@ -270,7 +270,7 @@ test("before_agent_start uses tape context in system-prompt mode and keeps deliv
   const projectDir = createTempDir("pi-memory-md-index-mode-project-4");
   const localPath = path.join(homeDir, "memory-root");
   createProjectMemory(projectDir, localPath);
-  fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+  initGitRepo(projectDir);
 
   writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
@@ -305,7 +305,7 @@ test("reloading extension picks up updated settings and switches behavior", asyn
   const projectDir = createTempDir("pi-memory-md-index-mode-project-5");
   const localPath = path.join(homeDir, "memory-root");
   createProjectMemory(projectDir, localPath);
-  fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+  initGitRepo(projectDir);
 
   const settingsPath = path.join(homeDir, ".pi", "agent", "settings.json");
   writeJson(settingsPath, {

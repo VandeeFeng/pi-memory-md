@@ -4,14 +4,16 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ## [Unreleased]
 
+I can't wrap my head around why LLM came up the code checking for a `.git` directory by walking up the folder tree to decide if it's a git repo — that's so dumb!
+
 ### Features
 
 - **Recent focus hints**: Tape context can now attach concise `recent focus` line ranges to selected memory files and recently active project files, based on recent `memory_read` / `read` offsets and parsed `edit` diffs from session history within the effective smart-scan window. The delivered summary keeps the latest merged ranges (up to five per file), for example `read 340-420` or `edit 390-399`, so the agent can see which parts of each file were actually touched most recently.
-- **Tape activation rules**: Tape now uses `"onlyGit": true` by default, so tape runs only inside a Git repository. If no `.git` is found, tape delivery and anchor recording are skipped. You can also add absolute `"excludeDirs"` paths, and built-in system/temp directories are excluded by default for safety.
+- **Tape activation rules**: Tape now uses `"onlyGit": true` by default, so tape runs only inside a Git repository. Git detection now uses `git rev-parse --show-toplevel` instead of manually checking for a `.git` directory, so worktrees and subdirectories resolve correctly. You can also add absolute `"excludeDirs"` paths, and built-in system/temp directories are excluded by default for safety.
 
 ### Changes
 
-- **Session-start caching mechanism**: Moved heavy initialization work from `before_agent_start` to `session_start`: tape activation resolution (`.git` check, exclude dir matching), `TapeService` and `MemoryFileSelector` instantiation (including anchor index loading), memory directory state checks, session-start hooks execution (git pull), and async context pre-building (memory dir scanning, file reading, smart file selection). The cached `initialMemoryContext` and `initialTapeContext` are then reused across all subsequent `before_agent_start` calls, significantly reducing agent response latency at the start of each turn.
+- **Session-start caching mechanism**: Moved heavy initialization work from `before_agent_start` to `session_start`: tape activation resolution (`git rev-parse --show-toplevel`, exclude dir matching), `TapeService` and `MemoryFileSelector` instantiation (including anchor index loading), memory directory state checks, session-start hooks execution (git pull), and async context pre-building (memory dir scanning, file reading, smart file selection). The cached `initialMemoryContext` and `initialTapeContext` are then reused across all subsequent `before_agent_start` calls, significantly reducing agent response latency at the start of each turn.
 - **Async API refactoring**: Core file operations (`memory_read`, `memory_write`, `memory_list`, `memory_sync`) and session management functions now return `Promise` results. Internal modules (`index.ts`, `memory-core.ts`, `utils.ts`) were updated to properly await these async operations, with parallel promises wrapped via `Promise.all()` where applicable.
 - **Delivery wording replaces injection wording**: In settings, `["injection": "..."]` is replaced by `["delivery": "..."]`. Both config fields still work.
   `injection` easily suggests bad things like `prompt injection` specially in LLM area, and pi-memory-md does not actually inject memory anyway; it delivers memory by appending a hidden message or appending to the system prompt, so I think `deliver` / `delivery` is a more accurate description.
@@ -21,6 +23,7 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ### Fixed
 
+- **Unified project root resolution**: Added a shared `ProjectMeta` model to centralize project path handling. Project root detection now uses `git rev-parse --show-toplevel`, and all project directory logic consistently uses the resolved Git root when available, or falls back to `cwd` otherwise.
 - **Tape handoff match flow**: `tape_handoff` now resolves keyword and manual handoffs internally instead of exposing `trigger` or `keywords` to the model. The model only provides `name`, `summary`, and `purpose`, and keyword handoffs only apply when the created anchor name matches the hidden keyword instruction for the current turn.
 - **Smart project file tracking**: Smart tape selection now keeps `read` / `edit` / `write` project file paths as full project paths, so active non-memory files are ranked and delivered correctly.
 - **Project settings trust boundary**: Project-level `.pi/settings.json` no longer overrides high-trust memory settings like `repoUrl`, `localPath`, sync hooks, legacy `autoSync`, or `tape.tapePath`. Those values now remain controlled by global user settings.

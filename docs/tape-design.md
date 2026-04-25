@@ -374,7 +374,7 @@ Tape runtime is enabled only when all of these checks pass:
 - `settings.tape.enabled !== false`
 - current `cwd` does not match any absolute path in `settings.tape.excludeDirs`
 - current `cwd` does not match the built-in system safety exclude list
-- when `settings.tape.onlyGit !== false`, a parent `.git` can be found by walking upward from `cwd`
+- when `settings.tape.onlyGit !== false`, `git rev-parse --show-toplevel` resolves a Git root from `cwd`
 
 If any check fails, tape is skipped completely for that turn/session startup: no tape delivery, no tape keyword handoff message, and no anchor recording.
 

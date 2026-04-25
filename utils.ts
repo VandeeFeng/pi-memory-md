@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -115,32 +116,40 @@ export function toRelativeIfInside(parentDir: string, targetPath: string): strin
   return isPathInside(resolvedParent, resolvedTarget) ? path.relative(resolvedParent, resolvedTarget) : resolvedTarget;
 }
 
-export function findGitTopLevel(cwd: string): string | null {
-  let currentDir = path.resolve(cwd);
-
-  while (true) {
-    if (fs.existsSync(path.join(currentDir, ".git"))) {
-      return currentDir;
-    }
-
-    const parentDir = path.dirname(currentDir);
-    if (parentDir === currentDir) {
-      return null;
-    }
-    currentDir = parentDir;
+function execGitSync(cwd: string, args: string[]): string | null {
+  try {
+    return execFileSync("git", args, {
+      cwd: path.resolve(cwd),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
   }
 }
 
-export function getProjectName(cwd: string): string {
-  return path.basename(cwd);
+export interface ProjectMeta {
+  cwd: string;
+  gitRoot: string | null;
+  root: string;
+  name: string;
+}
+
+export function getProjectMeta(cwd: string): ProjectMeta {
+  const absoluteCwd = path.resolve(cwd);
+  const gitRoot = execGitSync(absoluteCwd, ["rev-parse", "--show-toplevel"]);
+  const root = gitRoot ?? absoluteCwd;
+
+  return {
+    cwd: absoluteCwd,
+    gitRoot,
+    root,
+    name: path.basename(root),
+  };
 }
 
 export function getTapeBasePath(localPath: string, tapePath?: string): string {
   return tapePath ? expandHomePath(tapePath) : path.join(localPath, DEFAULT_TAPE_DIRNAME);
-}
-
-export function getGitDir(localPath: string): string {
-  return path.join(localPath, ".git");
 }
 
 export function toLocaleTime(value: string): string {

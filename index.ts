@@ -17,8 +17,8 @@ import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import {
   detectKeywordHandoff,
   type KeywordHandoffInstruction,
-  resolveTapeActivation,
-  type TapeActivationResult,
+  resolveTapeGate,
+  type TapeGateResult,
 } from "./tape/tape-gate.js";
 import { MemoryFileSelector } from "./tape/tape-selector.js";
 import { TapeService } from "./tape/tape-service.js";
@@ -26,7 +26,7 @@ import type { PendingHandoffMatch } from "./tape/tape-tools.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
-import { getProjectName, getTapeBasePath } from "./utils.js";
+import { getProjectMeta, getTapeBasePath } from "./utils.js";
 
 type CachedContext = { content: string; fileCount: number };
 
@@ -38,7 +38,7 @@ type ExtensionState = {
   initialTapeContext: CachedContext | null;
   hasDeliveredInitialContext: boolean;
   pendingHandoffMatch: PendingHandoffMatch | null;
-  tapeActivation: TapeActivationResult | null;
+  tapeGate: TapeGateResult | null;
   activeTapeRuntime: {
     service: TapeService;
     selector: MemoryFileSelector;
@@ -55,7 +55,7 @@ function createExtensionState(): ExtensionState {
     initialTapeContext: null,
     hasDeliveredInitialContext: false,
     pendingHandoffMatch: null,
-    tapeActivation: null,
+    tapeGate: null,
     activeTapeRuntime: null,
   };
 }
@@ -66,23 +66,23 @@ function ensureTapeRuntime(
   ctx: ExtensionContext,
   options: { recordSessionStart: boolean; sessionStartReason?: "startup" | "reload" | "new" | "resume" | "fork" },
 ): void {
-  const activation = resolveTapeActivation(ctx.cwd, settings.tape);
-  state.tapeActivation = activation;
+  const tapeGate = resolveTapeGate(ctx.cwd, settings.tape);
+  state.tapeGate = tapeGate;
 
-  if (!activation.enabled || !settings.localPath || !activation.projectName) {
+  if (!tapeGate.enabled || !settings.localPath || !tapeGate.project) {
     state.activeTapeRuntime = null;
     return;
   }
 
   const memoryDir = getMemoryDir(settings, ctx.cwd);
-  const projectName = activation.projectName;
+  const project = tapeGate.project;
 
   const sessionId = ctx.sessionManager.getSessionId();
   const tapeBasePath = getTapeBasePath(settings.localPath, settings.tape?.tapePath);
-  const runtimeKey = [tapeBasePath, projectName, sessionId].join("::");
+  const runtimeKey = [tapeBasePath, project.name, sessionId].join("::");
 
   if (!state.activeTapeRuntime || state.activeTapeRuntime.cacheKey !== runtimeKey) {
-    const service = TapeService.create(tapeBasePath, projectName, sessionId, ctx.cwd);
+    const service = TapeService.create(tapeBasePath, project.name, sessionId, ctx.cwd);
     service.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
 
     state.activeTapeRuntime = {
@@ -128,7 +128,7 @@ async function cacheInitialContext(
       }
     : null;
 
-  const tapeRuntime = state.tapeActivation?.enabled === true ? state.activeTapeRuntime : null;
+  const tapeRuntime = state.tapeGate?.enabled === true ? state.activeTapeRuntime : null;
   if (!tapeRuntime) {
     state.initialTapeContext = null;
     return;
@@ -288,7 +288,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
     const mode = settings.delivery ?? settings.injection ?? "message-append";
     const shouldDeliverInitialContext = mode === "system-prompt" || !state.hasDeliveredInitialContext;
     const tapeEnabled = settings.tape?.enabled;
-    const tapeActive = state.tapeActivation?.enabled === true && state.activeTapeRuntime !== null;
+    const tapeActive = state.tapeGate?.enabled === true && state.activeTapeRuntime !== null;
     const keywordHandoff = tapeActive ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
 
     if (state.pendingHandoffMatch?.trigger !== "manual") {
@@ -387,10 +387,10 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
   pi.registerCommand("memory-status", {
     description: "Show memory repository status",
     handler: async (_args, ctx) => {
-      const projectName = getProjectName(ctx.cwd);
+      const project = getProjectMeta(ctx.cwd);
       const memoryDir = getMemoryDir(settings, ctx.cwd);
       if (!isMemoryInitialized(memoryDir)) {
-        ctx.ui.notify(`Memory: ${projectName} | Not initialized | Use /memory-init to set up`, "info");
+        ctx.ui.notify(`Memory: ${project.name} | Not initialized | Use /memory-init to set up`, "info");
         return;
       }
 
@@ -398,7 +398,7 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
       const isDirty = result.stdout.trim().length > 0;
 
       ctx.ui.notify(
-        `Memory: ${projectName} | Repo: ${isDirty ? "Uncommitted changes" : "Clean"} | Path: ${memoryDir}`,
+        `Memory: ${project.name} | Repo: ${isDirty ? "Uncommitted changes" : "Clean"} | Path: ${memoryDir}`,
         isDirty ? "warning" : "info",
       );
     },
