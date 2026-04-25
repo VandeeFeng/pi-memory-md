@@ -7,6 +7,96 @@ description: Search and retrieve information from pi-memory-md memory files. Use
 
 Search memory files with **multi-mode** search capability.
 
+## Hot tier vs. cold tier
+
+`pi-memory-md` organizes every project (and `_shared/`) into two tiers:
+
+| Tier | Location | Auto-delivered to model? | Searched by `memory_search`? | Listed by `memory_list` (default)? |
+|------|----------|--------------------------|------------------------------|------------------------------------|
+| **Hot** | `core/` | ✅ every turn | ✅ yes | ✅ yes |
+| **Cold / warehouse** | `docs/`, `notes/`, `archive/`, `research/`, `tools/`, `techniques/`, `reference/`, … | ❌ no | ❌ no | ❌ no (opt in) |
+
+Cold-tier files are still git-synced and readable, but they only enter the
+conversation when explicitly loaded.
+
+### Listing the cold tier
+
+- `memory_list` (default) — hot tier only.
+- `memory_list includeCold=true` — hot + cold across project, `_shared/`, and included projects.
+- `memory_list directory="notes"` — explicit directory drills into the warehouse without flipping the flag.
+- `/memory-shared-list` (default) — `_shared/core/` only.
+- `/memory-shared-list --all` — also lists warehouse files under `_shared/`.
+
+### Reading cold files
+
+`memory_read` works on any path (hot or cold) that exists, including the three forms:
+1. Project-relative: `notes/meeting.md`
+2. Shared: `_shared/techniques/pattern.md`
+3. Included project: `<project>/archive/design.md`
+
+All paths are validated against traversal and symlink escapes.
+
+## Search Scope
+
+Searches automatically include:
+- **Current project** files
+- **`_shared/` files** (cross-project memory)
+- **Included project files** (from `includeProjects` config)
+
+No extra flags needed — shared files are always searched.
+
+## Cross-Project Sharing
+
+### Folder layout
+- `<localPath>/<project>/core/...` — per-project files (default scope).
+- `<localPath>/_shared/core/...` — cross-project files, loaded in every project.
+- `<localPath>/<other-project>/core/...` — loaded when `other-project` is listed in `includeProjects`.
+
+Project files override shared files at the same path. Conflicts are flagged in the delivered memory context.
+
+### Settings (`.pi/settings.json` → `pi-memory-md`)
+```jsonc
+{
+  "pi-memory-md": {
+    "includeProjects": ["other-project-name"]
+  }
+}
+```
+`_shared` and the current project are handled automatically and never need to be listed.
+
+### Tools & commands
+| Tool / command | Purpose |
+|----------------|---------|
+| `memory_write path=... shared=true` | Write into `_shared/` |
+| `memory_delete path=... shared=true` | Delete from project or `_shared/` |
+| `memory_move from=... to=... fromShared=true toShared=true` | Move across scopes |
+| `memory_read path="_shared/core/..."` | Read a shared or included-project file directly |
+| `/memory-shared-list` | List `_shared/core/` (pass `--all` for warehouse too) |
+| `/memory-share <relative path>` | Copy a project file into `_shared/` |
+
+See the **Hot tier vs. cold tier** section above for `memory_read` path forms
+and auto-delivery rules.
+
+### Scope-prefix guard
+
+When writing with `shared=true` (or using `/memory-share`), **do not** prefix
+the path with `_shared/`. The scope is implied by the flag, and prefixing
+would create a nested `_shared/_shared/` directory on disk.
+
+```text
+# ✅ Correct
+memory_write path="core/user/prefer.md" shared=true
+/memory-share core/user/prefer.md
+
+# ❌ Rejected
+memory_write path="_shared/core/user/prefer.md" shared=true
+/memory-share _shared/core/user/prefer.md
+```
+
+The same guard applies to `memory_move` when `toShared=true`. The guard is
+*not* applied to `fromShared` sources so legacy orphan files in
+`_shared/_shared/...` can still be moved out for cleanup.
+
 ## Search Modes
 
 ### 1. Tags & Description (Built-in)

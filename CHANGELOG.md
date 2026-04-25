@@ -4,14 +4,37 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ## [Unreleased]
 
+### Features
+
+- **Cross-project memory sharing via `_shared/`**: New top-level `_shared/` directory under the memory root lets you store memory files once and have them auto-delivered into every project's context. `_shared/core/` files appear alongside the current project's `core/` files in the delivered context, and `memory_read` accepts `_shared/core/...` paths directly.
+- **`includeProjects` setting**: Opt in other projects' `core/` files into the current project's context, keyed by project directory name. `_shared` and the current project are handled automatically and are silently filtered out of this list if listed.
+- **`memory_write shared=true`**: Writes the target file into `_shared/` instead of the current project directory. The tool rejects scope-prefixed paths (e.g. `_shared/core/user/prefer.md` together with `shared=true`) to prevent accidental `_shared/_shared/` nesting.
+- **`memory_delete` tool**: Removes a memory file from the project or `_shared/` (via `shared=true`). Validates path traversal and symlink escapes, and prunes empty parent directories up to the scope base.
+- **`memory_move` tool**: Moves a file across directories or between scopes using `fromShared` / `toShared` flags. Destination is scope-prefix-guarded; source is not, so legacy orphan files under `_shared/_shared/...` remain movable for cleanup.
+- **`/memory-share <path>` command**: Copies a project file into `_shared/` with the same path-guard rules.
+- **`/memory-shared-list` command**: Lists `_shared/core/` by default. Pass `--all` (or `--cold`) to also list warehouse files outside `core/`.
+- **`memory_list includeCold` flag**: By default `memory_list` now mirrors the existing hot/cold tier design and lists only `core/` across all scopes (project, `_shared/`, and included projects). Pass `includeCold=true` to also list warehouse directories (`notes/`, `docs/`, `research/`, `archive/`, `tools/`, `techniques/`, `reference/`, etc.). An explicit `directory=...` filter always bypasses tier gating.
+- **Conflict detection in context**: When a project `core/...` file has the same path as a `_shared/core/...` or included-project `core/...` file, the delivered context annotates it with `⚠️ Overrides _shared version` or `⚠️ Overrides included-project version` and emits a dedicated `## ⚠️ Conflicts` section listing both categories separately.
+
 ### Changes
 
 - **Removed session-start initialization notification**: No more "Memory-md not initialized. Use /memory-init to set up" notification on session start.
   That notify was really annoying.
+- **`memory_list` output format**: Lists now include a tier label (`core/ only`, `all tiers`, or `directory=<path>`) and group entries into `Project:` and `Shared:` sections. Shared and included-project entries use stable basePath-relative keys (`_shared/core/...`, `<project>/core/...`) that can be fed back into `memory_read` unchanged.
+- **Context builder structure**: `buildMemoryContextAsync` now emits three ordered sections — `## Shared Memory (_shared)`, `## Shared Memory (<project>)` per included project, and `## Project Memory` — followed by a `## ⚠️ Conflicts` section when relevant.
 
 ### Fixed
 
 - **Tape context warmup fix**: `initDeliveryContent` (formerly `initMemoryContext`) now returns `true` when tape is enabled (even without memory directory), preventing the repeated `cacheInitialContext` calls that used to happen on every `before_agent_start` when memory files don't exist.
+- **`memory_read` _shared/included fallback**: The fallback branch that resolves `_shared/...` and `<project>/...` paths now validates against the correct base directory (not the current project's `memoryDir`), so `memory_read path="_shared/core/user/prefer.md"` actually works. Previous behavior incorrectly rejected every such read as an invalid memory path.
+- **Path traversal in shared/included scopes**: `memory_read`, `memory_write`, `memory_delete`, `memory_move`, `memory_list`, `/memory-share`, and `/memory-shared-list` now route every relative path through `resolvePathWithin` and `hasSymlinkInPath` against whichever scope base was chosen (project, `_shared/`, or included project). Traversal via `../` and symlinks pointing outside the scope are blocked consistently.
+- **Duplicate `_shared` section in delivered context**: `getIncludedProjectDirs` now skips the current project **and** `_shared`, and deduplicates repeated entries. `buildMemoryContextAsync` also tracks which section headers it has already emitted, so `_shared/` and each included project now appear at most once in the delivered context.
+- **Override-detection false positives**: Conflict tracking now separates `_shared` core-relative paths and included-project core-relative paths into two sets, so a project file is no longer mis-flagged as overriding a `_shared` version when only an included-project copy exists.
+- **`memory_search` result paths**: Matches under `_shared/core/` and `<included>/core/` now render as `_shared/core/...` and `<project>/core/...` respectively, instead of awkward `../_shared/...` strings relative to the current project's memory directory.
+
+### Removed
+
+- **Unused `distill` settings type**: Dropped a `distill?: { enabled?, intervalMinutes?, model? }` block from `MemoryMdSettings` that had a type declaration but no implementation anywhere in the codebase.
 
 ## [0.1.31] - 2026-04-25
 

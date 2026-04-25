@@ -33,6 +33,7 @@ export interface MemoryMdSettings {
   delivery?: MemoryDeliveryMode;
   /** @deprecated Use `delivery` instead. */
   injection?: MemoryDeliveryMode;
+  includeProjects?: string[];
   tape?: TapeConfig;
 }
 

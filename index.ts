@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { setImmediate as waitForNextTick } from "node:timers/promises";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getHookActions, runHookTrigger } from "./hooks.js";
@@ -7,10 +8,13 @@ import {
   countMemoryContextFiles,
   DEFAULT_MEMORY_SCAN,
   formatMemoryContext,
+  getIncludedProjectDirs,
+  getMemoryBasePath,
   getMemoryCoreDir,
   getMemoryDir,
   initializeMemoryDirectory,
   isMemoryInitialized,
+  listMemoryFilesAsync,
   loadSettings,
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
@@ -26,7 +30,7 @@ import type { PendingHandoffMatch } from "./tape/tape-tools.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
-import { getProjectMeta, getTapeBasePath } from "./utils.js";
+import { getProjectMeta, getTapeBasePath, hasSymlinkInPath, resolvePathWithin } from "./utils.js";
 
 type CachedContext = { content: string; fileCount: number };
 
@@ -179,7 +183,10 @@ function initDeliveryContent(
   if (!settings.enabled) return false;
 
   const memoryDir = getMemoryDir(settings, ctx.cwd);
-  const memoryExists = fs.existsSync(getMemoryCoreDir(memoryDir));
+  const hasLocalCore = fs.existsSync(getMemoryCoreDir(memoryDir));
+  const hasIncluded = getIncludedProjectDirs(settings, ctx.cwd).some((d) => fs.existsSync(path.join(d, "core")));
+  const hasShared = fs.existsSync(path.join(getMemoryBasePath(settings), "_shared", "core"));
+  const memoryExists = hasLocalCore || hasIncluded || hasShared;
 
   state.hasDeliveredInitialContext = false;
   state.initialMemoryContext = null;
@@ -487,6 +494,83 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
       }
 
       ctx.ui.notify(treeOutput.trim(), "info");
+    },
+  });
+
+  pi.registerCommand("memory-shared-list", {
+    description:
+      "List files in _shared memory. Default: core/ only (auto-delivered tier). Pass --all for warehouse files too.",
+    handler: async (args, ctx) => {
+      const basePath = getMemoryBasePath(settings);
+      const sharedDir = path.join(basePath, "_shared");
+      if (!fs.existsSync(sharedDir)) {
+        ctx.ui.notify("No _shared directory found.", "warning");
+        return;
+      }
+
+      const includeCold = /(^|\s)(--all|--cold)(\s|$)/.test(args);
+      const scanDir = includeCold ? sharedDir : path.join(sharedDir, "core");
+      if (!fs.existsSync(scanDir)) {
+        ctx.ui.notify(includeCold ? "_shared directory is empty." : "_shared/core/ does not exist yet.", "info");
+        return;
+      }
+
+      const files = await listMemoryFilesAsync(scanDir);
+      if (files.length === 0) {
+        ctx.ui.notify(`No files in _shared/${includeCold ? "" : "core/"}.`, "info");
+        return;
+      }
+      const lines = files.map((f) => `  ${path.relative(sharedDir, f)}`).join("\n");
+      const tier = includeCold ? "all tiers" : "core/ only";
+      const hint = includeCold ? "" : "\n\n(Pass --all to also list warehouse files outside core/.)";
+      ctx.ui.notify(`Shared memory (${files.length} files, ${tier}):\n${lines}${hint}`, "info");
+    },
+  });
+
+  pi.registerCommand("memory-share", {
+    description: "Copy a project memory file into _shared/ for cross-project use",
+    handler: async (args, ctx) => {
+      const relPath = args.trim();
+      if (!relPath) {
+        ctx.ui.notify("Usage: /memory-share <path>", "warning");
+        return;
+      }
+
+      // Reject scope-prefixed paths that would nest into _shared/_shared/.
+      const firstSegment = relPath.replace(/\\/g, "/").replace(/^\/+/, "").split("/")[0];
+      if (firstSegment === "_shared") {
+        ctx.ui.notify(
+          `Do not prefix path with "_shared/". Use e.g. "core/user/prefer.md" instead of "_shared/core/user/prefer.md".`,
+          "error",
+        );
+        return;
+      }
+
+      const memDir = getMemoryDir(settings, ctx.cwd);
+      const sharedBase = path.join(getMemoryBasePath(settings), "_shared");
+
+      const src = resolvePathWithin(memDir, relPath);
+      const dst = resolvePathWithin(sharedBase, relPath);
+      if (!src || hasSymlinkInPath(memDir, src)) {
+        ctx.ui.notify(`Invalid source path: ${relPath}`, "error");
+        return;
+      }
+      if (!dst || hasSymlinkInPath(sharedBase, dst)) {
+        ctx.ui.notify(`Invalid destination path: ${relPath}`, "error");
+        return;
+      }
+      if (!fs.existsSync(src)) {
+        ctx.ui.notify(`File not found: ${relPath}`, "error");
+        return;
+      }
+      if (fs.existsSync(dst)) {
+        ctx.ui.notify(`Already exists in _shared: ${relPath}`, "warning");
+        return;
+      }
+
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(src, dst);
+      ctx.ui.notify(`Shared: ${relPath} \u2192 _shared/${relPath}`, "info");
     },
   });
 

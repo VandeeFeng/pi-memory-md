@@ -209,6 +209,27 @@ export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
   return path.join(localPath, getProjectMeta(cwd).name);
 }
 
+export function getMemoryBasePath(settings: MemoryMdSettings): string {
+  return settings.localPath || DEFAULT_LOCAL_PATH;
+}
+
+export function getIncludedProjectDirs(settings: MemoryMdSettings, cwd: string): string[] {
+  const basePath = getMemoryBasePath(settings);
+  const currentProject = getProjectMeta(cwd).name;
+  const dirs: string[] = [];
+  const seen = new Set<string>();
+  if (settings.includeProjects) {
+    for (const project of settings.includeProjects) {
+      if (!project || project === currentProject || project === "_shared") continue;
+      if (seen.has(project)) continue;
+      seen.add(project);
+      const projectDir = path.join(basePath, project);
+      if (fs.existsSync(projectDir)) dirs.push(projectDir);
+    }
+  }
+  return dirs;
+}
+
 export function getMemoryCoreDir(memoryDir: string): string {
   return path.join(memoryDir, "core");
 }
@@ -354,53 +375,121 @@ export function countMemoryContextFiles(context: string): number {
   return context.split("\n").filter((line) => line.startsWith("-")).length;
 }
 
-function buildMemoryContextLines(memoryDir: string, files: string[], memories: Array<MemoryFile | null>): string[] {
-  const lines: string[] = [
-    "# Project Memory",
-    "",
-    `Memory directory: ${memoryDir}`,
-    "Paths below are relative to that directory.",
-    "",
-    "Available memory files (use memory_read to view full content):",
-    "",
-  ];
+export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: string): Promise<string> {
+  const memoryDir = getMemoryDir(settings, cwd);
+  const basePath = getMemoryBasePath(settings);
+  const coreDir = getMemoryCoreDir(memoryDir);
 
-  for (let index = 0; index < files.length; index++) {
-    const filePath = files[index];
-    const memory = memories[index];
-    if (!filePath || !memory) {
-      continue;
+  const lines: string[] = [];
+  // Track which core-relative paths come from _shared vs included projects
+  // separately so override-detection is unambiguous.
+  const sharedCoreRelPaths = new Set<string>();
+  const includedCoreRelPaths = new Set<string>();
+  const seenSectionKeys = new Set<string>();
+
+  // 1. _shared files
+  const sharedDir = path.join(basePath, "_shared");
+  const sharedCoreDir = path.join(sharedDir, "core");
+  if (fs.existsSync(sharedCoreDir)) {
+    const sharedFiles = await listMemoryFilesAsync(sharedCoreDir);
+    if (sharedFiles.length > 0) {
+      lines.push("## Shared Memory (_shared)");
+      lines.push("");
+      seenSectionKeys.add("_shared");
+      for (const filePath of sharedFiles) {
+        const memory = await readMemoryFileAsync(filePath);
+        if (!memory) continue;
+        const relPath = path.relative(basePath, filePath);
+        sharedCoreRelPaths.add(path.relative(sharedCoreDir, filePath));
+        const { description, tags } = memory.frontmatter;
+        lines.push(`- ${relPath}`);
+        lines.push(`  Description: ${description}`);
+        lines.push(`  Tags: ${tags?.join(", ") || "none"}`);
+        lines.push("");
+      }
     }
+  }
 
-    const relPath = path.relative(memoryDir, filePath);
-    const { description, tags } = memory.frontmatter;
-    lines.push(`- ${relPath}`);
-    lines.push(`  Description: ${description}`);
-    lines.push(`  Tags: ${tags?.join(", ") || "none"}`);
+  // 2. Included project files
+  for (const includedDir of getIncludedProjectDirs(settings, cwd)) {
+    const includedCoreDir = path.join(includedDir, "core");
+    if (!fs.existsSync(includedCoreDir)) continue;
+    const projectName = path.basename(includedDir);
+    if (seenSectionKeys.has(projectName)) continue;
+    const includedFiles = await listMemoryFilesAsync(includedCoreDir);
+    if (includedFiles.length === 0) continue;
+    lines.push(`## Shared Memory (${projectName})`);
+    lines.push("");
+    seenSectionKeys.add(projectName);
+    for (const filePath of includedFiles) {
+      const memory = await readMemoryFileAsync(filePath);
+      if (!memory) continue;
+      const relPath = path.relative(basePath, filePath);
+      includedCoreRelPaths.add(path.relative(includedCoreDir, filePath));
+      const { description, tags } = memory.frontmatter;
+      lines.push(`- ${relPath}`);
+      lines.push(`  Description: ${description}`);
+      lines.push(`  Tags: ${tags?.join(", ") || "none"}`);
+      lines.push("");
+    }
+  }
+
+  // 3. Current project files
+  const sharedConflicts: string[] = [];
+  const includedConflicts: string[] = [];
+  try {
+    const stat = await fs.promises.stat(coreDir);
+    if (stat.isDirectory()) {
+      const files = await listMemoryFilesAsync(coreDir);
+      if (files.length > 0) {
+        lines.push("## Project Memory");
+        lines.push("");
+        for (const filePath of files) {
+          const memory = await readMemoryFileAsync(filePath);
+          if (!memory) continue;
+          const relPath = path.relative(memoryDir, filePath);
+          const coreRelPath = path.relative(coreDir, filePath);
+          const { description, tags } = memory.frontmatter;
+          lines.push(`- ${relPath}`);
+          lines.push(`  Description: ${description}`);
+          lines.push(`  Tags: ${tags?.join(", ") || "none"}`);
+          const overridesShared = sharedCoreRelPaths.has(coreRelPath);
+          const overridesIncluded = includedCoreRelPaths.has(coreRelPath);
+          if (overridesShared) {
+            lines.push("  \u26a0\ufe0f Overrides _shared version");
+            sharedConflicts.push(coreRelPath);
+          }
+          if (overridesIncluded) {
+            lines.push("  \u26a0\ufe0f Overrides included-project version");
+            includedConflicts.push(coreRelPath);
+          }
+          lines.push("");
+        }
+      }
+    }
+  } catch {}
+
+  if (sharedConflicts.length > 0 || includedConflicts.length > 0) {
+    lines.push("## \u26a0\ufe0f Conflicts");
+    lines.push("");
+    lines.push("These project files override shared versions (project takes priority):");
+    for (const c of sharedConflicts) lines.push(`- core/${c} (overrides _shared)`);
+    for (const c of includedConflicts) lines.push(`- core/${c} (overrides included-project)`);
     lines.push("");
   }
 
-  return lines;
-}
+  if (lines.length === 0) return "";
 
-export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: string): Promise<string> {
-  const memoryDir = getMemoryDir(settings, cwd);
-  const coreDir = getMemoryCoreDir(memoryDir);
-
-  try {
-    const stat = await fs.promises.stat(coreDir);
-    if (!stat.isDirectory()) {
-      return "";
-    }
-  } catch {
-    return "";
-  }
-
-  const files = await listMemoryFilesAsync(coreDir);
-  if (files.length === 0) {
-    return "";
-  }
-
-  const memories = await Promise.all(files.map((filePath) => readMemoryFileAsync(filePath)));
-  return buildMemoryContextLines(memoryDir, files, memories).join("\n");
+  return [
+    "# Project Memory",
+    "",
+    `Memory directory: ${memoryDir}`,
+    "Paths below are relative to that directory (or to the memory root for `_shared/` and included-project entries).",
+    "",
+    "Available memory files (use memory_read to view full content):",
+    "",
+    "**Rule**: Before acting on a topic, check if any listed files are relevant by description/tags and memory_read them first.",
+    "",
+    ...lines,
+  ].join("\n");
 }

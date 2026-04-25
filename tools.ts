@@ -6,6 +6,8 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import {
   getCurrentDate,
+  getIncludedProjectDirs,
+  getMemoryBasePath,
   getMemoryCoreDir,
   getMemoryDir,
   initializeMemoryDirectory,
@@ -16,7 +18,7 @@ import {
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
-import { getProjectMeta, hasSymlinkInPath, resolvePathWithin } from "./utils.js";
+import { getProjectMeta, hasSymlinkInPath, isPathInside, resolvePathWithin } from "./utils.js";
 
 // Re-export types for convenience
 export type { ToolRenderResultOptions } from "@mariozechner/pi-coding-agent";
@@ -220,16 +222,47 @@ export function registerMemoryRead(pi: ExtensionAPI, settings: MemoryMdSettings)
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { path: relPath, offset, limit } = params as { path: string; offset?: number; limit?: number };
       const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const fullPath = resolvePathWithin(memoryDir, relPath);
+      const basePath = getMemoryBasePath(settings);
 
-      if (!fullPath || hasSymlinkInPath(memoryDir, fullPath)) {
+      // Resolution order:
+      //  1. Current project (memoryDir)
+      //  2. _shared or included-project path relative to basePath (e.g. "_shared/core/...").
+      // Both paths are validated with resolvePathWithin + hasSymlinkInPath against
+      // their own base directory so traversal / symlink escape is blocked.
+      type Resolved = { fullPath: string; base: string };
+      const candidates: Array<{ base: string }> = [{ base: memoryDir }, { base: basePath }];
+      let resolved: Resolved | null = null;
+      let invalidSeen = false;
+
+      for (const { base } of candidates) {
+        const candidate = resolvePathWithin(base, relPath);
+        if (!candidate) {
+          invalidSeen = true;
+          continue;
+        }
+        if (hasSymlinkInPath(base, candidate)) {
+          invalidSeen = true;
+          continue;
+        }
+        if (fs.existsSync(candidate)) {
+          resolved = { fullPath: candidate, base };
+          break;
+        }
+      }
+
+      if (!resolved) {
         return {
-          content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
+          content: [
+            {
+              type: "text",
+              text: invalidSeen ? `Invalid memory path: ${relPath}` : `Memory file not found: ${relPath}`,
+            },
+          ],
           details: { error: true },
         };
       }
 
-      const memory = await readMemoryFileAsync(fullPath);
+      const memory = await readMemoryFileAsync(resolved.fullPath);
       if (!memory) {
         return {
           content: [{ type: "text", text: `Failed to read memory file: ${relPath}` }],
@@ -260,12 +293,16 @@ export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings
   pi.registerTool({
     name: "memory_write",
     label: "Memory Write",
-    description: "Create or update a memory file with YAML frontmatter",
+    description:
+      "Create or update a memory file with YAML frontmatter. Set shared=true to write to _shared/ for cross-project access.",
     parameters: Type.Object({
       path: Type.String({ description: "Relative path to memory file (e.g., 'core/user/identity.md')" }),
       content: Type.String({ description: "Markdown content" }),
       description: Type.String({ description: "Description for frontmatter" }),
       tags: Type.Optional(Type.Array(Type.String())),
+      shared: Type.Optional(
+        Type.Boolean({ description: "If true, write to _shared/ folder instead of the current project" }),
+      ),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -274,11 +311,34 @@ export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings
         content,
         description,
         tags,
-      } = params as { path: string; content: string; description: string; tags?: string[] };
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const fullPath = resolvePathWithin(memoryDir, relPath);
+        shared,
+      } = params as {
+        path: string;
+        content: string;
+        description: string;
+        tags?: string[];
+        shared?: boolean;
+      };
 
-      if (!fullPath || hasSymlinkInPath(memoryDir, fullPath)) {
+      // Guard: reject scope-prefixed paths (e.g. "_shared/core/..." with shared=true)
+      // which would nest under <base>/_shared/_shared/. Pre-fix writes produced
+      // orphan files that had to be cleaned up manually.
+      if (shared && hasScopePrefix(relPath, "_shared")) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Do not prefix path with "_shared/" when shared=true. Use e.g. "core/user/prefer.md" instead of "_shared/core/user/prefer.md". Got: ${relPath}`,
+            },
+          ],
+          details: { error: true },
+        };
+      }
+
+      const baseDir = shared ? path.join(getMemoryBasePath(settings), "_shared") : getMemoryDir(settings, ctx.cwd);
+      const fullPath = resolvePathWithin(baseDir, relPath);
+
+      if (!fullPath || hasSymlinkInPath(baseDir, fullPath)) {
         return {
           content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
           details: { error: true },
@@ -297,12 +357,21 @@ export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings
 
       writeMemoryFile(fullPath, content, frontmatter);
       return {
-        content: [{ type: "text", text: `Memory file written: ${relPath}` }],
-        details: { path: fullPath, frontmatter },
+        content: [{ type: "text", text: `Memory file written: ${shared ? "_shared/" : ""}${relPath}` }],
+        details: { path: fullPath, frontmatter, shared },
       };
     },
 
-    renderCall: (args, theme) => new Text(buildToolCallText("memory_write", args, theme), 0, 0),
+    renderCall: (args, theme) => {
+      let text = buildToolCallText("memory_write", args, theme);
+      if (args.shared)
+        text =
+          theme.fg("toolTitle", theme.bold("memory_write")) +
+          " " +
+          theme.fg("warning", "[shared] ") +
+          theme.fg("accent", formatValue(args.path));
+      return new Text(text, 0, 0);
+    },
     renderResult: (result, options, theme) => {
       const details = result.details as { frontmatter?: { description?: string; tags?: string[] } };
       return renderMemoryResult(result, options, theme, {
@@ -317,30 +386,93 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
   pi.registerTool({
     name: "memory_list",
     label: "Memory List",
-    description: "List all memory files in the repository",
+    description:
+      "List memory files. By default only the auto-delivered hot tier (core/) is listed. Pass includeCold=true to also show warehouse files (notes/, docs/, research/, archive/, tools/, techniques/, reference/, etc.) that live outside core/.",
     parameters: Type.Object({
       directory: Type.Optional(Type.String({ description: "Filter by directory (e.g., 'core/user')" })),
+      includeCold: Type.Optional(
+        Type.Boolean({
+          description:
+            "If true, include warehouse files outside core/. Default false (only core/ auto-delivered tier shown).",
+        }),
+      ),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { directory } = params as { directory?: string };
+      const { directory, includeCold } = params as { directory?: string; includeCold?: boolean };
       const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const listDir = directory ? resolvePathWithin(memoryDir, directory) : memoryDir;
+      const basePath = getMemoryBasePath(settings);
 
-      if (!listDir || hasSymlinkInPath(memoryDir, listDir)) {
+      // Resolve the listing directory under each scope with resolvePathWithin
+      // so callers can't traverse out with "../".
+      function resolveScopeDir(base: string): string | null {
+        if (!directory) return base;
+        const resolved = resolvePathWithin(base, directory);
+        if (!resolved || hasSymlinkInPath(base, resolved)) return null;
+        return resolved;
+      }
+
+      // When includeCold is false (default), confine listings to core/ which is
+      // the auto-delivered hot tier. When a `directory` filter is supplied,
+      // honor that verbatim so callers can still drill into warehouse subdirs
+      // on purpose without flipping includeCold.
+      function scopeListDir(base: string): string | null {
+        if (directory) return resolveScopeDir(base);
+        return includeCold ? base : path.join(base, "core");
+      }
+
+      const listDir = scopeListDir(memoryDir);
+      if (directory && listDir === null) {
         return {
           content: [{ type: "text", text: `Invalid memory directory: ${directory}` }],
           details: { files: [], count: 0, error: true },
         };
       }
 
-      const files = await listMemoryFilesAsync(listDir);
-      const relPaths = files.map((f) => path.relative(memoryDir, f));
+      const relPaths: string[] = [];
+      if (listDir && fs.existsSync(listDir)) {
+        for (const f of await listMemoryFilesAsync(listDir)) {
+          relPaths.push(path.relative(memoryDir, f));
+        }
+      }
+
+      // Shared + included-project listings are keyed relative to basePath
+      // (e.g. "_shared/core/..." or "<project>/core/...") so the same path
+      // can be passed back into memory_read unchanged.
+      const sharedPaths: string[] = [];
+      const sharedBase = path.join(basePath, "_shared");
+      const sharedListDir = scopeListDir(sharedBase);
+      if (sharedListDir && fs.existsSync(sharedListDir)) {
+        for (const f of await listMemoryFilesAsync(sharedListDir)) {
+          sharedPaths.push(path.relative(basePath, f));
+        }
+      }
+
+      const includedPaths: string[] = [];
+      for (const d of getIncludedProjectDirs(settings, ctx.cwd)) {
+        const scopeDir = scopeListDir(d);
+        if (!scopeDir || !fs.existsSync(scopeDir)) continue;
+        for (const f of await listMemoryFilesAsync(scopeDir)) {
+          includedPaths.push(path.relative(basePath, f));
+        }
+      }
+
+      const allShared = [...sharedPaths, ...includedPaths];
+      const allPaths = [...relPaths, ...allShared];
+      const tier = directory ? `directory=${directory}` : includeCold ? "all tiers" : "core/ only";
+      let text = `Memory files (${allPaths.length}, ${tier}):\n\n`;
+      if (relPaths.length > 0) {
+        text += `Project:\n${relPaths.map((p) => `  - ${p}`).join("\n")}\n`;
+      }
+      if (allShared.length > 0) {
+        text += `\nShared:\n${allShared.map((p) => `  - ${p}`).join("\n")}\n`;
+      }
+      if (!includeCold && !directory) {
+        text += `\n(Pass includeCold=true to also list warehouse files outside core/.)\n`;
+      }
       return {
-        content: [
-          { type: "text", text: `Memory files (${relPaths.length}):\n\n${relPaths.map((p) => `  - ${p}`).join("\n")}` },
-        ],
-        details: { files: relPaths, count: relPaths.length },
+        content: [{ type: "text", text }],
+        details: { files: allPaths, count: allPaths.length, tier: includeCold ? "all" : "core" },
       };
     },
 
@@ -367,15 +499,25 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         rg?: string;
       };
       const memoryDir = getMemoryDir(settings, ctx.cwd);
+      const basePath = getMemoryBasePath(settings);
       const coreDir = getMemoryCoreDir(memoryDir);
       const sections: string[] = [];
       const matchedFiles = new Set<string>();
 
-      if (!fs.existsSync(coreDir)) {
-        return {
-          content: [{ type: "text", text: `Memory directory not found: ${coreDir}` }],
-          details: { files: [], count: 0 },
-        };
+      // Map each search directory to the base used for display-relative paths
+      // so results render as e.g. "_shared/core/..." or "<project>/core/..."
+      // instead of messy "../_shared/..." strings relative to memoryDir.
+      const searchDirs: Array<{ dir: string; displayBase: string }> = [];
+      if (fs.existsSync(coreDir)) searchDirs.push({ dir: coreDir, displayBase: memoryDir });
+      const sharedCoreDir = path.join(basePath, "_shared", "core");
+      if (fs.existsSync(sharedCoreDir)) searchDirs.push({ dir: sharedCoreDir, displayBase: basePath });
+      for (const d of getIncludedProjectDirs(settings, ctx.cwd)) {
+        const ic = path.join(d, "core");
+        if (fs.existsSync(ic)) searchDirs.push({ dir: ic, displayBase: basePath });
+      }
+
+      if (searchDirs.length === 0) {
+        return { content: [{ type: "text", text: "No memory directories found" }], details: { files: [], count: 0 } };
       }
 
       if (!query && !grep && !rg) {
@@ -401,7 +543,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
       const escapedQuery = query ? query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : null;
       const searchLabel = query ?? grep ?? rg ?? "search";
 
-      async function runTool(tool: string, args: string[]): Promise<string[]> {
+      async function runTool(tool: string, args: string[], displayBase: string): Promise<string[]> {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), MEMORY_SEARCH_TIMEOUT_MS);
         const { stdout } = await pi.exec(tool, args, { signal: controller.signal }).catch(() => ({ stdout: "" }));
@@ -419,63 +561,61 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
 
           const matchedFilePath = line.slice(0, separatorIndex);
           matchedFiles.add(matchedFilePath);
-          results.push(`${path.relative(memoryDir, matchedFilePath)}: ${line.slice(separatorIndex + 1).trim()}`);
+          results.push(`${path.relative(displayBase, matchedFilePath)}: ${line.slice(separatorIndex + 1).trim()}`);
         }
 
         return results;
       }
 
       if (escapedQuery) {
-        const tagResults = await runTool("grep", [
-          "-rn",
-          "--include=*.md",
-          "-m",
-          String(MAX_SEARCH_RESULTS),
-          "-E",
-          `^\\s*-\\s*${escapedQuery}`,
-          coreDir,
-        ]);
-        if (tagResults.length > 0) {
-          sections.push(`## Tags matching: ${query}`, ...tagResults.slice(0, 20));
-        }
-
-        const descResults = await runTool("grep", [
-          "-rn",
-          "--include=*.md",
-          "-m",
-          String(MAX_SEARCH_RESULTS),
-          "-E",
-          `^description:\\s*.*${escapedQuery}`,
-          coreDir,
-        ]);
-        if (descResults.length > 0) {
-          sections.push("", `## Description matching: ${query}`, ...descResults.slice(0, 20));
+        for (const { dir, displayBase } of searchDirs) {
+          const tagResults = await runTool(
+            "grep",
+            ["-rn", "--include=*.md", "-m", String(MAX_SEARCH_RESULTS), "-E", `^\\s*-\\s*${escapedQuery}`, dir],
+            displayBase,
+          );
+          if (tagResults.length > 0) sections.push(`## Tags matching: ${query}`, ...tagResults.slice(0, 20));
+          const descResults = await runTool(
+            "grep",
+            [
+              "-rn",
+              "--include=*.md",
+              "-m",
+              String(MAX_SEARCH_RESULTS),
+              "-E",
+              `^description:\\s*.*${escapedQuery}`,
+              dir,
+            ],
+            displayBase,
+          );
+          if (descResults.length > 0)
+            sections.push("", `## Description matching: ${query}`, ...descResults.slice(0, 20));
         }
       }
 
       if (grep) {
-        const grepResults = await runTool("grep", [
-          "-rn",
-          "--include=*.md",
-          "-m",
-          String(MAX_SEARCH_RESULTS),
-          "-E",
-          grep,
-          coreDir,
-        ]);
-        if (grepResults.length > 0) {
-          sections.push("", `## Custom grep: ${grep}`, ...grepResults.slice(0, 50));
+        for (const { dir, displayBase } of searchDirs) {
+          const grepResults = await runTool(
+            "grep",
+            ["-rn", "--include=*.md", "-m", String(MAX_SEARCH_RESULTS), "-E", grep, dir],
+            displayBase,
+          );
+          if (grepResults.length > 0) sections.push("", `## Custom grep: ${grep}`, ...grepResults.slice(0, 50));
         }
       }
 
       if (rg) {
-        const rgResults = await runTool("rg", ["-t", "md", "-m", String(MAX_SEARCH_RESULTS), rg, coreDir]);
-        if (rgResults.length > 0) {
-          sections.push("", `## Custom ripgrep: ${rg}`, ...rgResults.slice(0, 50));
+        for (const { dir, displayBase } of searchDirs) {
+          const rgResults = await runTool("rg", ["-t", "md", "-m", String(MAX_SEARCH_RESULTS), rg, dir], displayBase);
+          if (rgResults.length > 0) sections.push("", `## Custom ripgrep: ${rg}`, ...rgResults.slice(0, 50));
         }
       }
 
-      const fileList = Array.from(matchedFiles).map((filePath) => path.relative(memoryDir, filePath));
+      const fileList = Array.from(matchedFiles).map((filePath) => {
+        // Prefer a base that actually contains the file so display paths stay clean.
+        const base = searchDirs.find((s) => filePath.startsWith(`${s.dir}${path.sep}`))?.displayBase ?? memoryDir;
+        return path.relative(base, filePath);
+      });
 
       if (sections.length === 0) {
         return {
@@ -619,6 +759,197 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
   });
 }
 
+// ============================================================================
+// Shared helpers for memory_delete / memory_move
+// ============================================================================
+
+function resolveBase(settings: MemoryMdSettings, cwd: string, shared?: boolean): string {
+  return shared ? path.join(getMemoryBasePath(settings), "_shared") : getMemoryDir(settings, cwd);
+}
+
+function labelFor(relPath: string, shared?: boolean): string {
+  return `${shared ? "_shared/" : ""}${relPath}`;
+}
+
+/**
+ * Detects when a caller accidentally passed a scope-prefixed relative path
+ * (e.g. "_shared/core/user/prefer.md" together with shared=true), which would
+ * nest into `<base>/_shared/core/...`. Normalizes separators so both posix and
+ * windows-style paths are caught.
+ */
+function hasScopePrefix(relPath: string, scope: string): boolean {
+  const normalized = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
+  return normalized.split("/")[0] === scope;
+}
+
+/**
+ * Walk upward from `startDir` removing empty parent directories. Stops when:
+ *  - directory is no longer inside `base`
+ *  - directory equals `base`
+ *  - directory is not empty
+ *  - readdir/rmdir throws (best-effort cleanup)
+ */
+function pruneEmptyParents(startDir: string, base: string): void {
+  const resolvedBase = path.resolve(base);
+  let current = path.resolve(startDir);
+  while (current !== resolvedBase && isPathInside(resolvedBase, current)) {
+    try {
+      if (fs.readdirSync(current).length !== 0) return;
+      fs.rmdirSync(current);
+    } catch {
+      return;
+    }
+    current = path.dirname(current);
+  }
+}
+
+export function registerMemoryDelete(pi: ExtensionAPI, settings: MemoryMdSettings): void {
+  pi.registerTool({
+    name: "memory_delete",
+    label: "Memory Delete",
+    description: "Delete a memory file. Set shared=true to delete from _shared/ folder.",
+    parameters: Type.Object({
+      path: Type.String({ description: "Relative path to memory file" }),
+      shared: Type.Optional(Type.Boolean({ description: "If true, delete from _shared/" })),
+    }),
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { path: relPath, shared } = params as { path: string; shared?: boolean };
+      const baseDir = resolveBase(settings, ctx.cwd, shared);
+      const fullPath = resolvePathWithin(baseDir, relPath);
+
+      if (!fullPath || hasSymlinkInPath(baseDir, fullPath)) {
+        return {
+          content: [{ type: "text", text: `Invalid memory path: ${labelFor(relPath, shared)}` }],
+          details: { error: true },
+        };
+      }
+      if (!fs.existsSync(fullPath)) {
+        return {
+          content: [{ type: "text", text: `File not found: ${labelFor(relPath, shared)}` }],
+          details: { error: true },
+        };
+      }
+
+      fs.unlinkSync(fullPath);
+      pruneEmptyParents(path.dirname(fullPath), baseDir);
+
+      return {
+        content: [{ type: "text", text: `Deleted: ${labelFor(relPath, shared)}` }],
+        details: { deleted: true, shared },
+      };
+    },
+
+    renderCall: (args, theme) => {
+      let text = `${theme.fg("toolTitle", theme.bold("memory_delete"))} `;
+      if (args.shared) text += theme.fg("warning", "[shared] ");
+      text += theme.fg("accent", formatValue(args.path));
+      return new Text(text, 0, 0);
+    },
+    renderResult: (result, options, theme) => {
+      if (options.isPartial) return renderText(theme.fg("warning", "Deleting..."));
+      const details = result.details as { error?: boolean } | undefined;
+      const text = getResultText(result);
+      return renderText(details?.error ? theme.fg("error", text) : theme.fg("success", text));
+    },
+  });
+}
+
+export function registerMemoryMove(pi: ExtensionAPI, settings: MemoryMdSettings): void {
+  pi.registerTool({
+    name: "memory_move",
+    label: "Memory Move",
+    description: "Move a memory file. Set toShared=true to move to _shared/, fromShared=true if source is in _shared/.",
+    parameters: Type.Object({
+      from: Type.String({ description: "Source relative path" }),
+      to: Type.String({ description: "Destination relative path" }),
+      fromShared: Type.Optional(Type.Boolean({ description: "Source is in _shared/" })),
+      toShared: Type.Optional(Type.Boolean({ description: "Destination is in _shared/" })),
+    }),
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { from, to, fromShared, toShared } = params as {
+        from: string;
+        to: string;
+        fromShared?: boolean;
+        toShared?: boolean;
+      };
+
+      // Guard destination against scope-prefixed path that would nest under
+      // <dstBase>/_shared/. Source is intentionally NOT guarded so pre-existing
+      // orphan files inside _shared/_shared/ can be moved out with fromShared=true.
+      if (toShared && hasScopePrefix(to, "_shared")) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Do not prefix destination with "_shared/" when toShared=true. Got: ${to}`,
+            },
+          ],
+          details: { error: true },
+        };
+      }
+
+      const srcBase = resolveBase(settings, ctx.cwd, fromShared);
+      const dstBase = resolveBase(settings, ctx.cwd, toShared);
+      const srcPath = resolvePathWithin(srcBase, from);
+      const dstPath = resolvePathWithin(dstBase, to);
+
+      if (!srcPath || hasSymlinkInPath(srcBase, srcPath)) {
+        return {
+          content: [{ type: "text", text: `Invalid source path: ${labelFor(from, fromShared)}` }],
+          details: { error: true },
+        };
+      }
+      if (!dstPath || hasSymlinkInPath(dstBase, dstPath)) {
+        return {
+          content: [{ type: "text", text: `Invalid destination path: ${labelFor(to, toShared)}` }],
+          details: { error: true },
+        };
+      }
+      if (!fs.existsSync(srcPath)) {
+        return {
+          content: [{ type: "text", text: `Source not found: ${labelFor(from, fromShared)}` }],
+          details: { error: true },
+        };
+      }
+      if (fs.existsSync(dstPath)) {
+        return {
+          content: [{ type: "text", text: `Destination exists: ${labelFor(to, toShared)}` }],
+          details: { error: true },
+        };
+      }
+
+      fs.mkdirSync(path.dirname(dstPath), { recursive: true });
+      fs.renameSync(srcPath, dstPath);
+      pruneEmptyParents(path.dirname(srcPath), srcBase);
+
+      const srcLabel = labelFor(from, fromShared);
+      const dstLabel = labelFor(to, toShared);
+      return {
+        content: [{ type: "text", text: `Moved: ${srcLabel} \u2192 ${dstLabel}` }],
+        details: { from: srcLabel, to: dstLabel },
+      };
+    },
+
+    renderCall: (args, theme) => {
+      const srcLabel = `${args.fromShared ? "_shared/" : ""}${args.from}`;
+      const dstLabel = `${args.toShared ? "_shared/" : ""}${args.to}`;
+      return new Text(
+        `${theme.fg("toolTitle", theme.bold("memory_move"))} ${theme.fg("accent", `${srcLabel} \u2192 ${dstLabel}`)}`,
+        0,
+        0,
+      );
+    },
+    renderResult: (result, options, theme) => {
+      if (options.isPartial) return renderText(theme.fg("warning", "Moving..."));
+      const details = result.details as { error?: boolean } | undefined;
+      const text = getResultText(result);
+      return renderText(details?.error ? theme.fg("error", text) : theme.fg("success", text));
+    },
+  });
+}
+
 export function registerAllMemoryTools(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   registerMemorySync(pi, settings);
   registerMemoryRead(pi, settings);
@@ -627,4 +958,6 @@ export function registerAllMemoryTools(pi: ExtensionAPI, settings: MemoryMdSetti
   registerMemorySearch(pi, settings);
   registerMemoryInit(pi, settings);
   registerMemoryCheck(pi, settings);
+  registerMemoryDelete(pi, settings);
+  registerMemoryMove(pi, settings);
 }

@@ -301,3 +301,91 @@ test("hasSymlinkInPath detects symlink escapes inside memory directory", () => {
 
   assert.equal(hasSymlinkInPath(baseDir, linkPath), true);
 });
+
+test("buildMemoryContextAsync emits _shared section once even when listed in includeProjects", async () => {
+  const tempDir = createTempDir("pi-memory-md-context-shared-dedup");
+  const projectDir = path.join(tempDir, "project-a");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+    // _shared must be ignored here — handled via its own section.
+    includeProjects: ["_shared"],
+  };
+
+  writeMemoryFile(path.join(settings.localPath, "_shared", "core", "user", "prefer.md"), "# P", {
+    description: "Shared prefer",
+    tags: ["user"],
+  });
+
+  const context = await buildMemoryContextAsync(settings, projectDir);
+  const sharedHeaderMatches = context.match(/## Shared Memory \(_shared\)/g) ?? [];
+  assert.equal(sharedHeaderMatches.length, 1);
+  assert.match(context, /_shared\/core\/user\/prefer\.md/);
+});
+
+test("buildMemoryContextAsync flags project overrides of _shared vs included separately", async () => {
+  const tempDir = createTempDir("pi-memory-md-context-override");
+  const projectDir = path.join(tempDir, "project-a");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+    includeProjects: ["other-proj"],
+  };
+  const memoryDir = path.join(settings.localPath, "project-a");
+
+  // Project file overrides _shared version:
+  writeMemoryFile(path.join(memoryDir, "core", "user", "prefer.md"), "# Project prefer", {
+    description: "Project prefer",
+  });
+  writeMemoryFile(path.join(settings.localPath, "_shared", "core", "user", "prefer.md"), "# Shared prefer", {
+    description: "Shared prefer",
+  });
+
+  // Project file overrides included-project version only:
+  writeMemoryFile(path.join(memoryDir, "core", "user", "note.md"), "# Project note", {
+    description: "Project note",
+  });
+  writeMemoryFile(path.join(settings.localPath, "other-proj", "core", "user", "note.md"), "# Other note", {
+    description: "Other note",
+  });
+
+  const context = await buildMemoryContextAsync(settings, projectDir);
+  assert.match(context, /Overrides _shared version/);
+  assert.match(context, /Overrides included-project version/);
+  assert.match(context, /core\/user\/prefer\.md \(overrides _shared\)/);
+  assert.match(context, /core\/user\/note\.md \(overrides included-project\)/);
+});
+
+test("buildMemoryContextAsync omits conflict section when no overrides", async () => {
+  const tempDir = createTempDir("pi-memory-md-context-no-conflict");
+  const projectDir = path.join(tempDir, "project-a");
+  const settings = { localPath: path.join(tempDir, "memory-root") };
+  const memoryDir = path.join(settings.localPath, "project-a");
+
+  writeMemoryFile(path.join(memoryDir, "core", "user", "identity.md"), "# Identity", {
+    description: "Identity",
+  });
+  writeMemoryFile(path.join(settings.localPath, "_shared", "core", "user", "prefer.md"), "# Prefer", {
+    description: "Prefer",
+  });
+
+  const context = await buildMemoryContextAsync(settings, projectDir);
+  assert.doesNotMatch(context, /## \u26a0\ufe0f Conflicts/);
+  assert.doesNotMatch(context, /Overrides/);
+});
+
+test("getIncludedProjectDirs skips current project and _shared", async () => {
+  const { getIncludedProjectDirs } = await import("../memory-core.js");
+  const tempDir = createTempDir("pi-memory-md-included-dirs");
+  const projectDir = path.join(tempDir, "project-a");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+    includeProjects: ["project-a", "_shared", "other-proj", "other-proj"],
+  };
+
+  fs.mkdirSync(path.join(settings.localPath, "other-proj"), { recursive: true });
+  fs.mkdirSync(path.join(settings.localPath, "project-a"), { recursive: true });
+  fs.mkdirSync(path.join(settings.localPath, "_shared"), { recursive: true });
+
+  const dirs = getIncludedProjectDirs(settings, projectDir);
+  assert.equal(dirs.length, 1);
+  assert.equal(path.basename(dirs[0] ?? ""), "other-proj");
+});
