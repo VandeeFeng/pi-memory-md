@@ -67,6 +67,7 @@ You can also use these slash commands directly in pi:
 | `/memory-status` | Show memory repository status (project name, git status, path) |
 | `/memory-refresh` | Refresh memory context from files (rebuild cache and deliver into current session) |
 | `/memory-check` | Check memory folder structure (display directory tree) |
+| `/memory-copy` | Copy project memory core files to current worktree |
 
 ## Available Tools
 

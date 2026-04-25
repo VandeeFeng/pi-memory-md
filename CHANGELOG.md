@@ -4,6 +4,10 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ## [Unreleased]
 
+### Features
+
+- **`memory-copy` command**: Copy project memory core files to current worktree. `getProjectMeta` now returns `isWorktree` and `mainRoot` to detect worktree context.
+
 ### Changes
 
 - **Removed session-start initialization notification**: No more "Memory-md not initialized. Use /memory-init to set up" notification on session start.

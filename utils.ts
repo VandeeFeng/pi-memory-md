@@ -133,6 +133,8 @@ export interface ProjectMeta {
   gitRoot: string | null;
   root: string;
   name: string;
+  isWorktree: boolean;
+  mainRoot?: string;
 }
 
 export function getProjectMeta(cwd: string): ProjectMeta {
@@ -140,11 +142,17 @@ export function getProjectMeta(cwd: string): ProjectMeta {
   const gitRoot = execGitSync(absoluteCwd, ["rev-parse", "--show-toplevel"]);
   const root = gitRoot ?? absoluteCwd;
 
+  const worktreeList = execGitSync(absoluteCwd, ["worktree", "list"]);
+  const mainRoot = worktreeList?.split("\n")[0].trim().split(/\s+/)[0];
+  const isWorktree = mainRoot ? mainRoot !== root : false;
+
   return {
     cwd: absoluteCwd,
     gitRoot,
     root,
     name: path.basename(root),
+    isWorktree,
+    mainRoot: isWorktree ? mainRoot : undefined,
   };
 }
 
