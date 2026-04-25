@@ -50,6 +50,7 @@
     "memory-core.ts",
     "tools.ts",
     "types.ts",
+    "utils.ts",
     "tape",
     "skills",
     "README.md",
