@@ -5,7 +5,7 @@ description: Initial setup and bootstrap guide for pi-memory-md repository. Use 
 
 ## Prerequisites
 
-1. **GitHub repository** - Create a new empty repository on GitHub
+1. **Git repository** - Create a new empty git repository
 2. **Git access** - Configure SSH keys or personal access token
 3. **Node.js & npm** - For installing the package
 
@@ -15,9 +15,9 @@ description: Initial setup and bootstrap guide for pi-memory-md repository. Use 
 pi install npm:pi-memory-md
 ```
 
-## Step 2: Create GitHub Repository
+## Step 2: Create Repository
 
-Create a new repository on GitHub:
+Create a new repository:
 - Name it something like `memory-md` or `pi-memory`
 - Make it private (recommended)
 - Don't initialize with README (we'll do that)
@@ -47,7 +47,7 @@ Add to your settings file (global: `~/.pi/agent/settings.json`, project: `.pi/se
 | Setting | Purpose | Default |
 |---------|---------|----------|
 | `enabled` | Enable/disable extension | `true` |
-| `repoUrl` | GitHub repository URL | Required |
+| `repoUrl` | Git repository URL | Required |
 | `localPath` | Local clone location (supports `~`) | `~/.pi/memory-md` |
 | `hooks.sessionStart` | Actions run at session start | `["pull"]` |
 | `hooks.sessionEnd` | Actions run at session end | `[]` |
@@ -61,7 +61,7 @@ memory_init()
 ```
 
 **This does:**
-1. Clones the GitHub repository
+1. Clones the git repository
 2. Creates directory structure:
    - `core/user/` - Your identity and preferences
    - `core/project/` - Project-specific info
@@ -212,11 +212,11 @@ memory_init(force=true)
 **Solution:**
 1. Verify SSH keys are configured: `ssh -T git@github.com`
 2. Check repo URL is correct in settings
-3. Ensure repo exists on GitHub
+3. Ensure repo exists and is accessible
 
 ### Settings Not Found
 
-**Error:** `GitHub repo URL not configured in settings["pi-memory-md"].repoUrl`
+**Error:** `Git repository URL not configured in settings["pi-memory-md"].repoUrl`
 
 **Solution:**
 1. Edit settings file (global or project)
@@ -245,7 +245,7 @@ After setup, verify:
 
 - [ ] Package installed: `pi install npm:pi-memory-md`
 - [ ] Settings configured in settings file
-- [ ] GitHub repository exists and is accessible
+- [ ] Git repository exists and is accessible
 - [ ] Repository cloned to configured `localPath`
 - [ ] Directory structure created
 - [ ] `/memory-status` shows correct info

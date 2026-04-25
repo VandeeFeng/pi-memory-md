@@ -15,7 +15,7 @@ Configure `pi-memory-md.repoUrl` in settings file (global: `~/.pi/agent/settings
 
 ### Pull
 
-Fetch latest changes from GitHub:
+Fetch latest changes from remote:
 
 ```
 memory_sync(action="pull")
@@ -25,7 +25,7 @@ Use before starting work or switching machines.
 
 ### Push
 
-Upload local changes to GitHub:
+Upload local changes to remote:
 
 ```
 memory_sync(action="push")

@@ -2,9 +2,17 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
-## [Unreleased]
+## [0.1.31] - 2026-04-25
 
 I can't wrap my head around why LLM came up the code checking for a `.git` directory by walking up the folder tree to decide if it's a git repo — that's so dumb!
+
+In this release, all memory context and tape-mode file selections are now pre-built asynchronously at `session_start` and cached for reuse at every `before_agent_start`, significantly cutting latency and eliminating the stuttering you used to feel on each turn.
+
+Security boundaries have also been hardened: symlink traversals inside the memory directory are now blocked to prevent escape, search execution is bounded with timeouts and pattern limits to prevent runaway abuse, and project-level settings can no longer override high-trust global memory settings such as `repoUrl` or `localPath`.
+
+In my daily use, I sometimes run pi outside of a git repo. So I added `onlyGit` and `excludeDirs` to avoid triggering tape's file analysis all the time.
+
+There’s still some logic problems I need to tidy up.
 
 ### Features
 

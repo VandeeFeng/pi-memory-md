@@ -1,6 +1,6 @@
 # pi-memory-md
 
-Letta-like memory management for [pi](https://github.com/badlogic/pi-mono) using Git-backed markdown files.
+Letta-like memory management for [pi](https://github.com/badlogic/pi-mono) using git-backed markdown files.
 
 ## Features
 
@@ -18,7 +18,7 @@ pi install npm:pi-memory-md
 # Or for latest from GitHub:
 pi install git:github.com/VandeeFeng/pi-memory-md
 
-# 2. Create a GitHub repository (private recommended)
+# 2. Create a git repository (private recommended)
 
 # 3. Configure pi
 # Add to ~/.pi/agent/settings.json:
@@ -133,7 +133,7 @@ Markdown content...
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `enabled` | `true` | Enable extension |
-| `repoUrl` | Required | GitHub repository URL |
+| `repoUrl` | Required | Git repository URL |
 | `localPath` | `~/.pi/memory-md` | Local clone path |
 | `delivery` | `"message-append"` | Memory delivery mode: `"message-append"`, `"system-prompt"` |
 | `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts |

@@ -1,7 +1,7 @@
 {
   "name": "pi-memory-md",
-  "version": "0.1.30",
-  "description": "Letta-like memory management for pi using structured markdown files in a GitHub repository",
+  "version": "0.1.31",
+  "description": "Letta-like memory management for pi using structured markdown files in a git repository",
   "type": "module",
   "license": "MIT",
   "author": "VandeePunk",

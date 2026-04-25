@@ -6,7 +6,7 @@ import { DEFAULT_LOCAL_PATH, formatCommitTimestamp, getProjectMeta } from "./uti
 
 const TIMEOUT_MS = 10000;
 const TIMEOUT_MESSAGE =
-  "Unable to connect to GitHub repository, connection timeout (10s). Please check your network connection or try again later.";
+  "Unable to connect to git repository, connection timeout (10s). Please check your network connection or try again later.";
 
 function getRepoName(settings: MemoryMdSettings): string {
   if (!settings.repoUrl) return "memory-md";
@@ -70,7 +70,7 @@ export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSetting
   const { repoUrl } = settings;
 
   if (!repoUrl) {
-    return { success: false, message: "GitHub repo URL or local path not configured" };
+    return { success: false, message: "Git repository URL or local path not configured" };
   }
 
   const repoName = getRepoName(settings);
@@ -117,7 +117,7 @@ export async function pushRepository(pi: ExtensionAPI, settings: MemoryMdSetting
   const { repoUrl } = settings;
 
   if (!repoUrl) {
-    return { success: false, message: "GitHub repo URL or local path not configured" };
+    return { success: false, message: "Git repository URL or local path not configured" };
   }
 
   const project = getProjectMeta(localPath);
