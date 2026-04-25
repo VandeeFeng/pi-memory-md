@@ -169,29 +169,25 @@ function scheduleContextWarmup(
   state.contextWarmupPromise = trackedWarmup;
 }
 
-function initMemoryContext(
+function initDeliveryContent(
   pi: ExtensionAPI,
   settings: MemoryMdSettings,
   state: ExtensionState,
   ctx: ExtensionContext,
-  options: { showNotification: boolean; runSessionStartHooks: boolean },
+  options: { runSessionStartHooks: boolean },
 ): boolean {
   if (!settings.enabled) return false;
 
   const memoryDir = getMemoryDir(settings, ctx.cwd);
-  if (!fs.existsSync(getMemoryCoreDir(memoryDir))) {
-    if (options.showNotification) {
-      ctx.ui.notify("Memory-md not initialized. Use /memory-init to set up project memory.", "info");
-    }
-    state.initialMemoryContext = null;
-    state.initialTapeContext = null;
-    state.contextWarmupPromise = null;
-    return false;
-  }
+  const memoryExists = fs.existsSync(getMemoryCoreDir(memoryDir));
 
   state.hasDeliveredInitialContext = false;
   state.initialMemoryContext = null;
   state.initialTapeContext = null;
+
+  if (!memoryExists && !settings.tape?.enabled) {
+    return false;
+  }
 
   if (options.runSessionStartHooks && settings.localPath && getHookActions(settings, "sessionStart").length > 0) {
     state.sessionStartHookPromise = runHookTrigger(settings, "sessionStart", (action) =>
@@ -262,18 +258,23 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
 
     if (event.reason === "new" || event.reason === "fork") {
       state.sessionStartHookPromise = null;
-      initMemoryContext(pi, settings, state, ctx, { showNotification: true, runSessionStartHooks: false });
+      initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: false });
       return;
     }
 
-    initMemoryContext(pi, settings, state, ctx, { showNotification: true, runSessionStartHooks: true });
+    initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: true });
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
 
-    if (!state.initialMemoryContext && !state.initialTapeContext && !state.contextWarmupPromise) {
-      initMemoryContext(pi, settings, state, ctx, { showNotification: true, runSessionStartHooks: false });
+    const needsContextInit = !state.initialMemoryContext && !state.initialTapeContext && !state.contextWarmupPromise;
+
+    if (needsContextInit) {
+      const initialized = initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: false });
+      if (!initialized && !state.contextWarmupPromise) {
+        state.contextWarmupPromise = Promise.resolve();
+      }
     }
 
     if (state.contextWarmupPromise) {

@@ -2,6 +2,17 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
+## [Unreleased]
+
+### Changes
+
+- **Removed session-start initialization notification**: No more "Memory-md not initialized. Use /memory-init to set up" notification on session start.
+  That notify was really annoying.
+
+### Fixed
+
+- **Tape context warmup fix**: `initDeliveryContent` (formerly `initMemoryContext`) now returns `true` when tape is enabled (even without memory directory), preventing the repeated `cacheInitialContext` calls that used to happen on every `before_agent_start` when memory files don't exist.
+
 ## [0.1.31] - 2026-04-25
 
 I can't wrap my head around why LLM came up the code checking for a `.git` directory by walking up the folder tree to decide if it's a git repo — that's so dumb!

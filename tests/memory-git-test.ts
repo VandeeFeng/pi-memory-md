@@ -75,7 +75,7 @@ test("syncRepository fails when repoUrl is missing", async () => {
 
   assert.deepEqual(result, {
     success: false,
-    message: "GitHub repo URL or local path not configured",
+    message: "Git repository URL or local path not configured",
   });
   assert.equal(pi.calls.length, 0);
 });
