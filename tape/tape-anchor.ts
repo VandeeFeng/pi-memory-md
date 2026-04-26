@@ -123,13 +123,7 @@ export class AnchorStore {
   }
 
   findById(id: string): TapeAnchor | null {
-    for (const entries of this.index.values()) {
-      for (const entry of entries) {
-        if (entry.id === id) return entry;
-      }
-    }
-
-    return null;
+    return this.allAnchors.find((a) => a.id === id) ?? null;
   }
 
   findByName(name: string): TapeAnchor | null {

@@ -4,16 +4,63 @@ import type { SessionEntry, SessionHeader } from "@mariozechner/pi-coding-agent"
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import { toTimestamp } from "../utils.js";
 
-type FileStatCache<T> = {
+const DEFAULT_CACHE_SIZE = 100;
+
+interface FileStatCache<T> {
   mtimeMs: number;
   size: number;
   value: T;
-};
+}
 
-const sessionFilePathsCache = new Map<string, { mtimeMs: number; filePaths: string[] }>();
-const sessionFilePathCache = new Map<string, { sessionDirMtimeMs: number; filePath: string | null }>();
-const sessionHeaderCache = new Map<string, FileStatCache<SessionHeader | null>>();
-const sessionParseCache = new Map<string, FileStatCache<{ header: SessionHeader; entries: SessionEntry[] } | null>>();
+class LRUCache<K, V> {
+  private cache = new Map<K, V>();
+  constructor(private maxSize: number = DEFAULT_CACHE_SIZE) {
+    if (maxSize < 1) {
+      throw new Error("maxSize must be at least 1");
+    }
+  }
+
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+    return value;
+  }
+
+  has(key: K): boolean {
+    return this.cache.has(key);
+  }
+
+  set(key: K, value: V): void {
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey);
+      }
+    }
+    this.cache.set(key, value);
+  }
+
+  delete(key: K): boolean {
+    return this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+const sessionFilePathsCache = new LRUCache<string, { mtimeMs: number; filePaths: string[] }>();
+const sessionFilePathCache = new LRUCache<string, { sessionDirMtimeMs: number; filePath: string | null }>();
+const sessionHeaderCache = new LRUCache<string, FileStatCache<SessionHeader | null>>();
+const sessionParseCache = new LRUCache<
+  string,
+  FileStatCache<{ header: SessionHeader; entries: SessionEntry[] } | null>
+>();
 
 function getSessionsDir(): string {
   return path.join(getAgentDir(), "sessions");
@@ -92,20 +139,25 @@ export function getSessionFilePath(cwd: string, sessionId: string): string | nul
   }
 
   const cacheKey = `${sessionDir}::${sessionId}`;
-  const files = getSessionFilePaths(cwd);
   const cached = sessionFilePathCache.get(cacheKey);
-  if (cached && cached.sessionDirMtimeMs === sessionDirMtimeMs) {
-    if (!cached.filePath) {
-      return null;
-    }
 
-    if (files.includes(cached.filePath) && readSessionHeader(cached.filePath)?.id === sessionId) {
-      return cached.filePath;
+  if (cached && cached.sessionDirMtimeMs === sessionDirMtimeMs && cached.filePath) {
+    if (fs.existsSync(cached.filePath)) {
+      const stat = fs.statSync(cached.filePath);
+      const headerCached = sessionHeaderCache.get(cached.filePath);
+      if (headerCached && headerCached.mtimeMs === stat.mtimeMs && headerCached.size === stat.size) {
+        if (headerCached.value?.id === sessionId) {
+          return cached.filePath;
+        }
+      }
     }
   }
 
-  for (const fullPath of files) {
-    if (readSessionHeader(fullPath)?.id === sessionId) {
+  const filePaths = getSessionFilePaths(cwd);
+
+  for (const fullPath of filePaths) {
+    const header = readSessionHeader(fullPath);
+    if (header?.id === sessionId) {
       sessionFilePathCache.set(cacheKey, { sessionDirMtimeMs, filePath: fullPath });
       return fullPath;
     }
@@ -151,7 +203,6 @@ export function parseSessionFile(filePath: string): { header: SessionHeader; ent
     }
 
     const parsed = { header, entries };
-    sessionHeaderCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: header });
     sessionParseCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: parsed });
     return parsed;
   } catch {

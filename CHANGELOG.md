@@ -24,6 +24,8 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ### Fixed
 
+- **Tape reader LRU caching**: Added `LRUCache` class to replace the unbounded `Map` caches in `tape-reader.ts`, preventing memory bloat during long sessions. `getSessionFilePath` now also validates session header cache via mtime/size before returning cached results.
+- **AnchorStore findById simplification**: `findById` now uses `allAnchors` instead of iterating nested index maps, reducing lookup complexity from O(n*m) to O(n).
 - **Tape context warmup fix**: `initDeliveryContent` (formerly `initMemoryContext`) now returns `true` when tape is enabled (even without memory directory), preventing the repeated `cacheInitialContext` calls that used to happen on every `before_agent_start` when memory files don't exist.
 
 ## [0.1.31] - 2026-04-25
