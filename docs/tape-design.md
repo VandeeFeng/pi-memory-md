@@ -6,13 +6,13 @@ Tape mode is an **anchor-based conversation history management system** that use
 **"On-demand memory, intelligent retrieval"**
 
 Tape mode is inspired by:
--- **LSTM memory** - Sequential context with checkpoint gates
--- **Git workflow** - Anchors as commits, conversation as branches
--- **Letta memory** - Explicit memory operations with tools
+- **LSTM memory** - Sequential context with checkpoint gates
+- **Git workflow** - Anchors as commits, conversation as branches
+- **Letta memory** - Explicit memory operations and tools
 
-Tape mode records all interactions from the pi session and provides on-demand, anchor-based context retrieval. Anchors act as named checkpoints that segment the conversation history, enabling efficient selective retrieval without consuming tokens on stale context.
+Tape mode stores anchors as points within pi session entries, using them as the source of truth. Context delivery then selects relevant memory files and recently active project files based on configured strategy, optionally including concise `recent focus` hints. Lifecycle anchors (`session/*`) are created automatically, while handoff anchors can be created via `/memory-anchor` manually. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked, which means the agent will not create anchors automatically, though keyword-matched hidden instructions and `/memory-anchor` still work. Keyword detection can send a hidden message to guide the agent to create a keyword anchor, but the agent may refuse when unnecessary. This combination of anchors and keywords balances the agent's autonomy with user control.
 
-For pi TUI compatibility, anchors are also mirrored into `/tree` as inline labels on the anchored session nodes when there is a concrete session entry to attach to. During resync, tape clears existing anchor-prefixed labels in the current session tree before rebuilding them so stale anchor labels do not remain on old nodes.
+For pi TUI compatibility, anchor names are mirrored into `/tree` as inline labels on the session nodes they attach to. During resync, tape clears existing anchor-prefixed labels before rebuilding them to avoid stale labels on old nodes.
 
 ### Architecture Overview
 
@@ -76,6 +76,7 @@ interface TapeAnchor {
     trigger?: "direct" | "keyword" | "manual";
     keywords?: string[];
     summary?: string;
+    purpose?: string; // 1-2 word label (e.g., "feature", "review", "deploy")
   };
   sessionId: string;      // Session ID
   sessionEntryId: string; // Related session entry ID

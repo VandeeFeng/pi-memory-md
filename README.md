@@ -273,9 +273,7 @@ It does not change the delivery mechanism; it changes **which memory files** are
 
 With tape enabled, the delivered content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the delivered list can also include recently active project file paths inferred from tool usage, plus a `recent focus` summary for each selected file showing the most recently attended `read` / `edit` ranges inside the same effective smart-scan window. Stale paths from old tape history are ignored when the file no longer exists.
 
-Tape follows an opt-out rule: if a `tape` block exists, tape is on unless you set `"enabled": false`.
-
-A delivered tape hidden message looks like this:
+A delivered tape hidden message looks like:
 
 ```md
 # Project Memory
@@ -301,18 +299,6 @@ Recently active project files (full paths from read/edit/write tool usage):
 ---
 💡 Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.
 ```
-
-Tape also:
-- Uses pi session entries as the source of truth, with anchors attached directly to points in the session
-- **Anchor-based context**: Selects relevant memory files and recently active project files based on recent usage and configured strategy
-- **Recent focus hints**: Selected files can include concise `recent focus` ranges such as `read 340-420` or `edit 390-399`
-- Creates `session/*` lifecycle anchors automatically and `handoff` anchors via `tape_handoff` or `/memory-anchor`
-- Supports `anchor.mode: "manual"` to hard-block direct `tape_handoff`; keyword-matched hidden instructions and `/memory-anchor` still authorize handoff creation
-- Keyword detection can send a hidden message that guides the agent to create a keyword anchor, while still allowing the agent to refuse when such an anchor is unnecessary
-  This hidden message is delivered in the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
-- Mirrors anchor names into pi `/tree` labels for the anchored session nodes, with full label cleanup before resync to avoid stale labels
-- **Pros**: Better context selection with checkpoint management, recent project file awareness, and handoff-aware prioritization
-- **Cons**: Slightly more complex configuration and more token costs
 
 ### Config Guide
 
@@ -400,7 +386,7 @@ Anchors are named checkpoints that correspond to pi session entries, marking imp
 
 Each line in the tape anchor store is a JSON record:
 ```json
-{"id":"1234567890-abc123","name":"task/begin","kind":"handoff","sessionId":"abc","sessionEntryId":"def","timestamp":"2026-04-04T12:00:00.000Z","meta":{"summary":"Working on feature X","trigger":"direct"}}
+{"id":"1234567890-abc123","timestamp":"2026-04-04T12:00:00.000Z","name":"task/begin","kind":"handoff","meta":{"summary":"Working on feature X","purpose":"feature","trigger":"manual"},"sessionId":"019dbd12-90b7-72b1-a88d-843706db32de","sessionEntryId":"446b6c33"}
 ```
 
 Each anchor has:
@@ -410,9 +396,17 @@ Each anchor has:
 - **`sessionId`**: The pi session this anchor belongs to
 - **`sessionEntryId`**: The associated session entry ID for tree mirroring
 - **`timestamp`**: ISO timestamp of when the anchor was created
-- **`meta`**: Optional metadata including `summary`, `trigger`, `keywords`, etc. `direct` means created by the agent automatically, `keyword` means created because configured keywords matched, and `manual` means created explicitly by the user or tool call
+- **`meta`**: Optional metadata including `summary`, `trigger`, `keywords`, `purpose`. `purpose` is a 1-2 word label (e.g., `feature`, `review`, `deploy`). `trigger` can be `direct` (agent auto), `keyword` (configured keywords matched), or `manual` (explicit user/tool call)
 
-more details: https://tape.systems/
+In a word, tape anchors are markers that help the agent organize context more effectively according to the user's intention.
+
+Tape anchors are stored as points within pi session entries. The context delivery then selects relevant memory files and recently active project files based on configured strategy, optionally including concise `recent focus` hints like `read 340-420` or `edit 390-399`.
+
+Lifecycle anchors (`session/*`) are created automatically, while handoff anchors can be created via `/memory-anchor` manually. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked, which means the agent will not create anchors automatically, though keyword-matched hidden instructions and `/memory-anchor` still work.
+
+Keyword detection can send a hidden message to guide the agent to create a keyword anchor, but the agent may refuse when unnecessary.Anchor names are also mirrored into pi `/tree` labels for the session nodes they attach to, with stale labels cleaned up before resync.
+
+The combination of anchors and keywords balances the agent's autonomy with user control.
 
 ### Tape Tools (Anchor-based Context)
 
@@ -427,7 +421,7 @@ more details: https://tape.systems/
 | `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, query?, kinds?, limit?}` | Read tape entries as formatted messages |
 | `tape_reset` | `{archive?: boolean}` | Reset the tape with a new session lifecycle anchor |
 
-> **Note**: Tape tools are automatically registered when `tape` is set to `true`. They provide anchor-based context management inspired by [bub](https://bub.build)'s tape mechanism.
+> **Note**: Tape tools are registered when a `tape` block exists in config (opt-out: set `"enabled": false`). They provide anchor-based context management inspired by [bub](https://bub.build)'s tape mechanism.
 
 ## Reference
 - [Introducing Context Repositories: Git-based Memory for Coding Agents | Letta](https://www.letta.com/blog/context-repositories)

@@ -10,9 +10,9 @@ Tape 模式的灵感来源于：
 - **Git 工作流** - 锚点作为提交，会话作为分支
 - **Letta 记忆** - 明确的记忆操作和工具
 
-Tape 模式记录来自 pi 会话的所有交互，并提供基于锚点的按需上下文检索。锚点作为命名检查点，对会话历史进行分段，从而实现高效的选择性检索，而不会在过时上下文中消耗 token。
+Tape 模式将锚点存储为 pi 会话条目中的点，以此作为数据源。上下文传递根据配置的策略选择相关的内存文件和最近活动的项目文件，可选择包含简洁的 `recent focus` 提示。生命周期锚点（`session/*`）自动创建，而handoff 锚点可通过 `/memory-anchor` 手动创建。当设置 `mode: "manual"` 时，直接的 `tape_handoff` 调用被阻止，这意味着 agent 不会自动创建锚点，但关键词匹配的隐藏指令和 `/memory-anchor` 仍然有效。关键词检测可以发送隐藏消息来引导 agent 创建关键词锚点，但 agent 可以在不需要时拒绝。这种锚点与关键词的组合平衡了 agent 的自主性和用户的控制权。
 
-为兼容 pi TUI，锚点也会在 `/tree` 中镜像为内联标签，附加到具体的会话节点上。在重新同步时，tape 会先清除当前会话树中现有的锚点前缀标签，然后再重建它们，以避免陈旧的锚点标签残留在旧节点上。
+为兼容 pi TUI，锚点名称会在 `/tree` 中镜像为附加到的会话节点的内联标签。在重新同步时，tape 会先清除现有的锚点前缀标签，然后再重建它们，以避免旧节点上残留陈旧的锚点标签。
 
 ### 架构概览
 
@@ -76,6 +76,7 @@ interface TapeAnchor {
     trigger?: "direct" | "keyword" | "manual";
     keywords?: string[];
     summary?: string;
+    purpose?: string; // 简短标签（如 "feature"、"review"、"deploy"）
   };
   sessionId: string;      // 会话 ID
   sessionEntryId: string; // 关联的会话条目 ID
