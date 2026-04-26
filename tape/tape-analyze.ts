@@ -16,7 +16,7 @@ export type MemoryPathStats = {
   memoryWriteCount: number;
 };
 
-export type SupportedPathToolName = "memory_read" | "memory_write" | "read" | "edit" | "write";
+export type SupportedPathToolName = "memory_write" | "read" | "edit" | "write";
 
 type AnchorWindow = {
   timestamp: string | null;
@@ -35,7 +35,8 @@ type AnalyzePathAccessOptions = {
   getAnchorWindowEndTimestamp: (anchor: { timestamp: string } | null, entries: SessionEntry[]) => number | null;
 };
 
-type RangeToolName = "memory_read" | "read" | "edit";
+// type RangeToolName = "memory_read" | "read" | "edit";
+type RangeToolName = "read" | "edit";
 
 export type LineRange = {
   kind: "read" | "edit";
@@ -154,7 +155,8 @@ export function analyzeRecentLineRanges(
         const resolvedPath = path.resolve(options.toAbsolutePath(trackedPath));
         if (!targetPaths.has(resolvedPath)) continue;
 
-        if (toolName === "read" || toolName === "memory_read") {
+        // if (toolName === "read" || toolName === "memory_read") {
+        if (toolName === "read") {
           const range = createReadRange(block.arguments?.offset, block.arguments?.limit);
           if (range) pushLineRange(rangeMap, resolvedPath, range);
         }
@@ -270,8 +272,8 @@ function getAccessScore(toolName: SupportedPathToolName): number {
   switch (toolName) {
     case "memory_write":
       return 16;
-    case "memory_read":
-      return 10;
+    // case "memory_read":
+    //   return 10;
     case "write":
       return 30;
     case "edit":
@@ -290,9 +292,9 @@ function getDiminishingReturnsMultiplier(count: number): number {
 
 function recordToolAccess(stats: MemoryPathStats, toolName: SupportedPathToolName): void {
   switch (toolName) {
-    case "memory_read":
-      stats.memoryReadCount += 1;
-      return;
+    // case "memory_read":
+    //   stats.memoryReadCount += 1;
+    //   return;
     case "memory_write":
       stats.memoryWriteCount += 1;
       return;
@@ -310,7 +312,7 @@ function recordToolAccess(stats: MemoryPathStats, toolName: SupportedPathToolNam
 
 function getFinalScore(stats: MemoryPathStats): number {
   const distinctToolKinds = [
-    stats.memoryReadCount > 0,
+    // stats.memoryReadCount > 0,
     stats.memoryWriteCount > 0,
     stats.readCount > 0,
     stats.editCount > 0,

@@ -125,7 +125,7 @@ class TapeService {
 
 **MemoryFileSelector**: Intelligently selects memory and project files
 - **Smart strategy**: Scans recent project history within a configurable time window (`memoryScan`), expands up to the max window when samples are too small, and ranks files with handoff-first weighting
-- **Recent focus extraction**: After smart selection picks files, extracts up to 5 concise `recent focus` ranges per selected file from recent `read` / `memory_read` / `edit` activity within the same effective smart-scan window
+- **Recent focus extraction**: After smart selection picks files, extracts up to 5 concise `recent focus` ranges per selected file from recent `read` / `edit` activity within the same effective smart-scan window
 - **Keyword handoff helper**: Normalizes configured keywords and builds a hidden handoff instruction when a user prompt in the `[10, 300]` character range matches a keyword
 - **Recent-only strategy**: Scans memory files and returns the most recently modified files
 
@@ -428,7 +428,6 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 - Counts only assistant-side tool calls recorded in tape history
 - Ignores stale tape paths when the referenced file no longer exists on disk
 - Tracks weighted file activity:
-  - `memory_read` => base score `10`
   - `memory_write` => base score `16`
   - `read` => base score `20`
   - `edit` => base score `28`
@@ -463,7 +462,7 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 - Falls back to directory scan if no history
 
 **Recent focus formatting:**
-- `read` / `memory_read` ranges come from `offset + limit`
+- `read` ranges come from `offset + limit`
 - `edit` ranges come from the linked edit tool result (`diff` / `firstChangedLine`)
 - Adjacent or overlapping ranges of the same kind are merged
 - Each selected file shows at most 5 recent focus ranges, ordered from most recent to older

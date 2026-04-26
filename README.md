@@ -79,7 +79,6 @@ The LLM can use these tools to interact with memory:
 |------|------------|-------------|
 | `memory_init` | `{force?: boolean}` | Initialize or reinitialize repository |
 | `memory_sync` | `{action: "pull" / "push" / "status"}` | Git operations |
-| `memory_read` | `{path: string}` | Read a memory file |
 | `memory_write` | `{path, content, description, tags?}` | Create/update memory file |
 | `memory_list` | `{directory?: string}` | List all memory files |
 | `memory_search` | `{query?, grep?, rg?}` | Search by tags/description and custom grep/ripgrep patterns |
@@ -286,7 +285,7 @@ Memory directory: /home/user/.pi/memory-md/my-project
 
 Paths below are relative to that directory.
 
-Available memory files (use memory_read to view full content):
+Available memory files (use read to view full content):
 
 - core/user/identity.md [high priority]
   recent focus: read 12-28

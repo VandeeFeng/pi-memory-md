@@ -206,55 +206,55 @@ export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings)
   });
 }
 
-export function registerMemoryRead(pi: ExtensionAPI, settings: MemoryMdSettings): void {
-  pi.registerTool({
-    name: "memory_read",
-    label: "Memory Read",
-    description: "Read a memory file by path",
-    parameters: Type.Object({
-      path: Type.String({ description: "Relative path to memory file (e.g., 'core/user/identity.md')" }),
-      offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)" })),
-      limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
-    }),
+// export function registerMemoryRead(pi: ExtensionAPI, settings: MemoryMdSettings): void {
+//   pi.registerTool({
+//     name: "memory_read",
+//     label: "Memory Read",
+//     description: "Read a memory file by path",
+//     parameters: Type.Object({
+//       path: Type.String({ description: "Relative path to memory file (e.g., 'core/user/identity.md')" }),
+//       offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)" })),
+//       limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
+//     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { path: relPath, offset, limit } = params as { path: string; offset?: number; limit?: number };
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const fullPath = resolvePathWithin(memoryDir, relPath);
+//     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+//       const { path: relPath, offset, limit } = params as { path: string; offset?: number; limit?: number };
+//       const memoryDir = getMemoryDir(settings, ctx.cwd);
+//       const fullPath = resolvePathWithin(memoryDir, relPath);
 
-      if (!fullPath || hasSymlinkInPath(memoryDir, fullPath)) {
-        return {
-          content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
-          details: { error: true },
-        };
-      }
+//       if (!fullPath || hasSymlinkInPath(memoryDir, fullPath)) {
+//         return {
+//           content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
+//           details: { error: true },
+//         };
+//       }
 
-      const memory = await readMemoryFileAsync(fullPath);
-      if (!memory) {
-        return {
-          content: [{ type: "text", text: `Failed to read memory file: ${relPath}` }],
-          details: { error: true },
-        };
-      }
+//       const memory = await readMemoryFileAsync(fullPath);
+//       if (!memory) {
+//         return {
+//           content: [{ type: "text", text: `Failed to read memory file: ${relPath}` }],
+//           details: { error: true },
+//         };
+//       }
 
-      const { description = "No description", tags = [] } = memory.frontmatter;
-      const lines = memory.content.split("\n");
-      const startLine = offset ? Math.max(0, offset - 1) : 0;
-      const endLine = limit ? startLine + Math.max(0, limit) : lines.length;
-      const selectedContent = lines.slice(startLine, endLine).join("\n");
+//       const { description = "No description", tags = [] } = memory.frontmatter;
+//       const lines = memory.content.split("\n");
+//       const startLine = offset ? Math.max(0, offset - 1) : 0;
+//       const endLine = limit ? startLine + Math.max(0, limit) : lines.length;
+//       const selectedContent = lines.slice(startLine, endLine).join("\n");
 
-      return {
-        content: [
-          { type: "text", text: `# ${description}\n\nTags: ${tags.join(", ") || "none"}\n\n${selectedContent}` },
-        ],
-        details: { frontmatter: memory.frontmatter },
-      };
-    },
+//       return {
+//         content: [
+//           { type: "text", text: `# ${description}\n\nTags: ${tags.join(", ") || "none"}\n\n${selectedContent}` },
+//         ],
+//         details: { frontmatter: memory.frontmatter },
+//       };
+//     },
 
-    renderCall: (args, theme) => new Text(buildToolCallText("memory_read", args, theme), 0, 0),
-    renderResult: (result, options, theme) => renderMemoryResult(result, options, theme),
-  });
-}
+//     renderCall: (args, theme) => new Text(buildToolCallText("memory_read", args, theme), 0, 0),
+//     renderResult: (result, options, theme) => renderMemoryResult(result, options, theme),
+//   });
+// }
 
 export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   pi.registerTool({
@@ -488,7 +488,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         content: [
           {
             type: "text",
-            text: `Found ${fileList.length} file(s) matching "${searchLabel}":\n\n${sections.join("\n")}\n\nUse memory_read to view full content.`,
+            text: `Found ${fileList.length} file(s) matching "${searchLabel}":\n\n${sections.join("\n")}\n\nUse read to view full content.`,
           },
         ],
         details: { files: fileList, count: fileList.length },
@@ -621,7 +621,7 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
 
 export function registerAllMemoryTools(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   registerMemorySync(pi, settings);
-  registerMemoryRead(pi, settings);
+  // registerMemoryRead(pi, settings);
   registerMemoryWrite(pi, settings);
   registerMemoryList(pi, settings);
   registerMemorySearch(pi, settings);

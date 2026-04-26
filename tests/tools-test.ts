@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { readMemoryFileAsync, writeMemoryFile } from "../memory-core.js";
-import { registerMemoryList, registerMemoryRead, registerMemorySearch, registerMemoryWrite } from "../tools.js";
+import { registerMemoryList, registerMemorySearch, registerMemoryWrite } from "../tools.js";
 import { createTempDir } from "./test-helpers.js";
 
 type RegisteredTool = {
@@ -52,76 +52,76 @@ async function executeTool(pi: MockPi, name: string, params: Record<string, unkn
   return tool.execute("tool-call-1", params, undefined, undefined, createToolContext(cwd));
 }
 
-test("memory_read reads a file with offset and limit", async () => {
-  const tempDir = createTempDir("pi-memory-md-tools-read");
-  const projectDir = path.join(tempDir, "project");
-  const settings = { localPath: path.join(tempDir, "memory-root") };
-  const memoryDir = path.join(settings.localPath, path.basename(projectDir));
+// test("memory_read reads a file with offset and limit", async () => {
+//   const tempDir = createTempDir("pi-memory-md-tools-read");
+//   const projectDir = path.join(tempDir, "project");
+//   const settings = { localPath: path.join(tempDir, "memory-root") };
+//   const memoryDir = path.join(settings.localPath, path.basename(projectDir));
 
-  writeMemoryFile(path.join(memoryDir, "core", "user", "identity.md"), "line1\nline2\nline3\nline4", {
-    description: "Identity",
-    tags: ["user"],
-  });
+//   writeMemoryFile(path.join(memoryDir, "core", "user", "identity.md"), "line1\nline2\nline3\nline4", {
+//     description: "Identity",
+//     tags: ["user"],
+//   });
 
-  const pi = createMockPi();
-  registerMemoryRead(pi as never, settings);
+//   const pi = createMockPi();
+//   registerMemoryRead(pi as never, settings);
 
-  const result = (await executeTool(
-    pi,
-    "memory_read",
-    { path: "core/user/identity.md", offset: 2, limit: 2 },
-    projectDir,
-  )) as {
-    content: Array<{ text?: string }>;
-    details?: { frontmatter?: { description?: string } };
-  };
+//   const result = (await executeTool(
+//     pi,
+//     "memory_read",
+//     { path: "core/user/identity.md", offset: 2, limit: 2 },
+//     projectDir,
+//   )) as {
+//     content: Array<{ text?: string }>;
+//     details?: { frontmatter?: { description?: string } };
+//   };
 
-  assert.match(result.content[0]?.text ?? "", /# Identity/);
-  assert.match(result.content[0]?.text ?? "", /line2\nline3/);
-  assert.doesNotMatch(result.content[0]?.text ?? "", /line1/);
-  assert.doesNotMatch(result.content[0]?.text ?? "", /line4/);
-  assert.equal(result.details?.frontmatter?.description, "Identity");
-});
+//   assert.match(result.content[0]?.text ?? "", /# Identity/);
+//   assert.match(result.content[0]?.text ?? "", /line2\nline3/);
+//   assert.doesNotMatch(result.content[0]?.text ?? "", /line1/);
+//   assert.doesNotMatch(result.content[0]?.text ?? "", /line4/);
+//   assert.equal(result.details?.frontmatter?.description, "Identity");
+// });
 
-test("memory_read rejects invalid traversal paths", async () => {
-  const tempDir = createTempDir("pi-memory-md-tools-read-invalid");
-  const projectDir = path.join(tempDir, "project");
-  const pi = createMockPi();
+// test("memory_read rejects invalid traversal paths", async () => {
+//   const tempDir = createTempDir("pi-memory-md-tools-read-invalid");
+//   const projectDir = path.join(tempDir, "project");
+//   const pi = createMockPi();
 
-  registerMemoryRead(pi as never, { localPath: path.join(tempDir, "memory-root") });
+//   registerMemoryRead(pi as never, { localPath: path.join(tempDir, "memory-root") });
 
-  const result = (await executeTool(pi, "memory_read", { path: "../escape.md" }, projectDir)) as {
-    content: Array<{ text?: string }>;
-    details?: { error?: boolean };
-  };
+//   const result = (await executeTool(pi, "memory_read", { path: "../escape.md" }, projectDir)) as {
+//     content: Array<{ text?: string }>;
+//     details?: { error?: boolean };
+//   };
 
-  assert.match(result.content[0]?.text ?? "", /Invalid memory path/);
-  assert.equal(result.details?.error, true);
-});
+//   assert.match(result.content[0]?.text ?? "", /Invalid memory path/);
+//   assert.equal(result.details?.error, true);
+// });
 
-test("memory_read rejects symlink paths", async () => {
-  const tempDir = createTempDir("pi-memory-md-tools-read-symlink");
-  const projectDir = path.join(tempDir, "project");
-  const settings = { localPath: path.join(tempDir, "memory-root") };
-  const memoryDir = path.join(settings.localPath, path.basename(projectDir));
-  const outsideFile = path.join(tempDir, "outside.md");
-  const linkPath = path.join(memoryDir, "core", "user", "linked.md");
+// test("memory_read rejects symlink paths", async () => {
+//   const tempDir = createTempDir("pi-memory-md-tools-read-symlink");
+//   const projectDir = path.join(tempDir, "project");
+//   const settings = { localPath: path.join(tempDir, "memory-root") };
+//   const memoryDir = path.join(settings.localPath, path.basename(projectDir));
+//   const outsideFile = path.join(tempDir, "outside.md");
+//   const linkPath = path.join(memoryDir, "core", "user", "linked.md");
 
-  writeMemoryFile(outsideFile, "outside", { description: "Outside" });
-  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
-  fs.symlinkSync(outsideFile, linkPath);
+//   writeMemoryFile(outsideFile, "outside", { description: "Outside" });
+//   fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+//   fs.symlinkSync(outsideFile, linkPath);
 
-  const pi = createMockPi();
-  registerMemoryRead(pi as never, settings);
+//   const pi = createMockPi();
+//   registerMemoryRead(pi as never, settings);
 
-  const result = (await executeTool(pi, "memory_read", { path: "core/user/linked.md" }, projectDir)) as {
-    content: Array<{ text?: string }>;
-    details?: { error?: boolean };
-  };
+//   const result = (await executeTool(pi, "memory_read", { path: "core/user/linked.md" }, projectDir)) as {
+//     content: Array<{ text?: string }>;
+//     details?: { error?: boolean };
+//   };
 
-  assert.match(result.content[0]?.text ?? "", /Invalid memory path/);
-  assert.equal(result.details?.error, true);
-});
+//   assert.match(result.content[0]?.text ?? "", /Invalid memory path/);
+//   assert.equal(result.details?.error, true);
+// });
 
 test("memory_write creates a file and preserves created while updating description and tags", async () => {
   const tempDir = createTempDir("pi-memory-md-tools-write");

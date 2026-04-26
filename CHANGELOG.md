@@ -7,8 +7,16 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 ### Features
 
 - **`memory-copy` command**: Copy project memory core files to current worktree. `getProjectMeta` now returns `isWorktree` and `mainRoot` to detect worktree context.
+  This is only intended to make the initial memory-file migration more convenient — existing memory folders won't be overwritten, since subsequent maintenance is handled through git.
 
 ### Changes
+
+- **Removed `memory_read` tool**: The memory read tool has been removed from the tool registry. Reading memory files is now handled by the native `read` tool with context hints. Tape-mode context now displays "Recent memory files" instead of "Available memory files" to clarify the smart selection behavior.
+
+  I think this tool is somewhat redundant — beyond a bit of UI convenience, there's no fundamental difference from the native `read` tool.
+  This also eliminates the need for complex path validation logic and removes the ambiguity around whether memory files outside the `core/` folder should be included or excluded.
+  The memory delivery content already ensures that files in the `core/` folder are clearly communicated to the agent.
+  And I think such guide for the agent shouldn't be overly restrictive on tool usage.
 
 - **Removed session-start initialization notification**: No more "Memory-md not initialized. Use /memory-init to set up" notification on session start.
   That notify was really annoying.
@@ -31,7 +39,7 @@ There’s still some logic problems I need to tidy up.
 
 ### Features
 
-- **Recent focus hints**: Tape context can now attach concise `recent focus` line ranges to selected memory files and recently active project files, based on recent `memory_read` / `read` offsets and parsed `edit` diffs from session history within the effective smart-scan window. The delivered summary keeps the latest merged ranges (up to five per file), for example `read 340-420` or `edit 390-399`, so the agent can see which parts of each file were actually touched most recently.
+- **Recent focus hints**: Tape context can now attach concise `recent focus` line ranges to selected memory files and recently active project files, based on recent `read` offsets and parsed `edit` diffs from session history within the effective smart-scan window. The delivered summary keeps the latest merged ranges (up to five per file), for example `read 340-420` or `edit 390-399`, so the agent can see which parts of each file were actually touched most recently.
 - **Tape activation rules**: Tape now uses `"onlyGit": true` by default, so tape runs only inside a Git repository. Git detection now uses `git rev-parse --show-toplevel` instead of manually checking for a `.git` directory, so worktrees and subdirectories resolve correctly. You can also add absolute `"excludeDirs"` paths, and built-in system/temp directories are excluded by default for safety.
 
 ### Changes

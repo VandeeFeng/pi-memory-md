@@ -257,8 +257,8 @@ After setup, verify:
 After initialization:
 
 1. **Import preferences** - Agent will prompt to extract from AGENTS.md
-2. Edit your identity: `memory_read(path="core/user/identity.md")` then `memory_write(...)` to update
-3. Review preferences: `memory_read(path="core/user/prefer.md")`
+2. Edit your identity: `read(path="core/user/identity.md")` then `memory_write(...)` to update
+3. Review preferences: `read(path="core/user/prefer.md")`
 4. Add project context: `memory_write(path="core/project/overview.md", ...)`
 5. Learn more: See `memory-management` skill
 

@@ -361,7 +361,7 @@ function buildMemoryContextLines(memoryDir: string, files: string[], memories: A
     `Memory directory: ${memoryDir}`,
     "Paths below are relative to that directory.",
     "",
-    "Available memory files (use memory_read to view full content):",
+    "Available memory files:",
     "",
   ];
 

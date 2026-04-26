@@ -157,10 +157,10 @@ memory_write(
 
 ## Reading Memory Files
 
-Use the `memory_read` tool:
+Use the native `read` tool:
 
 ```bash
-memory_read(path="core/user/identity.md")
+read(path="core/user/identity.md")
 ```
 
 ## Listing Memory Files

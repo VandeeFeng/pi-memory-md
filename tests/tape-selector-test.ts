@@ -152,23 +152,26 @@ test("MemoryFileSelector smart mode prioritizes frequently accessed memory files
   writeMemoryFile(path.join(memoryDir, coldFile), "# Cold", { description: "Cold", tags: ["cold"] });
 
   const entries = [
-    createMessageEntry(hoursAgoIso(5.5), "assistant", [
-      { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
-    ]),
+    // createMessageEntry(hoursAgoIso(5.5), "assistant", [
+    //   { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
+    // ]),
     createMessageEntry(hoursAgoIso(5), "assistant", [
       { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
     ]),
-    createMessageEntry(hoursAgoIso(4.5), "assistant", [
-      { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
-    ]),
-    createMessageEntry(hoursAgoIso(4), "assistant", [
-      { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
-    ]),
-    createMessageEntry(hoursAgoIso(3.5), "assistant", [
-      { type: "toolCall", name: "memory_read", arguments: { path: coldFile } },
-    ]),
+    // createMessageEntry(hoursAgoIso(4.5), "assistant", [
+    //   { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
+    // ]),
+    // createMessageEntry(hoursAgoIso(4), "assistant", [
+    //   { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
+    // ]),
+    // createMessageEntry(hoursAgoIso(3.5), "assistant", [
+    //   { type: "toolCall", name: "memory_read", arguments: { path: coldFile } },
+    // ]),
     createMessageEntry(hoursAgoIso(3), "assistant", [
       { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
+    ]),
+    createMessageEntry(hoursAgoIso(2), "assistant", [
+      { type: "toolCall", name: "memory_write", arguments: { path: coldFile } },
     ]),
   ];
   const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
@@ -252,9 +255,9 @@ test("MemoryFileSelector buildContextFromFilesAsync renders memory and project f
 
   const editToolCallId = crypto.randomUUID();
   const entries = [
-    createMessageEntry(hoursAgoIso(5), "assistant", [
-      { type: "toolCall", name: "memory_read", arguments: { path: "core/user/identity.md", offset: 3, limit: 4 } },
-    ]),
+    // createMessageEntry(hoursAgoIso(5), "assistant", [
+    //   { type: "toolCall", name: "memory_read", arguments: { path: "core/user/identity.md", offset: 3, limit: 4 } },
+    // ]),
     createMessageEntry(hoursAgoIso(4), "assistant", [
       { type: "toolCall", id: editToolCallId, name: "edit", arguments: { path: "src/index.ts" } },
     ]),
@@ -275,7 +278,7 @@ test("MemoryFileSelector buildContextFromFilesAsync renders memory and project f
 
   assert.match(context, /# Project Memory/);
   assert.match(context, /core\/user\/identity\.md \[high priority\]/);
-  assert.match(context, / {2}recent focus: read 3-6/);
+  // assert.match(context, / {2}recent focus: read 3-6/);  // memory_read removed
   assert.match(context, /Description: Identity/);
   assert.match(context, /Tags: user, profile/);
   assert.match(context, /Recently active project files/);

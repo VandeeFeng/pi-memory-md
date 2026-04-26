@@ -346,13 +346,6 @@ export class MemoryFileSelector {
     const { memoryEntries, projectEntries } = this.splitContextEntries(fileEntries);
 
     if (memoryEntries.length > 0) {
-      lines.push(
-        "Paths below are relative to that directory.",
-        "",
-        "Available memory files (use memory_read to view full content):",
-        "",
-      );
-
       const frontmatters = await Promise.all(
         memoryEntries.map((entry) => this.extractFrontmatterAsync(entry.displayPath)),
       );
@@ -369,7 +362,15 @@ export class MemoryFileSelector {
   }
 
   private createContextHeader(): string[] {
-    return ["# Project Memory", "", `Memory directory: ${this.memoryDir}`];
+    return [
+      "# Project Memory",
+      "",
+      `Memory directory: ${this.memoryDir}`,
+      "Paths below are relative to that directory.",
+      "",
+      "Recent memory files:",
+      "",
+    ];
   }
 
   private splitContextEntries(
@@ -439,7 +440,7 @@ export class MemoryFileSelector {
   }
 
   private resolveTrackedPath(toolName: SupportedPathToolName, entryPath: string): string | null {
-    if (toolName === "memory_read" || toolName === "memory_write") {
+    if (toolName === "memory_write") {
       return entryPath;
     }
 
