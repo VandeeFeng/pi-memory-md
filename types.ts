@@ -25,11 +25,17 @@ export type HookAction = BuiltinHookAction | (string & {});
 export type HookConfig = Partial<Record<HookTrigger, HookAction[]>>;
 export type MemoryDeliveryMode = "system-prompt" | "message-append";
 
+export interface GlobalMemorySettings {
+  enabled?: boolean;
+  directoryName?: string;
+}
+
 export interface MemoryMdSettings {
   enabled?: boolean;
   repoUrl?: string;
   localPath?: string;
   hooks?: HookConfig;
+  globalMemory?: GlobalMemorySettings;
   delivery?: MemoryDeliveryMode;
   /** @deprecated Use `delivery` instead. */
   injection?: MemoryDeliveryMode;

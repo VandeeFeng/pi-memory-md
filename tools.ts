@@ -6,6 +6,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import {
   getCurrentDate,
+  getGlobalMemoryDir,
   getMemoryCoreDir,
   getMemoryDir,
   initializeMemoryDirectory,
@@ -324,18 +325,59 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { directory } = params as { directory?: string };
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const listDir = directory ? resolvePathWithin(memoryDir, directory) : memoryDir;
+      const projectMemoryDir = getMemoryDir(settings, ctx.cwd);
 
-      if (!listDir || hasSymlinkInPath(memoryDir, listDir)) {
+      if (directory) {
+        const listDir = resolvePathWithin(projectMemoryDir, directory);
+
+        if (!listDir || hasSymlinkInPath(projectMemoryDir, listDir)) {
+          return {
+            content: [{ type: "text", text: `Invalid memory directory: ${directory}` }],
+            details: { files: [], count: 0, error: true },
+          };
+        }
+
+        const files = await listMemoryFilesAsync(listDir);
+        const relPaths = files.map((f) => path.relative(projectMemoryDir, f));
         return {
-          content: [{ type: "text", text: `Invalid memory directory: ${directory}` }],
-          details: { files: [], count: 0, error: true },
+          content: [
+            {
+              type: "text",
+              text: `Memory files (${relPaths.length}):\n\n${relPaths.map((p) => `  - ${p}`).join("\n")}`,
+            },
+          ],
+          details: { files: relPaths, count: relPaths.length },
         };
       }
 
-      const files = await listMemoryFilesAsync(listDir);
-      const relPaths = files.map((f) => path.relative(memoryDir, f));
+      const globalMemoryDir = getGlobalMemoryDir(settings);
+      if (!globalMemoryDir || globalMemoryDir === projectMemoryDir) {
+        const files = await listMemoryFilesAsync(projectMemoryDir);
+        const relPaths = files.map((file) => path.relative(projectMemoryDir, file));
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Memory files (${relPaths.length}):\n\n${relPaths.map((p) => `  - ${p}`).join("\n")}`,
+            },
+          ],
+          details: { files: relPaths, count: relPaths.length },
+        };
+      }
+
+      const roots = [
+        { prefix: "global", memoryDir: globalMemoryDir },
+        { prefix: "project", memoryDir: projectMemoryDir },
+      ];
+      const relPaths = (
+        await Promise.all(
+          roots.map(async ({ prefix, memoryDir }) => {
+            const files = await listMemoryFilesAsync(memoryDir);
+            return files.map((file) => `${prefix}/${path.relative(memoryDir, file)}`);
+          }),
+        )
+      ).flat();
+
       return {
         content: [
           { type: "text", text: `Memory files (${relPaths.length}):\n\n${relPaths.map((p) => `  - ${p}`).join("\n")}` },
@@ -533,16 +575,30 @@ export function registerMemoryInit(pi: ExtensionAPI, settings: MemoryMdSettings)
         };
       }
 
+      const globalMemoryDir = getGlobalMemoryDir(settings);
+      if (globalMemoryDir) {
+        initializeMemoryDirectory(globalMemoryDir);
+      }
       initializeMemoryDirectory(memoryDir);
+
+      const createdDirs = [
+        ...(globalMemoryDir
+          ? [`global: ${globalMemoryDir}`, "global/core/user", "global/core/project", "global/reference"]
+          : []),
+        `project: ${memoryDir}`,
+        "project/core/user",
+        "project/core/project",
+        "project/reference",
+      ];
 
       return {
         content: [
           {
             type: "text",
-            text: `Memory repository initialized:\n${result.message}\n\nCreated directory structure:\n${["core/user", "core/project", "reference"].map((d) => `  - ${d}`).join("\n")}`,
+            text: `Memory repository initialized:\n${result.message}\n\nCreated directory structure:\n${createdDirs.map((d) => `  - ${d}`).join("\n")}`,
           },
         ],
-        details: { success: true },
+        details: { success: true, globalMemoryDir, projectMemoryDir: memoryDir },
       };
     },
 
@@ -565,43 +621,69 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
     parameters: Type.Object({}),
 
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      if (!fs.existsSync(memoryDir)) {
+      const projectMemoryDir = getMemoryDir(settings, ctx.cwd);
+      const globalMemoryDir = getGlobalMemoryDir(settings);
+      const requiredDirs = [
+        ...(globalMemoryDir ? [{ label: "Shared global", path: globalMemoryDir }] : []),
+        { label: "Project", path: projectMemoryDir },
+      ];
+      const missingDir = requiredDirs.find((dir) => !fs.existsSync(dir.path));
+
+      if (missingDir) {
         return {
           content: [
             {
               type: "text",
-              text: `Memory directory not found: ${memoryDir}\n\nProject memory may not be initialized yet.`,
+              text: `${missingDir.label} memory directory not found: ${missingDir.path}\n\nMemory may not be initialized yet.`,
             },
           ],
-          details: { exists: false },
+          details: { exists: false, path: missingDir.path },
         };
       }
 
       const { execSync } = await import("node:child_process");
-      let treeOutput = "";
-      try {
-        treeOutput = execSync(`tree -L 3 -I "node_modules" "${memoryDir}"`, { encoding: "utf-8" });
-      } catch {
+
+      function renderTree(memoryDir: string): string {
         try {
-          treeOutput = execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*" | head -20`, {
-            encoding: "utf-8",
-          });
+          return execSync(`tree -L 3 -I "node_modules" "${memoryDir}"`, { encoding: "utf-8" });
         } catch {
-          treeOutput = "Unable to generate directory tree. Please check permissions.";
+          try {
+            return execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*" | head -20`, {
+              encoding: "utf-8",
+            });
+          } catch {
+            return "Unable to generate directory tree. Please check permissions.";
+          }
         }
       }
 
-      const files = await listMemoryFilesAsync(memoryDir);
-      const relPaths = files.map((f) => path.relative(memoryDir, f));
+      const sections = await Promise.all(
+        requiredDirs.map(async ({ label, path: memoryDir }) => {
+          const files = await listMemoryFilesAsync(memoryDir);
+          const relPaths = files.map((f) => path.relative(memoryDir, f));
+          return [
+            `## ${label} memory`,
+            `Path: ${memoryDir}`,
+            "",
+            renderTree(memoryDir),
+            `Memory files (${relPaths.length}):`,
+            relPaths.map((p) => `  ${p}`).join("\n"),
+          ].join("\n");
+        }),
+      );
+      const fileCount = sections.reduce((count, section) => {
+        const match = /Memory files \((\d+)\):/.exec(section);
+        return count + (match ? Number(match[1]) : 0);
+      }, 0);
+
       return {
         content: [
           {
             type: "text",
-            text: `Memory directory structure for project: ${getProjectMeta(ctx.cwd).name}\n\nPath: ${memoryDir}\n\n${treeOutput}\n\nMemory files (${relPaths.length}):\n${relPaths.map((p) => `  ${p}`).join("\n")}`,
+            text: `Memory directory structure for project: ${getProjectMeta(ctx.cwd).name}\n\n${sections.join("\n\n")}`,
           },
         ],
-        details: { path: memoryDir, fileCount: relPaths.length },
+        details: { path: projectMemoryDir, globalMemoryDir, fileCount },
       };
     },
 
