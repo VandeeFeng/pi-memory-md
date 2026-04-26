@@ -4,6 +4,8 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ## [Unreleased]
 
+最近我学到设计里的几个概念：Silent Success、Visibility of System Status、Affordance & Signifiers、Self Evident，让我看到现在有许多可以优化的地方。
+
 ### Changes
 
 - **Removed session-start initialization notification**: No more "Memory-md not initialized. Use /memory-init to set up" notification on session start.

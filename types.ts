@@ -34,6 +34,11 @@ export interface MemoryMdSettings {
   /** @deprecated Use `delivery` instead. */
   injection?: MemoryDeliveryMode;
   tape?: TapeConfig;
+  status?: StatusConfig;
+}
+
+export interface StatusConfig {
+  enabled?: boolean;
 }
 
 export interface GitResult {

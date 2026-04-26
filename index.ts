@@ -27,6 +27,7 @@ import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
 import { getProjectMeta, getTapeBasePath } from "./utils.js";
+import { registerMemoryStatus } from "./status.js";
 
 type CachedContext = { content: string; fileCount: number };
 
@@ -240,6 +241,7 @@ function buildTapeHint(settings: MemoryMdSettings): string {
 
 function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
   pi.on("session_start", async (event, ctx) => {
+    registerMemoryStatus(pi, settings, ctx);
     ensureTapeRuntime(settings, state, ctx, { recordSessionStart: true, sessionStartReason: event.reason });
 
     if (!state.tapeToolsRegistered) {

@@ -54,6 +54,7 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
       },
     },
   },
+  status: {},
 };
 
 export function expandPath(filePath: string): string {
@@ -145,6 +146,11 @@ function normalizeSettings(
   loadedSettings.delivery = delivery;
   loadedSettings.injection = delivery;
   loadedSettings.hooks = normalizeHooks(rawSettings.hooks ?? rawSettings.autoSync ?? loadedSettings.hooks);
+
+  if (rawSettings.status !== undefined) {
+    loadedSettings.status ??= {};
+    loadedSettings.status.enabled = rawSettings.status.enabled !== false;
+  }
 
   if (rawSettings.tape) {
     loadedSettings.tape ??= {};
