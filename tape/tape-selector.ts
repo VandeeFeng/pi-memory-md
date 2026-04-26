@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import matter from "gray-matter";
 import { DEFAULT_MEMORY_SCAN, normalizeMemoryScanRange } from "../memory-core.js";
-import { hoursAgoIso, isPathInside, resolveFrom, toRelativeIfInside, toTimestamp } from "../utils.js";
+import { getProjectMeta, hoursAgoIso, isPathInside, resolveFrom, toRelativeIfInside, toTimestamp } from "../utils.js";
 import {
   analyzePathAccess,
   analyzeRecentLineRanges,
@@ -203,6 +203,7 @@ async function getRipgrepVisibleProjectPaths(projectRoot: string): Promise<Set<s
 export class MemoryFileSelector {
   private readonly whitelist: string[];
   private readonly blacklist: string[];
+  private readonly isWorktree: boolean;
   private lastSelectionScanHours: number | null = null;
   private lastSmartLineRanges = new Map<string, LineRange[]>();
 
@@ -214,6 +215,7 @@ export class MemoryFileSelector {
   ) {
     this.whitelist = [...new Set(options?.whitelist ?? [])];
     this.blacklist = [...new Set(options?.blacklist ?? [])];
+    this.isWorktree = getProjectMeta(projectRoot).isWorktree;
   }
 
   async selectFilesForContext(
@@ -267,6 +269,10 @@ export class MemoryFileSelector {
     this.lastSelectionScanHours = effectiveHours;
     if (pathStats.size === 0) {
       this.lastSmartLineRanges = new Map();
+      // Worktrees have no access history in their own tape sessions, skip fallback
+      if (this.isWorktree) {
+        return [];
+      }
       return this.scanMemoryDirectoryAsync(limit);
     }
 

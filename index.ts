@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 import { setImmediate as waitForNextTick } from "node:timers/promises";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getHookActions, runHookTrigger } from "./hooks.js";
@@ -488,68 +487,6 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
       }
 
       ctx.ui.notify(treeOutput.trim(), "info");
-    },
-  });
-
-  pi.registerCommand("memory-copy", {
-    description: "Copy project memory core files to current worktree",
-    handler: async (_args, ctx) => {
-      if (!settings.localPath) {
-        ctx.ui.notify("Memory localPath not configured", "error");
-        return;
-      }
-
-      const mainRoot = getProjectMeta(ctx.cwd).mainRoot;
-      if (!mainRoot) {
-        ctx.ui.notify("Current directory is not a worktree or cannot find main worktree", "error");
-        return;
-      }
-
-      const mainMeta = getProjectMeta(mainRoot);
-      const projectMemoryDir = getMemoryDir(settings, mainRoot);
-
-      if (!isMemoryInitialized(projectMemoryDir)) {
-        ctx.ui.notify(`Project memory not initialized: ${mainMeta.name}`, "error");
-        return;
-      }
-
-      const worktreeMemoryDir = path.join(settings.localPath, getProjectMeta(ctx.cwd).name);
-
-      if (fs.existsSync(worktreeMemoryDir)) {
-        ctx.ui.notify(`Worktree memory already exists: ${getProjectMeta(ctx.cwd).name}`, "info");
-        return;
-      }
-
-      const sourceCoreDir = path.join(projectMemoryDir, "core");
-      fs.mkdirSync(worktreeMemoryDir, { recursive: true });
-
-      const copyDirRecursive = async (src: string, dest: string): Promise<string[]> => {
-        const copiedFiles: string[] = [];
-        for (const entry of await fs.promises.readdir(src, { withFileTypes: true })) {
-          const destPath = path.join(dest, entry.name);
-          if (entry.isDirectory()) {
-            fs.mkdirSync(destPath, { recursive: true });
-            copiedFiles.push(...(await copyDirRecursive(path.join(src, entry.name), destPath)));
-          } else if (entry.name.endsWith(".md")) {
-            fs.copyFileSync(path.join(src, entry.name), destPath);
-            copiedFiles.push(path.relative(settings.localPath!, destPath));
-          }
-        }
-        return copiedFiles;
-      };
-
-      try {
-        const copiedFiles = await copyDirRecursive(sourceCoreDir, path.join(worktreeMemoryDir, "core"));
-        ctx.ui.notify(
-          `Worktree memory created: ${getProjectMeta(ctx.cwd).name}\n\nCopied ${copiedFiles.length} files:\n${copiedFiles.map((f) => `  - ${f}`).join("\n")}`,
-          "info",
-        );
-      } catch (error) {
-        ctx.ui.notify(
-          `Failed to create worktree memory: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        );
-      }
     },
   });
 

@@ -6,11 +6,12 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ### Features
 
-- **`memory-copy` command**: Copy project memory core files to current worktree. `getProjectMeta` now returns `isWorktree` and `mainRoot` to detect worktree context.
-  This is only intended to make the initial memory-file migration more convenient — existing memory folders won't be overwritten, since subsequent maintenance is handled through git.
+- **Worktree memory integration**: Memory tools now automatically resolve to the main repository's memory directory when operating in a worktree, using the `mainRoot` project name for path resolution.
+  Project core memory files don't vary much across worktrees, so I think sharing them makes sense for better continuity.
 
 ### Changes
 
+- **Worktree smart mode refinement**: Tape smart mode no longer falls back to scanning all memory files when there's no access history. Since worktrees have independent tape sessions, they won't have memory file access history — returning an empty result is more appropriate than a full directory scan.
 - **Removed `memory_read` tool**: The memory read tool has been removed from the tool registry. Reading memory files is now handled by the native `read` tool with context hints. Tape-mode context now displays "Recent memory files" instead of "Available memory files" to clarify the smart selection behavior.
 
   I think this tool is somewhat redundant — beyond a bit of UI convenience, there's no fundamental difference from the native `read` tool.

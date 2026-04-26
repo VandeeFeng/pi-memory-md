@@ -206,7 +206,8 @@ export function loadSettings(cwd = process.cwd()): MemoryMdSettings {
 
 export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
   const localPath = settings.localPath || DEFAULT_LOCAL_PATH;
-  return path.join(localPath, getProjectMeta(cwd).name);
+  const { mainRoot, name } = getProjectMeta(cwd);
+  return path.join(localPath, mainRoot ? path.basename(mainRoot) : name);
 }
 
 export function getMemoryCoreDir(memoryDir: string): string {

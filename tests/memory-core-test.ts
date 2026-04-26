@@ -1,9 +1,10 @@
 // Covers settings loading, memory file I/O, initialization, context building, and path safety.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import { mock, test } from "node:test";
+import path from "path";
 import {
   buildMemoryContextAsync,
   DEFAULT_SETTINGS,
@@ -300,4 +301,20 @@ test("hasSymlinkInPath detects symlink escapes inside memory directory", () => {
   fs.symlinkSync(outsideFile, linkPath);
 
   assert.equal(hasSymlinkInPath(baseDir, linkPath), true);
+});
+
+test("getMemoryDir uses mainRoot project name for worktrees", () => {
+  const tempDir = createTempDir("pi-memory-md-worktree-memory");
+  const mainRepo = path.join(tempDir, "main-project");
+  const worktreePath = path.join(tempDir, "my-feature");
+  const settings = { localPath: path.join(tempDir, "memory") };
+
+  initGitRepo(mainRepo);
+  execFileSync("git", ["worktree", "add", "-b", "feature", worktreePath], {
+    cwd: mainRepo,
+    stdio: "ignore",
+  });
+
+  const memoryDir = getMemoryDir(settings, worktreePath);
+  assert.equal(memoryDir, path.join(settings.localPath, "main-project"));
 });

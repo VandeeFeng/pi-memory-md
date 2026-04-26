@@ -37,13 +37,7 @@ test("memoryMdExtension does not register memory-anchor when tape is disabled", 
     homedirMock.mock.restore();
   }
 
-  assert.deepEqual(registeredCommands, [
-    "memory-status",
-    "memory-init",
-    "memory-refresh",
-    "memory-check",
-    "memory-copy",
-  ]);
+  assert.deepEqual(registeredCommands, ["memory-status", "memory-init", "memory-refresh", "memory-check"]);
   assert.equal(registeredCommands.includes("memory-anchor"), false);
 });
 

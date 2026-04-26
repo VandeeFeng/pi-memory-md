@@ -137,8 +137,16 @@ export interface ProjectMeta {
   mainRoot?: string;
 }
 
+const projectMetaCache = new Map<string, ProjectMeta>();
+
 export function getProjectMeta(cwd: string): ProjectMeta {
   const absoluteCwd = path.resolve(cwd);
+  const cached = projectMetaCache.get(absoluteCwd);
+
+  if (cached) {
+    return cached;
+  }
+
   const gitRoot = execGitSync(absoluteCwd, ["rev-parse", "--show-toplevel"]);
   const root = gitRoot ?? absoluteCwd;
 
@@ -146,7 +154,7 @@ export function getProjectMeta(cwd: string): ProjectMeta {
   const mainRoot = worktreeList?.split("\n")[0].trim().split(/\s+/)[0];
   const isWorktree = mainRoot ? mainRoot !== root : false;
 
-  return {
+  const meta: ProjectMeta = {
     cwd: absoluteCwd,
     gitRoot,
     root,
@@ -154,6 +162,9 @@ export function getProjectMeta(cwd: string): ProjectMeta {
     isWorktree,
     mainRoot: isWorktree ? mainRoot : undefined,
   };
+
+  projectMetaCache.set(absoluteCwd, meta);
+  return meta;
 }
 
 export function getTapeBasePath(localPath: string, tapePath?: string): string {
