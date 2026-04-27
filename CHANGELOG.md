@@ -2,7 +2,25 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
-## [Unreleased]
+## [0.1.32] - 2026-04-27
+
+I think the `memory_read` tool is a bad idea — it doesn't add any real value and only imposes unnecessary constraints on reading and managing memory files, also hindered feature expansion.
+
+It's gone to jail!
+
+I've been working on compatibility issues for worktrees lately.
+
+Less is more — I need to keep streamlining the code.
+
+Big thanks to everyone who flagged issues in the PRs — really appreciate the feedback!
+
+This project is meant to provide the basic memory foundation and scaffolding, so it's ready to integrate with more sophisticated memory systems down the road. That's about as far as I can take it with my current abilities.
+
+For modern agents, context handling is where the big gains are. Got plenty of ideas rattling around in my head, and I need to dig deeper into the theory.
+
+For now, this project needs to focus on the fundamentals — solid framework design, stability, and extensibility.
+
+**Strange thing**: whenever I publish an npm release, a new big issue always shows up.
 
 ### Features
 
@@ -11,7 +29,7 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ### Changes
 
-- **Worktree smart mode refinement**: Tape smart mode no longer falls back to scanning all memory files when there's no access history. Since worktrees have independent tape sessions, they won't have memory file access history — returning an empty result is more appropriate than a full directory scan.
+- **Worktree smart mode refinement**: Tape smart mode no longer falls back to scanning all memory files when there's no access history. Since worktrees have independent tape sessions (pi stores session JSONL history per worktree), they won't have memory file access history — returning an empty result is more appropriate than a full directory scan.This ensures file weights are calculated correctly for the current worktree's context.
 - **Removed `memory_read` tool**: The memory read tool has been removed from the tool registry. Reading memory files is now handled by the native `read` tool with context hints. Tape-mode context now displays "Recent memory files" instead of "Available memory files" to clarify the smart selection behavior.
 
   I think this tool is somewhat redundant — beyond a bit of UI convenience, there's no fundamental difference from the native `read` tool.
