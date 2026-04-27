@@ -2,6 +2,14 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
+## [Unreleased]
+
+### Changes
+
+- **Unified AnchorStore query API**: Added `query(options: QueryOptions)` method that unifies id/name/sessionId/sessionEntryId filtering with `returnMode` ('first', 'last', 'all').
+  Removed old `findById`, `findByName`, `findByNameInSession`, `findAllByName`, `findBySession`, `findBySessionEntryId`, `getLastAnchor` methods. Use `query()` instead.
+  `search()` remains unchanged for complex queries (text search, time ranges, meta filtering).
+
 ## [0.1.32] - 2026-04-27
 
 I think the `memory_read` tool is a bad idea — it doesn't add any real value and only imposes unnecessary constraints on reading and managing memory files, also hindered feature expansion.

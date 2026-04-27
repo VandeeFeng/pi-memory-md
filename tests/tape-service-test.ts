@@ -106,7 +106,7 @@ test("createAnchor binds current session id and active session entry id", () => 
   assert.equal(anchor.sessionEntryId, "leaf-1");
   assert.equal(anchor.name, "task/begin");
   assert.equal(anchor.kind, "handoff");
-  assert.equal(service.getAnchorStore().findById(anchor.id)?.meta?.summary, "start work");
+  assert.equal(service.getAnchorStore().query({ id: anchor.id, returnMode: "first" })[0]?.meta?.summary, "start work");
 });
 
 test("query supports scope, types, limit, query, anchors, and date ranges", () => {
@@ -137,8 +137,10 @@ test("query supports scope, types, limit, query, anchors, and date ranges", () =
     service.createAnchor("mark/start", "handoff", undefined, false);
     service.createAnchor("mark/end", "handoff", undefined, false);
 
-    const anchors = service.getAnchorStore().findAllByName("mark/start");
-    const endAnchor = service.getAnchorStore().findByName("mark/end");
+    const anchors = service.getAnchorStore().query({ name: "mark/start", nameCaseInsensitive: true });
+    const endAnchor = service
+      .getAnchorStore()
+      .query({ name: "mark/end", nameCaseInsensitive: true, returnMode: "last" })[0];
     anchors[0]!.timestamp = "2026-04-23T10:05:00.000Z";
     endAnchor!.timestamp = "2026-04-23T10:25:00.000Z";
 
