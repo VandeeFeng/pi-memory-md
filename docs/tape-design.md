@@ -71,7 +71,7 @@ interface TapeAnchor {
   id: string;             // Stable anchor id
   timestamp: string;      // ISO timestamp
   name: string;           // Anchor name (e.g., "session/new", "session/resume", "task/begin")
-  kind: "session" | "handoff";
+  type: "session" | "handoff";
   meta?: {
     trigger?: "direct" | "keyword" | "manual";
     keywords?: string[];
@@ -83,7 +83,7 @@ interface TapeAnchor {
 }
 ```
 
-Current JSONL write order is: `id`, `timestamp`, `name`, `kind`, `meta`, `sessionId`, `sessionEntryId`.
+Current JSONL write order is: `id`, `timestamp`, `name`, `type`, `meta`, `sessionId`, `sessionEntryId`.
 
 **Key Methods:**
 - `append(entry)` - Add new anchor to store
@@ -100,7 +100,7 @@ Main service combining session reading and anchor management:
 ```typescript
 class TapeService {
   // Anchor operations
-  createAnchor(name: string, kind: "session" | "handoff", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
+  createAnchor(name: string, type: "session" | "handoff", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
   recordSessionStart(reason?: "startup" | "reload" | "new" | "resume" | "fork"): TapeAnchor
   deleteAnchor(id: string): TapeAnchor | null
   findAnchorByName(name: string, anchorScope?: "current-session" | "project"): TapeAnchor | null

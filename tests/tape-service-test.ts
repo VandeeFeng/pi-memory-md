@@ -105,7 +105,7 @@ test("createAnchor binds current session id and active session entry id", () => 
   assert.equal(anchor.sessionId, "session-xyz");
   assert.equal(anchor.sessionEntryId, "leaf-1");
   assert.equal(anchor.name, "task/begin");
-  assert.equal(anchor.kind, "handoff");
+  assert.equal(anchor.type, "handoff");
   assert.equal(service.getAnchorStore().query({ id: anchor.id, returnMode: "first" })[0]?.meta?.summary, "start work");
 });
 

@@ -34,12 +34,12 @@ async function runHandoff(
   const service =
     tapeService ??
     ({
-      createAnchor(name: string, kind: string, meta?: unknown) {
+      createAnchor(name: string, type: string, meta?: unknown) {
         const anchor = {
           id: "anchor-1",
           timestamp: "2026-04-23T12:00:00.000Z",
           name,
-          kind,
+          type,
           meta,
         };
         createdAnchors.push(anchor);
@@ -91,7 +91,7 @@ test("tape_handoff allows keyword and manual matches in manual mode", async () =
     id: "anchor-1",
     timestamp: "2026-04-23T12:00:00.000Z",
     name: "task/keyword",
-    kind: "handoff",
+    type: "handoff",
     meta: { summary: "kw", purpose: "test", trigger: "keyword", keywords: ["tape"] },
   });
   assert.equal(manualCall.createdAnchors.length, 1);
@@ -109,7 +109,7 @@ test("tape_handoff allows direct calls in auto mode and defaults trigger to dire
     id: "anchor-1",
     timestamp: "2026-04-23T12:00:00.000Z",
     name: "task/direct",
-    kind: "handoff",
+    type: "handoff",
     meta: { summary: "ship it", purpose: "deploy", trigger: "direct" },
   });
   assert.equal((result as any).details.name, "task/direct");
@@ -128,7 +128,7 @@ test("tape_handoff downgrades mismatched keyword handoff match to direct", async
     id: "anchor-1",
     timestamp: "2026-04-23T12:00:00.000Z",
     name: "task/fake-keyword",
-    kind: "handoff",
+    type: "handoff",
     meta: { summary: "kw", purpose: "test", trigger: "direct" },
   });
   assert.equal((result as any).details.matchedKeywordHandoff, false);
@@ -147,7 +147,7 @@ test("tape_handoff only accepts keyword handoff match when the anchor name match
     id: "anchor-1",
     timestamp: "2026-04-23T12:00:00.000Z",
     name: "task/keyword",
-    kind: "handoff",
+    type: "handoff",
     meta: { summary: "kw", purpose: "test", trigger: "keyword", keywords: ["tape", "memory"] },
   });
 });

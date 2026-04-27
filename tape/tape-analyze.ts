@@ -30,7 +30,7 @@ type AnalyzePathAccessOptions = {
   pathExists: (filePath: string) => boolean;
   getLatestAnchor: (
     scanHours: number,
-    match: (anchor: { kind: string; meta?: { trigger?: string } }) => boolean,
+    match: (anchor: { type: string; meta?: { trigger?: string } }) => boolean,
   ) => { timestamp: string } | null;
   getAnchorWindowEndTimestamp: (anchor: { timestamp: string } | null, entries: SessionEntry[]) => number | null;
 };
@@ -248,10 +248,10 @@ function mergeLineRanges(ranges: LineRange[]): LineRange[] {
 }
 
 function createAnchorWindows(entries: SessionEntry[], options: AnalyzePathAccessOptions): AnchorWindow[] {
-  const recentHandoffAnchor = options.getLatestAnchor(options.scanHours, (anchor) => anchor.kind === "handoff");
+  const recentHandoffAnchor = options.getLatestAnchor(options.scanHours, (anchor) => anchor.type === "handoff");
   const recentKeywordHandoffAnchor = options.getLatestAnchor(
     options.scanHours,
-    (anchor) => anchor.kind === "handoff" && anchor.meta?.trigger === "keyword",
+    (anchor) => anchor.type === "handoff" && anchor.meta?.trigger === "keyword",
   );
 
   return [

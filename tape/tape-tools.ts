@@ -4,7 +4,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { MemoryMdSettings } from "../types.js";
 import { toLocaleDateTime, toLocaleTime, toTimestamp } from "../utils.js";
-import type { TapeAnchorKind, TapeAnchorMeta } from "./tape-anchor.js";
+import type { TapeAnchorMeta, TapeAnchorType } from "./tape-anchor.js";
 import type { KeywordHandoffInstruction } from "./tape-gate.js";
 import { extractMessageContent } from "./tape-selector.js";
 import type { TapeService } from "./tape-service.js";
@@ -311,7 +311,7 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
           id: anchor.id,
           name: anchor.name,
           timestamp: anchor.timestamp,
-          kind: anchor.kind,
+          type: anchor.type,
           meta: anchor.meta ?? {},
           beforeContext,
           afterContext,
@@ -329,7 +329,7 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
                 anchor.beforeContext.length > 0 ? `\n  Before:\n    ${anchor.beforeContext.join("\n    ")}` : "";
               const afterStr =
                 anchor.afterContext.length > 0 ? `\n  After:\n    ${anchor.afterContext.join("\n    ")}` : "";
-              return `  - ${anchor.name} [${anchor.kind}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}${beforeStr}${afterStr}`;
+              return `  - ${anchor.name} [${anchor.type}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}${beforeStr}${afterStr}`;
             })
             .join("\n\n");
       }
@@ -531,7 +531,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
       ),
       query: Type.Optional(Type.String({ description: "Text search in entry/anchor content" })),
       anchorName: Type.Optional(Type.String({ description: "Filter anchors by name substring" })),
-      anchorKind: Type.Optional(Type.String({ description: "Filter anchors by exact kind, e.g. 'handoff'" })),
+      anchorType: Type.Optional(Type.String({ description: "Filter anchors by exact type, e.g. 'handoff'" })),
       anchorSummary: Type.Optional(Type.String({ description: "Filter anchors by summary substring" })),
       anchorPurpose: Type.Optional(Type.String({ description: "Filter anchors by purpose substring" })),
       anchorKeywords: Type.Optional(
@@ -555,7 +555,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         anchorScope = "current-session",
         query,
         anchorName,
-        anchorKind,
+        anchorType,
         anchorSummary,
         anchorPurpose,
         anchorKeywords,
@@ -571,7 +571,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         anchorScope?: "current-session" | "project";
         query?: string;
         anchorName?: string;
-        anchorKind?: TapeAnchorKind;
+        anchorType?: TapeAnchorType;
         anchorSummary?: string;
         anchorPurpose?: string;
         anchorKeywords?: string[];
@@ -600,7 +600,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           until,
           sessionId,
           name: anchorName,
-          kind: anchorKind,
+          type: anchorType,
           summary: anchorSummary,
           purpose: anchorPurpose,
           keywords: anchorKeywords,
@@ -612,7 +612,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           lines.push("Anchors:");
           for (const anchor of anchors.slice(-5)) {
             const metaStr = anchor.meta ? ` ${JSON.stringify(anchor.meta)}` : "";
-            lines.push(`  ${anchor.name} [${anchor.kind}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}`);
+            lines.push(`  ${anchor.name} [${anchor.type}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}`);
           }
           if (anchorCount > 5) lines.push(`  ... and ${anchorCount - 5} more`);
         }
@@ -654,7 +654,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           anchorCount,
           entryCount,
           anchorName,
-          anchorKind,
+          anchorType,
           anchorSummary,
           anchorPurpose,
           anchorKeywords,

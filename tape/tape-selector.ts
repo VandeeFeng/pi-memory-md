@@ -488,7 +488,7 @@ export class MemoryFileSelector {
 
   private getLatestAnchor(
     scanHours: number,
-    match: (anchor: { kind: string; meta?: { trigger?: string } }) => boolean,
+    match: (anchor: { type: string; meta?: { trigger?: string } }) => boolean,
   ) {
     const since = hoursAgoIso(scanHours);
     const anchors = this.tapeService.getAnchorStore().search({ since, limit: Number.MAX_SAFE_INTEGER }).filter(match);

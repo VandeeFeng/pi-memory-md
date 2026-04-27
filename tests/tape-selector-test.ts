@@ -11,7 +11,7 @@ import { hoursAgoIso, toTimestamp } from "../utils.js";
 import { createTempDir } from "./test-helpers.js";
 
 type MockAnchor = {
-  kind: string;
+  type: string;
   timestamp: string;
   meta?: { trigger?: string };
 };

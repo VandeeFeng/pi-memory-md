@@ -21,7 +21,7 @@ function createAnchor(overrides: Partial<TapeAnchor>): TapeAnchor {
   return {
     id: overrides.id ?? crypto.randomUUID(),
     name: overrides.name ?? "handoff/default",
-    kind: overrides.kind ?? "handoff",
+    type: overrides.type ?? "handoff",
     sessionId: overrides.sessionId ?? "session-1",
     sessionEntryId: overrides.sessionEntryId ?? "entry-1",
     timestamp: overrides.timestamp ?? "2026-04-23T10:00:00.000Z",
@@ -64,7 +64,7 @@ test("AnchorStore skips malformed and incomplete JSONL lines during load", () =>
       ),
       JSON.stringify({
         name: "task/fallback-id",
-        kind: "handoff",
+        type: "handoff",
         sessionId: "session-1",
         sessionEntryId: "entry-10",
         timestamp: "2026-04-23T12:30:00.000Z",
@@ -118,7 +118,7 @@ test("AnchorStore search combines filters for session, range, name, meta, and ke
     createAnchor({
       id: "a1",
       name: "task/plan",
-      kind: "handoff",
+      type: "handoff",
       sessionId: "session-1",
       timestamp: "2026-04-23T10:00:00.000Z",
       meta: { summary: "plan release", purpose: "plan", keywords: ["release", "urgent"] },
@@ -126,7 +126,7 @@ test("AnchorStore search combines filters for session, range, name, meta, and ke
     createAnchor({
       id: "a2",
       name: "session/new",
-      kind: "session",
+      type: "session",
       sessionId: "session-2",
       timestamp: "2026-04-23T11:00:00.000Z",
       meta: { summary: "resume work", purpose: "resume", keywords: ["followup"] },
@@ -134,7 +134,7 @@ test("AnchorStore search combines filters for session, range, name, meta, and ke
     createAnchor({
       id: "a3",
       name: "task/release",
-      kind: "handoff",
+      type: "handoff",
       sessionId: "session-1",
       timestamp: "2026-04-23T12:00:00.000Z",
       meta: { summary: "ship release", purpose: "deploy", keywords: ["release", "prod"] },
@@ -147,7 +147,7 @@ test("AnchorStore search combines filters for session, range, name, meta, and ke
 
   assert.deepEqual(
     store
-      .search({ sessionId: "session-1", kind: "handoff", since: "2026-04-23T11:30:00.000Z" })
+      .search({ sessionId: "session-1", type: "handoff", since: "2026-04-23T11:30:00.000Z" })
       .map((anchor) => anchor.id),
     ["a3"],
   );

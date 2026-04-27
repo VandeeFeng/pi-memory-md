@@ -71,7 +71,7 @@ interface TapeAnchor {
   id: string;             // 稳定的锚点 ID
   timestamp: string;      // ISO 时间戳
   name: string;           // 锚点名称（如 "session/new", "session/resume", "task/begin"）
-  kind: "session" | "handoff";
+  type: "session" | "handoff";
   meta?: {
     trigger?: "direct" | "keyword" | "manual";
     keywords?: string[];
@@ -83,7 +83,7 @@ interface TapeAnchor {
 }
 ```
 
-当前 JSONL 写入顺序为：`id`、`timestamp`、`name`、`kind`、`meta`、`sessionId`、`sessionEntryId`。
+当前 JSONL 写入顺序为：`id`、`timestamp`、`name`、`type`、`meta`、`sessionId`、`sessionEntryId`。
 
 **关键方法：**
 - `append(entry)` - 添加新锚点到存储
@@ -100,7 +100,7 @@ interface TapeAnchor {
 ```typescript
 class TapeService {
   // 锚点操作
-  createAnchor(name: string, kind: "session" | "handoff", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
+  createAnchor(name: string, type: "session" | "handoff", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
   recordSessionStart(reason?: "startup" | "reload" | "new" | "resume" | "fork"): TapeAnchor
   deleteAnchor(id: string): TapeAnchor | null
   findAnchorByName(name: string, anchorScope?: "current-session" | "project"): TapeAnchor | null

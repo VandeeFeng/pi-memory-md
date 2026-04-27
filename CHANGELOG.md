@@ -6,6 +6,11 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ### Changes
 
+- **Renamed `kind` to `type` for TapeAnchor**: `TapeAnchor.kind` → `TapeAnchor.type`, `TapeAnchorKind` → `TapeAnchorType`, `anchorKind` → `anchorType`.
+  Before: `{"id":"...","kind":"handoff",...}` → After: `{"id":"...","type":"handoff",...}`
+  `type` is more semantically accurate.
+  **Note**: This will affect stored JSONL anchor records.
+
 - **Unified AnchorStore query API**: Added `query(options: QueryOptions)` method that unifies id/name/sessionId/sessionEntryId filtering with `returnMode` ('first', 'last', 'all').
   Removed old `findById`, `findByName`, `findByNameInSession`, `findAllByName`, `findBySession`, `findBySessionEntryId`, `getLastAnchor` methods. Use `query()` instead.
   `search()` remains unchanged for complex queries (text search, time ranges, meta filtering).

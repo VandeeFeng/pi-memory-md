@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { toTimestamp } from "../utils.js";
 
-export type TapeAnchorKind = "session" | "handoff";
+export type TapeAnchorType = "session" | "handoff";
 
 export type TapeAnchorMeta = {
   trigger?: "direct" | "keyword" | "manual";
@@ -14,7 +14,7 @@ export type TapeAnchorMeta = {
 export interface TapeAnchor {
   id: string;
   name: string;
-  kind: TapeAnchorKind;
+  type: TapeAnchorType;
   sessionId: string;
   sessionEntryId: string;
   timestamp: string;
@@ -41,14 +41,14 @@ function sortAnchorsByTimestamp(anchors: TapeAnchor[]): TapeAnchor[] {
 function parseAnchorLine(line: string): TapeAnchor | null {
   try {
     const rawEntry = JSON.parse(line) as Partial<TapeAnchor>;
-    if (!rawEntry.name || !rawEntry.kind || !rawEntry.sessionId || !rawEntry.sessionEntryId || !rawEntry.timestamp) {
+    if (!rawEntry.name || !rawEntry.type || !rawEntry.sessionId || !rawEntry.sessionEntryId || !rawEntry.timestamp) {
       return null;
     }
 
     return {
       id: rawEntry.id ?? `${rawEntry.sessionEntryId}:${rawEntry.timestamp}:${rawEntry.name}`,
       name: rawEntry.name,
-      kind: rawEntry.kind,
+      type: rawEntry.type,
       sessionId: rawEntry.sessionId,
       sessionEntryId: rawEntry.sessionEntryId,
       timestamp: rawEntry.timestamp,
@@ -237,12 +237,12 @@ export class AnchorStore {
     since?: string;
     until?: string;
     name?: string;
-    kind?: TapeAnchorKind;
+    type?: TapeAnchorType;
     summary?: string;
     purpose?: string;
     keywords?: string[];
   }): TapeAnchor[] {
-    const { query, sessionId, limit = 20, since, until, name, kind, summary, purpose, keywords } = options;
+    const { query, sessionId, limit = 20, since, until, name, type, summary, purpose, keywords } = options;
     const sinceTime = since ? toTimestamp(since) : null;
     const untilTime = until ? toTimestamp(until) : null;
     const needle = query?.toLowerCase();
@@ -269,7 +269,7 @@ export class AnchorStore {
       anchors = anchors.filter(
         (anchor) =>
           anchor.name.toLowerCase().includes(needle) ||
-          anchor.kind.toLowerCase().includes(needle) ||
+          anchor.type.toLowerCase().includes(needle) ||
           (anchor.meta && JSON.stringify(anchor.meta).toLowerCase().includes(needle)),
       );
     }
@@ -279,8 +279,8 @@ export class AnchorStore {
       anchors = anchors.filter((anchor) => anchor.name.toLowerCase().includes(normalizedName));
     }
 
-    if (kind) {
-      anchors = anchors.filter((anchor) => anchor.kind === kind);
+    if (type) {
+      anchors = anchors.filter((anchor) => anchor.type === type);
     }
 
     if (summary) {

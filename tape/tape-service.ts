@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import { nowIso, toTimestamp } from "../utils.js";
-import { AnchorStore, type TapeAnchor, type TapeAnchorKind, type TapeAnchorMeta } from "./tape-anchor.js";
+import { AnchorStore, type TapeAnchor, type TapeAnchorMeta, type TapeAnchorType } from "./tape-anchor.js";
 import { getEntriesAfterTimestamp, getSessionFilePath, getSessionFilePaths, parseSessionFile } from "./tape-reader.js";
 import type { TapeQueryOptions } from "./tape-types.js";
 
@@ -117,13 +117,13 @@ export class TapeService {
     return this.createAnchor(anchorName, "session");
   }
 
-  createAnchor(name: string, kind: TapeAnchorKind, meta?: TapeAnchorMeta, syncTreeLabel = true): TapeAnchor {
+  createAnchor(name: string, type: TapeAnchorType, meta?: TapeAnchorMeta, syncTreeLabel = true): TapeAnchor {
     const sessionEntryId = this.sessionManager?.getLeafId() ?? crypto.randomUUID();
     const anchor: TapeAnchor = {
       id: crypto.randomUUID(),
       timestamp: nowIso(),
       name,
-      kind,
+      type,
       meta: meta ?? undefined,
       sessionId: this.sessionId,
       sessionEntryId,

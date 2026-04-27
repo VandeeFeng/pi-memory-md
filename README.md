@@ -386,13 +386,13 @@ Anchors are named checkpoints that correspond to pi session entries, marking imp
 
 Each line in the tape anchor store is a JSON record:
 ```json
-{"id":"1234567890-abc123","timestamp":"2026-04-04T12:00:00.000Z","name":"task/begin","kind":"handoff","meta":{"summary":"Working on feature X","purpose":"feature","trigger":"manual"},"sessionId":"019dbd12-90b7-72b1-a88d-843706db32de","sessionEntryId":"446b6c33"}
+{"id":"1234567890-abc123","timestamp":"2026-04-04T12:00:00.000Z","name":"task/begin","type":"handoff","meta":{"summary":"Working on feature X","purpose":"feature","trigger":"manual"},"sessionId":"019dbd12-90b7-72b1-a88d-843706db32de","sessionEntryId":"446b6c33"}
 ```
 
 Each anchor has:
 - **`id`**: A stable unique identifier, auto-generated from `sessionEntryId:timestamp:name`
 - **`name`**: A human-readable label (e.g., `session/new`, `task/begin`)
-- **`kind`**: Anchor type - `session` for lifecycle anchors, `handoff` for manual/semantic transitions
+- **`type`**: Anchor type - `session` for lifecycle anchors, `handoff` for manual/semantic transitions
 - **`sessionId`**: The pi session this anchor belongs to
 - **`sessionEntryId`**: The associated session entry ID for tree mirroring
 - **`timestamp`**: ISO timestamp of when the anchor was created
@@ -417,7 +417,7 @@ The combination of anchors and keywords balances the agent's autonomy with user 
 | `tape_list` | `{limit?: number}` | List all anchor checkpoints |
 | `tape_delete` | `{id}` | Delete an anchor checkpoint by id |
 | `tape_info` | `{}` | Get tape statistics and information |
-| `tape_search` | `{query?, kinds?, limit?, sinceAnchor?, anchorName?, anchorKind?, anchorSummary?, anchorPurpose?, anchorKeywords?}` | Search tape entries by text or kind, with structured anchor-field filters |
+| `tape_search` | `{query?, kinds?, limit?, sinceAnchor?, anchorName?, anchorType?, anchorSummary?, anchorPurpose?, anchorKeywords?}` | Search tape entries by text or type, with structured anchor-field filters |
 | `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, query?, kinds?, limit?}` | Read tape entries as formatted messages |
 | `tape_reset` | `{archive?: boolean}` | Reset the tape with a new session lifecycle anchor |
 
