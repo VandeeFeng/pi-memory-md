@@ -58,7 +58,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepare": "husky",
+    "prepare": "node .husky/install.mjs",
     "check": "biome check --write --error-on-warnings . && tsgo --noEmit",
     "test": "node --import tsx --test tests/*-test.ts"
   }
