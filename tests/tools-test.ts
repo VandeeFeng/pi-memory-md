@@ -242,6 +242,40 @@ test("memory_list returns relative paths and supports directory filtering", asyn
   assert.match(allFiles.content[0]?.text ?? "", /Memory files \(2\):/);
 });
 
+test("memory_list includes shared global files when global memory is enabled", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-list-global");
+  const projectDir = path.join(tempDir, "project");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+    globalMemory: {
+      enabled: true,
+      directoryName: "global",
+    },
+  };
+  const globalMemoryDir = path.join(settings.localPath, "global");
+  const projectMemoryDir = path.join(settings.localPath, path.basename(projectDir));
+
+  writeMemoryFile(path.join(globalMemoryDir, "core", "user", "prefer.md"), "# Preferences", {
+    description: "Global preferences",
+  });
+  writeMemoryFile(path.join(projectMemoryDir, "core", "project", "overview.md"), "# Overview", {
+    description: "Project overview",
+  });
+
+  const pi = createMockPi();
+  registerMemoryList(pi as never, settings);
+
+  const allFiles = (await executeTool(pi, "memory_list", {}, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { files?: string[]; count?: number };
+  };
+
+  assert.equal(allFiles.details?.count, 2);
+  assert.deepEqual(allFiles.details?.files, ["global/core/user/prefer.md", "project/core/project/overview.md"]);
+  assert.match(allFiles.content[0]?.text ?? "", /global\/core\/user\/prefer\.md/);
+  assert.match(allFiles.content[0]?.text ?? "", /project\/core\/project\/overview\.md/);
+});
+
 test("memory_list rejects symlink directories", async () => {
   const tempDir = createTempDir("pi-memory-md-tools-list-symlink");
   const projectDir = path.join(tempDir, "project");

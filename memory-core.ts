@@ -17,6 +17,7 @@ export * from "./types.js";
 export { DEFAULT_LOCAL_PATH, getCurrentDate } from "./utils.js";
 
 export const DEFAULT_MEMORY_SCAN: [number, number] = [72, 168];
+export const DEFAULT_GLOBAL_MEMORY_DIRNAME = "global";
 
 export function normalizeMemoryScanRange(memoryScan?: [number, number]): [number, number] {
   const [startHours, maxHours] = memoryScan ?? DEFAULT_MEMORY_SCAN;
@@ -31,6 +32,10 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
   repoUrl: "",
   localPath: DEFAULT_LOCAL_PATH,
   hooks: DEFAULT_HOOKS,
+  globalMemory: {
+    enabled: false,
+    directoryName: DEFAULT_GLOBAL_MEMORY_DIRNAME,
+  },
   delivery: "message-append",
   /** @deprecated Use `delivery` instead. */
   injection: "message-append",
@@ -121,6 +126,7 @@ function sanitizeProjectSettings(
     repoUrl: undefined,
     localPath: undefined,
     hooks: undefined,
+    globalMemory: undefined,
     autoSync: undefined,
   };
 
@@ -134,6 +140,16 @@ function sanitizeProjectSettings(
   return sanitized;
 }
 
+function normalizeGlobalMemorySettings(rawSettings: MemoryMdSettings): MemoryMdSettings["globalMemory"] {
+  const directoryName = rawSettings.globalMemory?.directoryName?.trim() || DEFAULT_GLOBAL_MEMORY_DIRNAME;
+  const safeDirectoryName = path.basename(directoryName).replace(/^\.+$/, DEFAULT_GLOBAL_MEMORY_DIRNAME);
+
+  return {
+    enabled: rawSettings.globalMemory?.enabled === true,
+    directoryName: safeDirectoryName || DEFAULT_GLOBAL_MEMORY_DIRNAME,
+  };
+}
+
 function normalizeSettings(
   rawSettings: MemoryMdSettings & {
     hooks?: MemoryMdSettings["hooks"];
@@ -145,6 +161,7 @@ function normalizeSettings(
   loadedSettings.delivery = delivery;
   loadedSettings.injection = delivery;
   loadedSettings.hooks = normalizeHooks(rawSettings.hooks ?? rawSettings.autoSync ?? loadedSettings.hooks);
+  loadedSettings.globalMemory = normalizeGlobalMemorySettings(rawSettings);
 
   if (rawSettings.tape) {
     loadedSettings.tape ??= {};
@@ -208,6 +225,12 @@ export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
   const localPath = settings.localPath || DEFAULT_LOCAL_PATH;
   const { mainRoot, name } = getProjectMeta(cwd);
   return path.join(localPath, mainRoot ? path.basename(mainRoot) : name);
+}
+
+export function getGlobalMemoryDir(settings: MemoryMdSettings): string | null {
+  if (settings.globalMemory?.enabled !== true) return null;
+  const localPath = settings.localPath || DEFAULT_LOCAL_PATH;
+  return path.join(localPath, settings.globalMemory.directoryName || DEFAULT_GLOBAL_MEMORY_DIRNAME);
 }
 
 export function getMemoryCoreDir(memoryDir: string): string {
@@ -355,17 +378,57 @@ export function countMemoryContextFiles(context: string): number {
   return context.split("\n").filter((line) => line.startsWith("-")).length;
 }
 
-function buildMemoryContextLines(memoryDir: string, files: string[], memories: Array<MemoryFile | null>): string[] {
-  const lines: string[] = [
-    "# Project Memory",
-    "",
-    `Memory directory: ${memoryDir}`,
-    "Paths below are relative to that directory.",
-    "",
-    "Available memory files:",
-    "",
-  ];
+type MemoryContextScope = {
+  label: string;
+  prefix: string;
+  memoryDir: string;
+};
 
+function getMemoryContextScopes(settings: MemoryMdSettings, cwd: string): MemoryContextScope[] {
+  const projectMemoryDir = getMemoryDir(settings, cwd);
+  const globalMemoryDir = getGlobalMemoryDir(settings);
+  const scopes: MemoryContextScope[] = [];
+
+  if (globalMemoryDir && globalMemoryDir !== projectMemoryDir) {
+    scopes.push({ label: "Shared Global Memory", prefix: "global", memoryDir: globalMemoryDir });
+  }
+
+  scopes.push({ label: "Project Memory", prefix: "project", memoryDir: projectMemoryDir });
+  return scopes;
+}
+
+async function readCoreMemoryFiles(
+  memoryDir: string,
+): Promise<{ files: string[]; memories: Array<MemoryFile | null> } | null> {
+  const coreDir = getMemoryCoreDir(memoryDir);
+
+  try {
+    const stat = await fs.promises.stat(coreDir);
+    if (!stat.isDirectory()) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  const files = await listMemoryFilesAsync(coreDir);
+  if (files.length === 0) {
+    return null;
+  }
+
+  return {
+    files,
+    memories: await Promise.all(files.map((filePath) => readMemoryFileAsync(filePath))),
+  };
+}
+
+function appendMemoryFileLines(
+  lines: string[],
+  memoryDir: string,
+  files: string[],
+  memories: Array<MemoryFile | null>,
+  prefix?: string,
+): void {
   for (let index = 0; index < files.length; index++) {
     const filePath = files[index];
     const memory = memories[index];
@@ -374,34 +437,67 @@ function buildMemoryContextLines(memoryDir: string, files: string[], memories: A
     }
 
     const relPath = path.relative(memoryDir, filePath);
+    const displayPath = prefix ? `${prefix}/${relPath}` : relPath;
     const { description, tags } = memory.frontmatter;
-    lines.push(`- ${relPath}`);
+    lines.push(`- ${displayPath}`);
     lines.push(`  Description: ${description}`);
     lines.push(`  Tags: ${tags?.join(", ") || "none"}`);
     lines.push("");
   }
+}
 
+async function buildMemoryContextSection(scope: MemoryContextScope): Promise<string[] | null> {
+  const coreFiles = await readCoreMemoryFiles(scope.memoryDir);
+  if (!coreFiles) return null;
+
+  const lines: string[] = [`## ${scope.label}`, "", `Memory directory: ${scope.memoryDir}`, ""];
+  appendMemoryFileLines(lines, scope.memoryDir, coreFiles.files, coreFiles.memories, scope.prefix);
   return lines;
 }
 
 export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: string): Promise<string> {
-  const memoryDir = getMemoryDir(settings, cwd);
-  const coreDir = getMemoryCoreDir(memoryDir);
+  const projectMemoryDir = getMemoryDir(settings, cwd);
+  const globalMemoryDir = getGlobalMemoryDir(settings);
 
-  try {
-    const stat = await fs.promises.stat(coreDir);
-    if (!stat.isDirectory()) {
-      return "";
-    }
-  } catch {
+  if (!globalMemoryDir || globalMemoryDir === projectMemoryDir) {
+    const coreFiles = await readCoreMemoryFiles(projectMemoryDir);
+    if (!coreFiles) return "";
+
+    const lines = [
+      "# Project Memory",
+      "",
+      `Memory directory: ${projectMemoryDir}`,
+      "Paths below are relative to that directory.",
+      "",
+      "Available memory files:",
+      "",
+    ];
+    appendMemoryFileLines(lines, projectMemoryDir, coreFiles.files, coreFiles.memories);
+    return lines.join("\n");
+  }
+
+  const sections = (
+    await Promise.all(getMemoryContextScopes(settings, cwd).map((scope) => buildMemoryContextSection(scope)))
+  ).filter((section): section is string[] => section !== null);
+
+  if (sections.length === 0) {
     return "";
   }
 
-  const files = await listMemoryFilesAsync(coreDir);
-  if (files.length === 0) {
-    return "";
+  const lines = [
+    "# Project Memory",
+    "",
+    `Shared global memory directory: ${globalMemoryDir}`,
+    `Project memory directory: ${projectMemoryDir}`,
+    "Paths below are prefixed with `global/` or `project/` when shared global memory is enabled.",
+    "",
+    "Available memory files:",
+    "",
+  ];
+
+  for (const section of sections) {
+    lines.push(...section);
   }
 
-  const memories = await Promise.all(files.map((filePath) => readMemoryFileAsync(filePath)));
-  return buildMemoryContextLines(memoryDir, files, memories).join("\n");
+  return lines.join("\n");
 }

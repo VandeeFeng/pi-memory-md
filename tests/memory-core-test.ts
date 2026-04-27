@@ -8,6 +8,7 @@ import path from "path";
 import {
   buildMemoryContextAsync,
   DEFAULT_SETTINGS,
+  getGlobalMemoryDir,
   getMemoryCoreDir,
   getMemoryDir,
   getMemoryUserDir,
@@ -31,6 +32,10 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
       hooks: {
         sessionStart: ["pull"],
         sessionEnd: [],
+      },
+      globalMemory: {
+        enabled: true,
+        directoryName: "global",
       },
       delivery: "system-prompt",
       tape: {
@@ -56,6 +61,10 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
       hooks: {
         sessionStart: ["push", "", "pull"],
         sessionEnd: ["push"],
+      },
+      globalMemory: {
+        enabled: true,
+        directoryName: "project-global",
       },
       tape: {
         tapePath: "~/project-tape",
@@ -90,6 +99,11 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
       sessionStart: ["pull"],
       sessionEnd: [],
     });
+    assert.deepEqual(settings.globalMemory, {
+      enabled: true,
+      directoryName: "global",
+    });
+    assert.equal(getGlobalMemoryDir(settings), path.join(tempHome, "global-memory", "global"));
     assert.equal(settings.tape?.enabled, true);
     assert.equal(settings.tape?.onlyGit, true);
     assert.equal(settings.tape?.context?.fileLimit, 3);
@@ -270,6 +284,42 @@ test("buildMemoryContextAsync lists only core markdown files with relative paths
   assert.match(context, /- core\/user\/identity\.md/);
   assert.match(context, /- core\/project\/roadmap\.md/);
   assert.doesNotMatch(context, /reference\/ignore\.md/);
+});
+
+test("buildMemoryContextAsync includes shared global memory before project memory", async () => {
+  const tempDir = createTempDir("pi-memory-md-global-context");
+  const projectDir = path.join(tempDir, "project-a");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+    globalMemory: {
+      enabled: true,
+      directoryName: "global",
+    },
+  };
+  const projectMemoryDir = getMemoryDir(settings, projectDir);
+  const globalMemoryDir = getGlobalMemoryDir(settings);
+
+  assert.ok(globalMemoryDir);
+  writeMemoryFile(path.join(globalMemoryDir, "core", "user", "prefer.md"), "# Preferences", {
+    description: "Global preferences",
+    tags: ["global"],
+  });
+  writeMemoryFile(path.join(projectMemoryDir, "core", "project", "overview.md"), "# Overview", {
+    description: "Project overview",
+    tags: ["project"],
+  });
+
+  const context = await buildMemoryContextAsync(settings, projectDir);
+
+  assert.match(
+    context,
+    new RegExp(`Shared global memory directory: ${globalMemoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+  );
+  assert.match(context, /## Shared Global Memory/);
+  assert.match(context, /- global\/core\/user\/prefer\.md/);
+  assert.match(context, /## Project Memory/);
+  assert.match(context, /- project\/core\/project\/overview\.md/);
+  assert.ok(context.indexOf("## Shared Global Memory") < context.indexOf("## Project Memory"));
 });
 
 test("buildMemoryContextAsync returns empty string when core directory is missing", async () => {
