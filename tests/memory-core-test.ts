@@ -33,11 +33,10 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
         sessionStart: ["pull"],
         sessionEnd: [],
       },
-      globalMemory: {
-        enabled: true,
-        directory: "global",
-      },
       delivery: "system-prompt",
+      memoryDir: {
+        globalMemory: "global",
+      },
       tape: {
         enabled: true,
         context: {
@@ -62,10 +61,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
         sessionStart: ["push", "", "pull"],
         sessionEnd: ["push"],
       },
-      globalMemory: {
-        enabled: true,
-        directory: "project-global",
-      },
+      globalMemory: "project-global",
       tape: {
         tapePath: "~/project-tape",
         excludeDirs: ["~/blocked", "relative/path"],
@@ -99,10 +95,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
       sessionStart: ["pull"],
       sessionEnd: [],
     });
-    assert.deepEqual(settings.globalMemory, {
-      enabled: true,
-      directoryName: "global",
-    });
+    assert.equal(settings.memoryDir?.globalMemory, "global");
     assert.equal(getGlobalMemoryDir(settings), path.join(tempHome, "global-memory", "global"));
     assert.equal(settings.tape?.enabled, true);
     assert.equal(settings.tape?.onlyGit, true);
@@ -193,76 +186,27 @@ test("readMemoryFileAsync returns fallback frontmatter for missing frontmatter",
   assert.equal(memory?.content, "# Plain note\n\nNo frontmatter here.");
 });
 
-test("globalMemory defaults to enabled when config block exists", () => {
-  const tempHome = createTempDir("pi-memory-md-home-global-default");
-  const projectDir = createTempDir("pi-memory-md-project-global-default");
+test("loadSettings supports memoryDir unified config structure", () => {
+  const tempHome = createTempDir("pi-memory-md-home-memory-dir");
+  const projectDir = createTempDir("pi-memory-md-project-memory-dir");
 
-  // Test 1: Empty globalMemory block defaults to enabled
   writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
     "pi-memory-md": {
-      localPath: "~/memory",
-      globalMemory: {},
-    },
-  });
-
-  let homedirMock = mock.method(os, "homedir", () => tempHome);
-  try {
-    const settings = loadSettings(projectDir);
-    assert.equal(settings.globalMemory?.enabled, true);
-    assert.equal(settings.globalMemory?.directory, "global");
-  } finally {
-    homedirMock.mock.restore();
-  }
-
-  // Test 2: globalMemory with directory defaults to enabled
-  writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
-    "pi-memory-md": {
-      localPath: "~/memory",
-      globalMemory: {
-        directory: "shared",
+      memoryDir: {
+        repoUrl: "https://github.com/acme/memory.git",
+        localPath: "~/my-memory",
+        globalMemory: "shared",
       },
     },
   });
 
-  homedirMock = mock.method(os, "homedir", () => tempHome);
+  const homedirMock = mock.method(os, "homedir", () => tempHome);
+
   try {
     const settings = loadSettings(projectDir);
-    assert.equal(settings.globalMemory?.enabled, true);
-    assert.equal(settings.globalMemory?.directory, "shared");
-  } finally {
-    homedirMock.mock.restore();
-  }
-
-  // Test 3: No globalMemory config defaults to disabled
-  writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
-    "pi-memory-md": {
-      localPath: "~/memory",
-    },
-  });
-
-  homedirMock = mock.method(os, "homedir", () => tempHome);
-  try {
-    const settings = loadSettings(projectDir);
-    assert.equal(settings.globalMemory?.enabled, false);
-  } finally {
-    homedirMock.mock.restore();
-  }
-
-  // Test 4: Explicit enabled: false disables
-  writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
-    "pi-memory-md": {
-      localPath: "~/memory",
-      globalMemory: {
-        enabled: false,
-        directory: "should-not-use",
-      },
-    },
-  });
-
-  homedirMock = mock.method(os, "homedir", () => tempHome);
-  try {
-    const settings = loadSettings(projectDir);
-    assert.equal(settings.globalMemory?.enabled, false);
+    assert.equal(settings.repoUrl, "https://github.com/acme/memory.git");
+    assert.equal(settings.localPath, path.join(tempHome, "my-memory"));
+    assert.equal(settings.memoryDir?.globalMemory, "shared");
   } finally {
     homedirMock.mock.restore();
   }
@@ -366,9 +310,8 @@ test("buildMemoryContextAsync includes shared global memory before project memor
   const projectDir = path.join(tempDir, "project-a");
   const settings = {
     localPath: path.join(tempDir, "memory-root"),
-    globalMemory: {
-      enabled: true,
-      directory: "global",
+    memoryDir: {
+      globalMemory: "global",
     },
   };
   const projectMemoryDir = getMemoryDir(settings, projectDir);

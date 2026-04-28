@@ -32,13 +32,14 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
   repoUrl: "",
   localPath: DEFAULT_LOCAL_PATH,
   hooks: DEFAULT_HOOKS,
-  globalMemory: {
-    enabled: false,
-    directory: DEFAULT_GLOBAL_MEMORY_DIRNAME,
-  },
   delivery: "message-append",
   /** @deprecated Use `delivery` instead. */
   injection: "message-append",
+  memoryDir: {
+    repoUrl: "",
+    localPath: DEFAULT_LOCAL_PATH,
+    globalMemory: DEFAULT_GLOBAL_MEMORY_DIRNAME,
+  },
   tape: {
     enabled: false,
     onlyGit: true,
@@ -126,8 +127,8 @@ function sanitizeProjectSettings(
     repoUrl: undefined,
     localPath: undefined,
     hooks: undefined,
-    globalMemory: undefined,
     autoSync: undefined,
+    memoryDir: undefined,
   };
 
   if (sanitized.tape) {
@@ -140,32 +141,25 @@ function sanitizeProjectSettings(
   return sanitized;
 }
 
-function normalizeGlobalMemorySettings(rawSettings: MemoryMdSettings): MemoryMdSettings["globalMemory"] {
-  const directoryName = rawSettings.globalMemory?.directory?.trim() || DEFAULT_GLOBAL_MEMORY_DIRNAME;
-  const safeDirectoryName = path.basename(directoryName).replace(/^\.+$/, DEFAULT_GLOBAL_MEMORY_DIRNAME);
-
-  // If globalMemory config block exists, default to enabled unless explicitly disabled
-  const hasGlobalMemoryConfig = rawSettings.globalMemory !== undefined;
-  const enabled = hasGlobalMemoryConfig && rawSettings.globalMemory?.enabled !== false;
-
-  return {
-    enabled,
-    directory: safeDirectoryName || DEFAULT_GLOBAL_MEMORY_DIRNAME,
-  };
-}
-
 function normalizeSettings(
   rawSettings: MemoryMdSettings & {
     hooks?: MemoryMdSettings["hooks"];
     autoSync?: { onSessionStart?: boolean };
   },
 ): MemoryMdSettings {
+  if (rawSettings.memoryDir?.localPath && !rawSettings.localPath) {
+    rawSettings.localPath = rawSettings.memoryDir.localPath;
+  }
+
+  if (rawSettings.memoryDir?.repoUrl && !rawSettings.repoUrl) {
+    rawSettings.repoUrl = rawSettings.memoryDir.repoUrl;
+  }
+
   const loadedSettings = deepMergeSettings(DEFAULT_SETTINGS, rawSettings);
   const delivery = rawSettings.delivery ?? rawSettings.injection ?? loadedSettings.delivery ?? loadedSettings.injection;
   loadedSettings.delivery = delivery;
   loadedSettings.injection = delivery;
   loadedSettings.hooks = normalizeHooks(rawSettings.hooks ?? rawSettings.autoSync ?? loadedSettings.hooks);
-  loadedSettings.globalMemory = normalizeGlobalMemorySettings(rawSettings);
 
   if (rawSettings.tape) {
     loadedSettings.tape ??= {};
@@ -233,9 +227,14 @@ export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
 }
 
 export function getGlobalMemoryDir(settings: MemoryMdSettings): string | null {
-  if (settings.globalMemory?.enabled !== true) return null;
+  const globalMemory = settings.memoryDir?.globalMemory;
+  if (!globalMemory) return null;
+
+  const directoryName = globalMemory.trim();
+  const safeDirectoryName =
+    path.basename(directoryName).replace(/^\.+$/, DEFAULT_GLOBAL_MEMORY_DIRNAME) || DEFAULT_GLOBAL_MEMORY_DIRNAME;
   const localPath = settings.localPath || DEFAULT_LOCAL_PATH;
-  return path.join(localPath, settings.globalMemory.directory || DEFAULT_GLOBAL_MEMORY_DIRNAME);
+  return path.join(localPath, safeDirectoryName);
 }
 
 export function getMemoryCoreDir(memoryDir: string): string {

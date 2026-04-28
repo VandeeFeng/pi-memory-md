@@ -236,7 +236,7 @@ test("memory_list returns relative paths and supports directory filtering", asyn
   };
 
   assert.equal(allFiles.details?.count, 2);
-  assert.deepEqual(allFiles.details?.files, ["core/project/roadmap.md", "core/user/identity.md"]);
+  assert.deepEqual((allFiles.details?.files ?? []).sort(), ["core/project/roadmap.md", "core/user/identity.md"].sort());
   assert.equal(userFiles.details?.count, 1);
   assert.deepEqual(userFiles.details?.files, ["core/user/identity.md"]);
   assert.match(allFiles.content[0]?.text ?? "", /Memory files \(2\):/);
@@ -247,9 +247,8 @@ test("memory_list includes shared global files when global memory is enabled", a
   const projectDir = path.join(tempDir, "project");
   const settings = {
     localPath: path.join(tempDir, "memory-root"),
-    globalMemory: {
-      enabled: true,
-      directory: "global",
+    memoryDir: {
+      globalMemory: "global",
     },
   };
   const globalMemoryDir = path.join(settings.localPath, "global");

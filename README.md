@@ -116,16 +116,20 @@ Markdown content...
 ```json
 {
   "pi-memory-md": {
-    "globalMemory":{
-      // Shared memory folder under localPath (e.g., "global" → {localPath}/global)
-      // If config block exists, enabled by default unless explicitly set to false
-      // "enabled": false,
-      "directory": "global"
-    },
     // "enabled": false,
+
+    "memoryDir":{
+    // git remote url
     "repoUrl": "git@github.com:username/repo.git", // Or HTTPS format
+
     // Root dir for all memory (cloned from repo) `~/.pi/memory-md` as default
     "localPath": "~/.pi/memory-md",
+
+    // Shared memory folder under localPath (e.g., "global" → {localPath}/global)
+    // Only enabled when explicitly configured
+    "globalMemory": "global"
+    },
+
     // `injection` is still accepted as a legacy alias for `delivery`.
     "delivery": "message-append",
     "hooks": {
@@ -139,20 +143,15 @@ Markdown content...
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `enabled` | `true` | Enable extension |
-| `globalMemory.directory` | `"global"` | Shared memory folder name (relative to `localPath`) |
-| `repoUrl` | Required | Git repository URL |
-| `localPath` | `~/.pi/memory-md` | Local memory clone path |
+| `memoryDir.repoUrl` | Required | Git repository URL |
+| `memoryDir.localPath` | `~/.pi/memory-md` | Local memory clone path |
+| `memoryDir.globalMemory` | `"global"` | Shared memory folder name (relative to `localPath`) |
 | `delivery` | `"message-append"` | Memory delivery mode: `"message-append"`, `"system-prompt"` |
 | `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts |
 | `hooks.sessionEnd` | `[]` | Actions to run when a session ends |
 | `tape.enabled` | `false` | Enable tape mode for dynamic context selection |
 
 When settings change, run `/reload` to apply them.
-
-### Hooks
-
-- `sessionStart: ["pull"]`: pull latest memory before the first prompt.
-- `sessionEnd: ["push"]`: commit and push memory when the session ends.
 
 Legacy config is still supported:
 
@@ -164,7 +163,17 @@ Legacy config is still supported:
 }
 ```
 
-But it is recommended to migrate to the new `hooks` config.
+```json
+{
+  "localPath": "~/.pi/memory-md",
+  "repoUrl": "git@github.com:username/repo.git", // Or HTTPS format
+}
+```
+
+### Hooks
+
+- `sessionStart: ["pull"]`: pull latest memory before the first prompt.
+- `sessionEnd: ["push"]`: commit and push memory when the session ends.
 
 More trigger actions can be added later, even custom hooks.
 

@@ -48,16 +48,17 @@ main() {
   
   log "Using settings: $SETTINGS_FILE"
   
-  # Extract values
+  # Extract values (support memoryDir structure with fallback to top-level)
   if command -v jq &> /dev/null; then
-    REPO_URL=$(jq -r '.["pi-memory-md"].repoUrl // empty' "$SETTINGS_FILE")
-    LOCAL_PATH=$(jq -r '.["pi-memory-md"].localPath // empty' "$SETTINGS_FILE")
-    # globalMemory enabled if config block exists AND enabled != false
-    GLOBAL_ENABLED=$(jq -r '.["pi-memory-md"].globalMemory != null and .["pi-memory-md"].globalMemory.enabled != false' "$SETTINGS_FILE")
+    # Check memoryDir first, then fallback to top-level
+    REPO_URL=$(jq -r '.["pi-memory-md"].memoryDir.repoUrl // .["pi-memory-md"].repoUrl // empty' "$SETTINGS_FILE")
+    LOCAL_PATH=$(jq -r '.["pi-memory-md"].memoryDir.localPath // .["pi-memory-md"].localPath // empty' "$SETTINGS_FILE")
+    GLOBAL_ENABLED=$(jq -r '.["pi-memory-md"].memoryDir.globalMemory // .["pi-memory-md"].globalMemory // empty')
+    GLOBAL_ENABLED=$([ -n "$GLOBAL_ENABLED" ] && echo "true" || echo "false")
   else
     REPO_URL=$(grep -o '"repoUrl"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')
     LOCAL_PATH=$(grep -o '"localPath"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')
-    GLOBAL_ENABLED="false"
+    GLOBAL_ENABLED=$(grep -q '"globalMemory"' "$SETTINGS_FILE" && echo "true" || echo "false")
   fi
   
   LOCAL_PATH="${LOCAL_PATH:-$HOME/.pi/memory-md}"

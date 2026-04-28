@@ -4,15 +4,25 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ## [Unreleased]
 
+ Special Thanks to [@nqh-packages](https://github.com/VandeeFeng/pi-memory-md/pull/7) for the globalMemory feature contribution!
+
 ### Features
 
 - **globalMemory: shared memory directory across projects**: Configures a shared memory root (`{localPath}/global/`) accessible from any project.
   When enabled, `global/core/user/` (identity.md, prefer.md) and `global/core/project/` files are included in memory context alongside project-specific memory.
   The `globalMemory` config block can include `directory` to customize the folder name (default: `global`).
-  Previously required explicit `enabled: true`. Now enabled by default when config block exists — set `enabled: false` to disable.
 
 ### Changes
 
+- **Unified `memoryDir` config block**: `repoUrl`, `localPath`, and `globalMemory` are now consolidated under `memoryDir` for cleaner configuration. Top-level fields remain supported for backward compatibility.
+  ```md
+  "memoryDir": {
+    "repoUrl": "git@github.com:username/repo.git", // Or HTTPS format
+    "localPath": "~/.pi/memory-md",
+    "globalMemory": "global"
+  }
+  ```
+  Previously these were separate top-level fields. They still work, but `memoryDir` is the preferred structure.
 - **Replaced `/memory-init` command and built-in tool with `memory-init` skill**: Provides greater flexibility and user-driven configuration instead of hardcoded logic.
   The skill delegates to `scripts/memory-init.sh` and prompts users to select templates and import preferences from AGENTS.md.
   The built-in `memory-init` tool had too many constraints. I abstracted and consolidated this tool into SKILL, preserving its original functionality while adding more flexibility and user control
