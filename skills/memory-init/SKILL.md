@@ -1,92 +1,75 @@
 ---
 name: memory-init
-description: Initial setup and bootstrap guide for pi-memory-md repository. Use when you need to set up pi-memory-md for the first time or reinitialize an existing installation.
+description: Initialize memory repository - clone git repo and create directory structure. Use when you need to set up pi-memory-md for the first time or initalize project's memory files.
 ---
+
+## Overview
+
+1. Run [scripts/memory-init.sh](scripts/memory-init.sh) to clone/sync repo and create directories
+2. Read and copy template files from [templates/](templates/) (user decides which)
 
 ## Prerequisites
 
-1. **Git repository** - Create a new empty git repository
-2. **Git access** - Configure SSH keys or personal access token
-3. **Node.js & npm** - For installing the package
+Before running this skill, ensure:
+- Package installed: `pi install npm:pi-memory-md`
+- Settings configured with `repoUrl` in your settings file
+- Git repository created and accessible
 
-## Step 1: Install Package
+## Execution Steps
+
+### Step 1: Run Initialization Script
+
+Execute the initialization script: [scripts/memory-init.sh](scripts/memory-init.sh)
+
+The script will:
+1. Read settings from `.pi/settings.json` or `$PI_CODING_AGENT_DIR/settings.json`
+2. Calculate memory directories
+3. Clone or sync the git repository
+4. Create `core/project/`, `reference/`
+
+### Step 2: Configure globalMemory (if applicable)
+
+Read settings from `.pi/settings.json` or `$PI_CODING_AGENT_DIR/settings.json` and check for `globalMemory` configuration.
+
+If `globalMemory` config block exists:
+
+1. **Ask user**: Should I also create `identity-template.md` and `prefer-template.md` in `global/core/user/`?
+   - If YES, copy templates to `global/core/user/`
+   - If NO, skip
+
+### Step 3: Copy Template Files for Project Memory (Optional)
+
+Ask user which templates to create in [templates/](templates/):
+
+```
+Which template files would you like to create? (select all that apply)
+1. identity-template.md - User identity template
+2. prefer-template.md - User preferences template
+3. Both
+4. None (skip templates)
+```
+
+If user selects templates, copy them from `templates/` to the `{projectMemoryDir}/core/user` directory:
 
 ```bash
-pi install npm:pi-memory-md
+cp templates/identity-template.md {projectMemoryDir}/core/user
+cp templates/prefer-template.md {projectMemoryDir}/core/user
 ```
 
-## Step 2: Create Repository
+### Step 4: Import Preferences from AGENTS.md (Optional)
 
-Create a new repository:
-- Name it something like `memory-md` or `pi-memory`
-- Make it private (recommended)
-- Don't initialize with README (we'll do that)
+This step extracts preferences from AGENTS.md to populate prefer.md.
 
-**Clone URL will be:** `git@github.com:username/repo-name.git`
+1. **Find AGENTS.md** (check in order):
+   - Project root: `{cwd}/AGENTS.md`
+   - Project: `{cwd}/.pi/agent/AGENTS.md`
+   - Global: `~/.pi/agent/AGENTS.md`
 
-## Step 3: Configure Settings
+2. **Ask user**: Do you want to import preferences from AGENTS.md?
+   - If NO, skip to Step 4
+   - If YES, continue
 
-Add to your settings file (global: `~/.pi/agent/settings.json`, project: `.pi/settings.json`):
-
-```json
-{
-  "pi-memory-md": {
-    "enabled": true,
-    "repoUrl": "git@github.com:username/repo-name.git",
-    "localPath": "~/.pi/memory-md",
-    "hooks": {
-      "sessionStart": ["pull"],
-      "sessionEnd": []
-    }
-  }
-}
-```
-
-**Settings explained:**
-
-| Setting | Purpose | Default |
-|---------|---------|----------|
-| `enabled` | Enable/disable extension | `true` |
-| `repoUrl` | Git repository URL | Required |
-| `localPath` | Local clone location (supports `~`) | `~/.pi/memory-md` |
-| `hooks.sessionStart` | Actions run at session start | `["pull"]` |
-| `hooks.sessionEnd` | Actions run at session end | `[]` |
-
-## Step 4: Initialize Repository
-
-Start pi and run:
-
-```
-memory_init()
-```
-
-**This does:**
-1. Clones the git repository
-2. Creates directory structure:
-   - `core/user/` - Your identity and preferences
-   - `core/project/` - Project-specific info
-3. Creates default files:
-   - `core/user/identity.md` - User identity template
-   - `core/user/prefer.md` - User preferences template
-
-**Example output:**
-```
-Memory repository initialized:
-Cloned repository successfully
-
-Created directory structure:
-  - core/user
-  - core/project
-  - reference
-```
-
-## Step 5: Import Preferences from AGENTS.md
-
-After initialization, extract relevant preferences from your `AGENTS.md` file to populate `prefer.md`:
-
-1. **Read AGENTS.md** (typically at `.pi/agent/AGENTS.md` or project root)
-
-2. **Extract relevant sections** such as:
+3. **Read AGENTS.md** and extract relevant sections:
    - IMPORTANT Rules
    - Code Quality Principles
    - Coding Style Preferences
@@ -94,176 +77,138 @@ After initialization, extract relevant preferences from your `AGENTS.md` file to
    - Development Workflow
    - Technical Preferences
 
-3. **Present extracted content** to the user in a summarized format
-
-4. **Ask first confirmation**: Include these extracted preferences in `prefer.md`?
+4. **Summarize and confirm**:
    ```
    Found these preferences in AGENTS.md:
-   - IMPORTANT Rules: [summary]
-   - Code Quality Principles: [summary]
-   - Coding Style: [summary]
+   - IMPORTANT Rules: [1-2 sentence summary]
+   - Code Quality Principles: [1-2 sentence summary]
+   - Coding Style: [1-2 sentence summary]
 
    Include these in core/user/prefer.md? (yes/no)
    ```
 
-5. **Ask for additional content**: Is there anything else you want to add to your preferences?
+5. **If confirmed**, update or create `core/user/prefer.md` with:
+   - Extracted content from AGENTS.md
+   - Keep the existing frontmatter (description, tags, created)
+
+6. **Ask for additional preferences**:
    ```
-   Any additional preferences you'd like to include? (e.g., communication style, specific tools, workflows)
+   Any additional preferences to add to prefer.md? (e.g., communication style, specific tools)
    ```
 
-6. **Update prefer.md** with:
-   - Extracted content from AGENTS.md (if user confirmed)
-   - Any additional preferences provided by user
+### Step 5: Verify Setup
 
-## Step 6: Verify Setup
+Call `memory_check` tool to verify setup is correct.
 
-Check status with command:
-
-```
-/memory-status
-```
-
-Should show: `Memory: project-name | Repo: Clean | Path: {localPath}/project-name`
-
-List files:
-
-```
-memory_list()
-```
-
-Should show: `core/user/identity.md`, `core/user/prefer.md`
-
-## Project Structure
-
-**Base path**: Configured via `settings["pi-memory-md"].localPath` (default: `~/.pi/memory-md`)
-
-Each project gets its own folder in the repository:
+## Memory Repository Structure
 
 ```
 {localPath}/
-├── project-a/
+├── global/                    # (if globalMemory config block exists)
 │   ├── core/
-│   │   ├── user/
-│   │   │   ├── identity.md
-│   │   │   └── prefer.md
-│   │   └── project/
+│   │   ├── user/              # User memory files (identity.md, prefer.md)
+│   │   └── project/           # Project memory files
 │   └── reference/
-├── project-b/
-│   └── ...
-└── project-c/
-    └── ...
+└── {project-name}/
+    ├── core/
+    │   ├── user/              # User memory files (identity.md, prefer.md)
+    │   └── project/           # Project memory files
+    └── reference/
 ```
 
-Project name is derived from:
-- Git repository name (if in a git repo)
-- Or current directory name
-
-## First-Time Setup Script
-
-Automate setup with this script:
-
-```bash
-#!/bin/bash
-# setup-memory-md.sh
-
-REPO_URL="git@github.com:username/memory-repo.git"
-SETTINGS_FILE="$HOME/.pi/agent/settings.json"
-
-# Backup existing settings
-cp "$SETTINGS_FILE" "$SETTINGS_FILE.bak"
-
-# Add pi-memory-md configuration
-node -e "
-const fs = require('fs');
-const path = require('path');
-const settingsPath = '$SETTINGS_FILE';
-const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-settings['pi-memory-md'] = {
-  enabled: true,
-  repoUrl: '$REPO_URL',
-  localPath: path.join(require('os').homedir(), '.pi', 'memory-md'),
-  hooks: {
-    sessionStart: ["pull"],
-    sessionEnd: []
-  }
-};
-fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-"
-
-echo "Settings configured. Now run: memory_init()"
-```
-
-## Reinitializing
-
-To reset everything:
+## Workflow Guide
 
 ```
-memory_init(force=true)
+START
+  │
+  ▼
+Run scripts/memory-init.sh
+  │
+  ▼
+Clone/sync git repository
+  │
+  ▼
+Create directories (core/user, core/project, reference)
+  │
+  ▼
+Check: globalMemory config exists?
+  │
+  ├─ NO ──► Skip to templates
+  │
+  └─ YES
+      │
+      ▼
+  Ask: Create global/core/user templates?
+      │
+  ├─ NO ──► Skip
+  │
+  └─ YES
+      │
+      ▼
+  Copy identity/prefer to global/core/user/
+      │
+      ▼
+Ask: Which templates for project memory?
+  │
+  ├─ None ──► Skip templates
+  │
+  └─ Select templates
+      │
+      ▼
+  Copy selected templates
+      ▼
+Ask: Import preferences from AGENTS.md?
+  │
+  ├─ NO ──► Skip to verify
+  │
+  └─ YES
+      │
+      ▼
+  Read AGENTS.md and extract preferences
+      │
+      ▼
+  Ask: Confirm import to prefer.md?
+      │
+  ├─ NO ──► Ask for additional preferences
+  │
+  └─ YES
+      │
+      ▼
+  Update core/user/prefer.md
+      │
+      ▼
+  Ask: Additional preferences?
+      │
+      ▼
+  Verify with /memory-status
+      │
+      ▼
+DONE
 ```
 
-**Warning:** This will re-clone the repository, potentially losing local uncommitted changes.
+## Error Handling
 
-## Troubleshooting
+| Error | Solution |
+|-------|----------|
+| `settings not found` | Configure `pi-memory-md` in settings file |
+| `repoUrl not configured` | Add `repoUrl` to settings |
+| `Permission denied` | Check SSH keys: `ssh -T git@github.com` |
+| `Directory exists but not git` | Remove directory manually and retry |
+| `Connection timeout` | Check network, try again |
 
-### Clone Failed
+## Templates
 
-**Error:** `Clone failed: Permission denied`
+Copy these templates to start:
 
-**Solution:**
-1. Verify SSH keys are configured: `ssh -T git@github.com`
-2. Check repo URL is correct in settings
-3. Ensure repo exists and is accessible
+- [templates/identity-template.md](templates/identity-template.md) — User identity template
+- [templates/prefer-template.md](templates/prefer-template.md) — User preferences template
 
-### Settings Not Found
+## Scripts
 
-**Error:** `Git repository URL not configured in settings["pi-memory-md"].repoUrl`
-
-**Solution:**
-1. Edit settings file (global or project)
-2. Add `pi-memory-md` section (see Step 3)
-3. Run `/reload` in pi
-
-### Directory Already Exists
-
-**Error:** `Directory exists but is not a git repo`
-
-**Solution:**
-1. Remove existing directory: `rm -rf {localPath}` (use your configured path)
-2. Run `memory_init()` again
-
-### No Write Permission
-
-**Error:** `EACCES: permission denied`
-
-**Solution:**
-1. Check directory permissions: `ls -la {localPath}/..` (use your configured path)
-2. Fix ownership: `sudo chown -R $USER:$USER {localPath}` (use your configured path)
-
-## Verification Checklist
-
-After setup, verify:
-
-- [ ] Package installed: `pi install npm:pi-memory-md`
-- [ ] Settings configured in settings file
-- [ ] Git repository exists and is accessible
-- [ ] Repository cloned to configured `localPath`
-- [ ] Directory structure created
-- [ ] `/memory-status` shows correct info
-- [ ] `memory_list()` returns files
-- [ ] `prefer.md` populated (either from AGENTS.md or default template)
-
-## Next Steps
-
-After initialization:
-
-1. **Import preferences** - Agent will prompt to extract from AGENTS.md
-2. Edit your identity: `read(path="core/user/identity.md")` then `memory_write(...)` to update
-3. Review preferences: `read(path="core/user/prefer.md")`
-4. Add project context: `memory_write(path="core/project/overview.md", ...)`
-5. Learn more: See `memory-management` skill
+- [scripts/memory-init.sh](scripts/memory-init.sh) — Initialize memory repository (clone repo, create directories)
 
 ## Related Skills
 
-- `memory-management` - Creating and managing memory files
+- `memory-management` - Create and manage memory files
 - `memory-sync` - Git synchronization
-- `memory-search` - Finding information
+- `memory-search` - Find information in memory

@@ -30,7 +30,7 @@ pi install git:github.com/VandeeFeng/pi-memory-md
 }
 
 # 4. Start a new pi session
-# type /memory-init slash command to initialize the memory files
+# type /skill:memory-init slash command to initialize the memory files
 ```
 
 > **Security recommendation**
@@ -63,7 +63,7 @@ You can also use these slash commands directly in pi:
 
 | Command | Description |
 |---------|-------------|
-| `/memory-init` | Initialize memory repository (clone repo, create directory structure, generate default files) |
+| `/skill:memory-init` | Initialize memory repository (clone repo, create directory structure, generate default files) |
 | `/memory-status` | Show memory repository status (project name, git status, path) |
 | `/memory-refresh` | Refresh memory context from files (rebuild cache and deliver into current session) |
 | `/memory-check` | Check memory folder structure (display directory tree) |
@@ -76,7 +76,6 @@ The LLM can use these tools to interact with memory:
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `memory_init` | `{force?: boolean}` | Initialize or reinitialize repository |
 | `memory_sync` | `{action: "pull" / "push" / "status"}` | Git operations |
 | `memory_write` | `{path, content, description, tags?}` | Create/update memory file |
 | `memory_list` | `{directory?: string}` | List all memory files |
@@ -117,8 +116,16 @@ Markdown content...
 ```json
 {
   "pi-memory-md": {
+    "globalMemory":{
+      // Shared memory folder under localPath (e.g., "global" → {localPath}/global)
+      // If config block exists, enabled by default unless explicitly set to false
+      // "enabled": false,
+      "directory": "global"
+    },
     // "enabled": false,
     "repoUrl": "git@github.com:username/repo.git", // Or HTTPS format
+    // Root dir for all memory (cloned from repo) `~/.pi/memory-md` as default
+    "localPath": "~/.pi/memory-md",
     // `injection` is still accepted as a legacy alias for `delivery`.
     "delivery": "message-append",
     "hooks": {
@@ -132,15 +139,15 @@ Markdown content...
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `enabled` | `true` | Enable extension |
+| `globalMemory.directory` | `"global"` | Shared memory folder name (relative to `localPath`) |
 | `repoUrl` | Required | Git repository URL |
-| `localPath` | `~/.pi/memory-md` | Local clone path |
+| `localPath` | `~/.pi/memory-md` | Local memory clone path |
 | `delivery` | `"message-append"` | Memory delivery mode: `"message-append"`, `"system-prompt"` |
 | `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts |
 | `hooks.sessionEnd` | `[]` | Actions to run when a session ends |
 | `tape.enabled` | `false` | Enable tape mode for dynamic context selection |
 
 When settings change, run `/reload` to apply them.
-
 
 ### Hooks
 

@@ -249,7 +249,7 @@ test("memory_list includes shared global files when global memory is enabled", a
     localPath: path.join(tempDir, "memory-root"),
     globalMemory: {
       enabled: true,
-      directoryName: "global",
+      directory: "global",
     },
   };
   const globalMemoryDir = path.join(settings.localPath, "global");

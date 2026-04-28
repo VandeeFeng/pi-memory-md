@@ -27,7 +27,7 @@ export type MemoryDeliveryMode = "system-prompt" | "message-append";
 
 export interface GlobalMemorySettings {
   enabled?: boolean;
-  directoryName?: string;
+  directory?: string;
 }
 
 export interface MemoryMdSettings {

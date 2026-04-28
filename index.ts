@@ -9,7 +9,7 @@ import {
   formatMemoryContext,
   getMemoryCoreDir,
   getMemoryDir,
-  initializeMemoryDirectory,
+  // initializeMemoryDirectory, // TODO: unused after memory-init moved to SKILL
   isMemoryInitialized,
   loadSettings,
 } from "./memory-core.js";
@@ -405,31 +405,32 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
     },
   });
 
-  pi.registerCommand("memory-init", {
-    description: "Initialize memory repository",
-    handler: async (_args, ctx) => {
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const alreadyInitialized = isMemoryInitialized(memoryDir);
-      const result = await syncRepository(pi, settings);
+  // TODO: memory-init moved to SKILL
+  // pi.registerCommand("memory-init", {
+  //   description: "Initialize memory repository",
+  //   handler: async (_args, ctx) => {
+  //     const memoryDir = getMemoryDir(settings, ctx.cwd);
+  //     const alreadyInitialized = isMemoryInitialized(memoryDir);
+  //     const result = await syncRepository(pi, settings);
 
-      if (!result.success) {
-        ctx.ui.notify(`Initialization failed: ${result.message}`, "error");
-        return;
-      }
+  //     if (!result.success) {
+  //       ctx.ui.notify(`Initialization failed: ${result.message}`, "error");
+  //       return;
+  //     }
 
-      initializeMemoryDirectory(memoryDir);
+  //     initializeMemoryDirectory(memoryDir);
 
-      if (alreadyInitialized) {
-        ctx.ui.notify(`Memory already exists: ${result.message}`, "info");
-        return;
-      }
+  //     if (alreadyInitialized) {
+  //       ctx.ui.notify(`Memory already exists: ${result.message}`, "info");
+  //       return;
+  //     }
 
-      ctx.ui.notify(
-        `Memory initialized: ${result.message}\n\nCreated:\n  - core/user\n  - core/project\n  - reference`,
-        "info",
-      );
-    },
-  });
+  //     ctx.ui.notify(
+  //       `Memory initialized: ${result.message}\n\nCreated:\n  - core/user\n  - core/project\n  - reference`,
+  //       "info",
+  //     );
+  //   },
+  // });
 
   pi.registerCommand("memory-refresh", {
     description: "Refresh memory context from files",

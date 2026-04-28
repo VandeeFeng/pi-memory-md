@@ -4,7 +4,18 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ## [Unreleased]
 
+### Features
+
+- **globalMemory: shared memory directory across projects**: Configures a shared memory root (`{localPath}/global/`) accessible from any project.
+  When enabled, `global/core/user/` (identity.md, prefer.md) and `global/core/project/` files are included in memory context alongside project-specific memory.
+  The `globalMemory` config block can include `directory` to customize the folder name (default: `global`).
+  Previously required explicit `enabled: true`. Now enabled by default when config block exists — set `enabled: false` to disable.
+
 ### Changes
+
+- **Replaced `/memory-init` command and built-in tool with `memory-init` skill**: Provides greater flexibility and user-driven configuration instead of hardcoded logic.
+  The skill delegates to `scripts/memory-init.sh` and prompts users to select templates and import preferences from AGENTS.md.
+  The built-in `memory-init` tool had too many constraints. I abstracted and consolidated this tool into SKILL, preserving its original functionality while adding more flexibility and user control
 
 - **Renamed `kind` to `type` for TapeAnchor**: `TapeAnchor.kind` → `TapeAnchor.type`, `TapeAnchorKind` → `TapeAnchorType`, `anchorKind` → `anchorType`.
   Before: `{"id":"...","kind":"handoff",...}` → After: `{"id":"...","type":"handoff",...}`
@@ -14,6 +25,10 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 - **Unified AnchorStore query API**: Added `query(options: QueryOptions)` method that unifies id/name/sessionId/sessionEntryId filtering with `returnMode` ('first', 'last', 'all').
   Removed old `findById`, `findByName`, `findByNameInSession`, `findAllByName`, `findBySession`, `findBySessionEntryId`, `getLastAnchor` methods. Use `query()` instead.
   `search()` remains unchanged for complex queries (text search, time ranges, meta filtering).
+
+### Fixed
+
+- **Support `PI_CODING_AGENT_DIR` environment variable**: All modules now respect this env var for global settings path, defaulting to `~/.pi/agent` if unset.
 
 ## [0.1.32] - 2026-04-27
 

@@ -9,7 +9,7 @@ import {
   getGlobalMemoryDir,
   getMemoryCoreDir,
   getMemoryDir,
-  initializeMemoryDirectory,
+  // initializeMemoryDirectory, // TODO: unused after memory-init moved to SKILL
   isMemoryInitialized,
   listMemoryFilesAsync,
   readMemoryFileAsync,
@@ -546,72 +546,72 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
   });
 }
 
-export function registerMemoryInit(pi: ExtensionAPI, settings: MemoryMdSettings): void {
-  pi.registerTool({
-    name: "memory_init",
-    label: "Memory Init",
-    description: "Initialize memory repository (clone or create initial structure)",
-    parameters: Type.Object({
-      force: Type.Optional(Type.Boolean({ description: "Reinitialize even if already set up" })),
-    }),
+// export function registerMemoryInit(pi: ExtensionAPI, settings: MemoryMdSettings): void {
+//   pi.registerTool({
+//     name: "memory_init",
+//     label: "Memory Init",
+//     description: "Initialize memory repository (clone or create initial structure)",
+//     parameters: Type.Object({
+//       force: Type.Optional(Type.Boolean({ description: "Reinitialize even if already set up" })),
+//     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { force = false } = params as { force?: boolean };
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const alreadyInitialized = isMemoryInitialized(memoryDir);
+//     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+//       const { force = false } = params as { force?: boolean };
+//       const memoryDir = getMemoryDir(settings, ctx.cwd);
+//       const alreadyInitialized = isMemoryInitialized(memoryDir);
 
-      if (alreadyInitialized && !force) {
-        return {
-          content: [{ type: "text", text: "Memory repository already initialized. Use force: true to reinitialize." }],
-          details: { initialized: true },
-        };
-      }
+//       if (alreadyInitialized && !force) {
+//         return {
+//           content: [{ type: "text", text: "Memory repository already initialized. Use force: true to reinitialize." }],
+//           details: { initialized: true },
+//         };
+//       }
 
-      const result = await syncRepository(pi, settings);
-      if (!result.success) {
-        return {
-          content: [{ type: "text", text: `Initialization failed: ${result.message}` }],
-          details: { success: false },
-        };
-      }
+//       const result = await syncRepository(pi, settings);
+//       if (!result.success) {
+//         return {
+//           content: [{ type: "text", text: `Initialization failed: ${result.message}` }],
+//           details: { success: false },
+//         };
+//       }
 
-      const globalMemoryDir = getGlobalMemoryDir(settings);
-      if (globalMemoryDir) {
-        initializeMemoryDirectory(globalMemoryDir);
-      }
-      initializeMemoryDirectory(memoryDir);
+//       const globalMemoryDir = getGlobalMemoryDir(settings);
+//       if (globalMemoryDir) {
+//         initializeMemoryDirectory(globalMemoryDir);
+//       }
+//       initializeMemoryDirectory(memoryDir);
 
-      const createdDirs = [
-        ...(globalMemoryDir
-          ? [`global: ${globalMemoryDir}`, "global/core/user", "global/core/project", "global/reference"]
-          : []),
-        `project: ${memoryDir}`,
-        "project/core/user",
-        "project/core/project",
-        "project/reference",
-      ];
+//       const createdDirs = [
+//         ...(globalMemoryDir
+//           ? [`global: ${globalMemoryDir}`, "global/core/user", "global/core/project", "global/reference"]
+//           : []),
+//         `project: ${memoryDir}`,
+//         "project/core/user",
+//         "project/core/project",
+//         "project/reference",
+//       ];
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Memory repository initialized:\n${result.message}\n\nCreated directory structure:\n${createdDirs.map((d) => `  - ${d}`).join("\n")}`,
-          },
-        ],
-        details: { success: true, globalMemoryDir, projectMemoryDir: memoryDir },
-      };
-    },
+//       return {
+//         content: [
+//           {
+//             type: "text",
+//             text: `Memory repository initialized:\n${result.message}\n\nCreated directory structure:\n${createdDirs.map((d) => `  - ${d}`).join("\n")}`,
+//           },
+//         ],
+//         details: { success: true, globalMemoryDir, projectMemoryDir: memoryDir },
+//       };
+//     },
 
-    renderCall: (args, theme) => new Text(buildToolCallText("memory_init", args, theme), 0, 0),
-    renderResult: (result, options, theme) => {
-      if (options.isPartial) return renderText(theme.fg("warning", "Initializing..."));
-      const details = result.details as { initialized?: boolean; success?: boolean };
-      if (details?.initialized) return renderText(theme.fg("muted", "Already initialized"));
-      const summary = details?.success ? "Initialized" : "Initialization failed";
-      return renderCollapsed(summary, getResultText(result), options, theme);
-    },
-  });
-}
+//     renderCall: (args, theme) => new Text(buildToolCallText("memory_init", args, theme), 0, 0),
+//     renderResult: (result, options, theme) => {
+//       if (options.isPartial) return renderText(theme.fg("warning", "Initializing..."));
+//       const details = result.details as { initialized?: boolean; success?: boolean };
+//       if (details?.initialized) return renderText(theme.fg("muted", "Already initialized"));
+//       const summary = details?.success ? "Initialized" : "Initialization failed";
+//       return renderCollapsed(summary, getResultText(result), options, theme);
+//     },
+//   });
+// }
 
 export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   pi.registerTool({
@@ -707,6 +707,6 @@ export function registerAllMemoryTools(pi: ExtensionAPI, settings: MemoryMdSetti
   registerMemoryWrite(pi, settings);
   registerMemoryList(pi, settings);
   registerMemorySearch(pi, settings);
-  registerMemoryInit(pi, settings);
+  // registerMemoryInit(pi, settings); // TODO: moved to SKILL
   registerMemoryCheck(pi, settings);
 }

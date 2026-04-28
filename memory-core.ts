@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
   hooks: DEFAULT_HOOKS,
   globalMemory: {
     enabled: false,
-    directoryName: DEFAULT_GLOBAL_MEMORY_DIRNAME,
+    directory: DEFAULT_GLOBAL_MEMORY_DIRNAME,
   },
   delivery: "message-append",
   /** @deprecated Use `delivery` instead. */
@@ -141,12 +141,16 @@ function sanitizeProjectSettings(
 }
 
 function normalizeGlobalMemorySettings(rawSettings: MemoryMdSettings): MemoryMdSettings["globalMemory"] {
-  const directoryName = rawSettings.globalMemory?.directoryName?.trim() || DEFAULT_GLOBAL_MEMORY_DIRNAME;
+  const directoryName = rawSettings.globalMemory?.directory?.trim() || DEFAULT_GLOBAL_MEMORY_DIRNAME;
   const safeDirectoryName = path.basename(directoryName).replace(/^\.+$/, DEFAULT_GLOBAL_MEMORY_DIRNAME);
 
+  // If globalMemory config block exists, default to enabled unless explicitly disabled
+  const hasGlobalMemoryConfig = rawSettings.globalMemory !== undefined;
+  const enabled = hasGlobalMemoryConfig && rawSettings.globalMemory?.enabled !== false;
+
   return {
-    enabled: rawSettings.globalMemory?.enabled === true,
-    directoryName: safeDirectoryName || DEFAULT_GLOBAL_MEMORY_DIRNAME,
+    enabled,
+    directory: safeDirectoryName || DEFAULT_GLOBAL_MEMORY_DIRNAME,
   };
 }
 
@@ -203,7 +207,8 @@ function normalizeSettings(
 }
 
 export function loadSettings(cwd = process.cwd()): MemoryMdSettings {
-  const globalSettingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+  const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+  const globalSettingsPath = path.join(agentDir, "settings.json");
   const projectSettingsPath = path.join(cwd, ".pi", "settings.json");
   const globalSettings = readSettingsFile(globalSettingsPath);
   const projectSettings = readSettingsFile(projectSettingsPath);
@@ -230,7 +235,7 @@ export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
 export function getGlobalMemoryDir(settings: MemoryMdSettings): string | null {
   if (settings.globalMemory?.enabled !== true) return null;
   const localPath = settings.localPath || DEFAULT_LOCAL_PATH;
-  return path.join(localPath, settings.globalMemory.directoryName || DEFAULT_GLOBAL_MEMORY_DIRNAME);
+  return path.join(localPath, settings.globalMemory.directory || DEFAULT_GLOBAL_MEMORY_DIRNAME);
 }
 
 export function getMemoryCoreDir(memoryDir: string): string {

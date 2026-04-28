@@ -18,11 +18,11 @@ description: Core memory operations guide for pi-memory-md - create, read, updat
 {localPath}/
 └── {project-name}/                  # Project memory root
     ├── core/                        # Auto-delivered into context (selection may be tape-aware)
-    │   ├── user/                    # 【FIXED】User information
+    │   ├── user/                    # User information
     │   │   ├── identity.md          # Who the user is
     │   │   └── prefer.md            # User habits and code style preferences
     │   │
-    │   └── project/                 # 【FIXED】Project information (pre-created)
+    │   └── project/                 # Project information (pre-created)
     │       ├── overview.md          # Project overview
     │       ├── architecture.md      # Architecture and design
     │       ├── conventions.md       # Code conventions
