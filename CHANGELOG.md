@@ -2,15 +2,32 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
-## [Unreleased]
+## [0.1.33] - 2026-04-28
 
- Special Thanks to [@nqh-packages](https://github.com/VandeeFeng/pi-memory-md/pull/7) for the globalMemory feature contribution!
+I'm really happy to have such helpful contributions — everyone's support has helped uncover and fix many issues I couldn't have found on my own.
+
+And I've learned a lot!
+
+Special thanks to:
+- [@nqh-packages](https://github.com/nqh-packages)'s PR [#7](https://github.com/VandeeFeng/pi-memory-md/pull/7) for the globalMemory feature contribution!
+- [@musaddiq-dev](https://github.com/musaddiq-dev)'s PR [#8](https://github.com/VandeeFeng/pi-memory-md/pull/8) for husky config to avoid `pi update` failure.
+
+I think the `memory-init` tool is a bad design, so it's gone to jail now!
+
+The built-in `memory-init` tool had too many constraints, so I abstracted and consolidated this tool into SKILL.
+
+This skill provides guides through creating the memory folder structure and asks whether to create specific subfolders, giving users more autonomy.
+
+This also better complements the design of globalMemory.
+
+The experience of this part is the same as before, even smoother.
 
 ### Features
 
-- **globalMemory: shared memory directory across projects**: Configures a shared memory root (`{localPath}/global/`) accessible from any project.
+- **globalMemory: shared memory directory across projects**: Configures a shared memory folder (default: `global/`) under `localPath` accessible from any project.
   When enabled, `global/core/user/` (identity.md, prefer.md) and `global/core/project/` files are included in memory context alongside project-specific memory.
-  The `globalMemory` config block can include `directory` to customize the folder name (default: `global`).
+  Configure as a string value in `memoryDir.globalMemory` (e.g., `"globalMemory": "global"`).
+  When configured, global memory files are also included in the delivered memory hidden message.
 
 ### Changes
 
@@ -23,6 +40,7 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
   }
   ```
   Previously these were separate top-level fields. They still work, but `memoryDir` is the preferred structure.
+
 - **Replaced `/memory-init` command and built-in tool with `memory-init` skill**: Provides greater flexibility and user-driven configuration instead of hardcoded logic.
   The skill delegates to `scripts/memory-init.sh` and prompts users to select templates and import preferences from AGENTS.md.
   The built-in `memory-init` tool had too many constraints. I abstracted and consolidated this tool into SKILL, preserving its original functionality while adding more flexibility and user control

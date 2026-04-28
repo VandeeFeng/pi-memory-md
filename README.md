@@ -24,8 +24,11 @@ pi install git:github.com/VandeeFeng/pi-memory-md
 # Add to ~/.pi/agent/settings.json:
 {
   "pi-memory-md": {
-    "repoUrl": "git@github.com:username/repo.git", // or HTTPS format
-    "localPath": "~/.pi/memory-md"
+    "memoryDir": {
+      "repoUrl": "git@github.com:username/repo.git", // Or HTTPS format
+      "localPath": "~/.pi/memory-md",
+      "globalMemory": "global" // optional, global as default
+    }
   }
 }
 
@@ -39,7 +42,7 @@ pi install git:github.com/VandeeFeng/pi-memory-md
 >
 > If project settings could override these options, a repository could redirect your memory to another local path, point sync at a different remote repo, or enable automatic pull/push behavior you did not intend.
 >
-> For this reason, project-level `.pi/settings.json` does not override these `pi-memory-md` options: `repoUrl`, `localPath`, sync hooks, and `tape.tapePath`.
+> For this reason, project-level `.pi/settings.json` does not override these `pi-memory-md` options: `repoUrl`, `localPath`, `memoryDir`, sync hooks, and `tape.tapePath`.
 
 ## How It Works
 
