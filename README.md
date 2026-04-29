@@ -127,8 +127,10 @@ Markdown content...
     // Root dir for all memory (cloned from repo) `~/.pi/memory-md` as default
     "localPath": "~/.pi/memory-md",
 
-    // Shared memory folder under localPath (e.g., "global" → {localPath}/global)
+    // Shared memory folder name under localPath.
     // Only enabled when explicitly configured
+    // "global" -> {localPath}/global, "foo/bar" -> {localPath}/bar.
+    // "" or omitted -> disabled, "   " -> {localPath}/global, ".." -> {localPath}/global.
     "globalMemory": "global"
     },
 

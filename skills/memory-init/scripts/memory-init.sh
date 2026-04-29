@@ -10,6 +10,7 @@ set -e
 
 log() { echo "[memory-init] $1"; }
 error() { echo "[memory-init] Error: $1" >&2; }
+warn() { echo "[memory-init] Warning: $1" >&2; }
 
 find_settings() {
   local project_settings="$(pwd)/.pi/settings.json"
@@ -29,6 +30,22 @@ get_project_name() {
     git rev-parse --show-toplevel | xargs basename
   else
     basename "$(pwd)"
+  fi
+}
+
+get_safe_global_dirname() {
+  local directory_name="$1"
+  local trimmed_name
+  local safe_directory_name
+
+  trimmed_name=$(printf '%s' "$directory_name" | xargs)
+  safe_directory_name=$(basename "$trimmed_name")
+  safe_directory_name=$(printf '%s' "$safe_directory_name" | sed 's/^\.\+$/global/')
+
+  if [ -z "$safe_directory_name" ]; then
+    echo "global"
+  else
+    echo "$safe_directory_name"
   fi
 }
 
@@ -55,6 +72,7 @@ main() {
     LOCAL_PATH=$(jq -r '.["pi-memory-md"].memoryDir.localPath // .["pi-memory-md"].localPath // empty' "$SETTINGS_FILE")
     GLOBAL_MEMORY=$(jq -r '.["pi-memory-md"].memoryDir.globalMemory // .["pi-memory-md"].globalMemory // empty' "$SETTINGS_FILE")
   else
+    warn "jq is not installed. Falling back to grep/sed parsing for settings. Install jq for more reliable JSON parsing."
     REPO_URL=$(grep -o '"repoUrl"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')
     LOCAL_PATH=$(grep -o '"localPath"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')
     GLOBAL_MEMORY=$(grep -o '"globalMemory"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')
@@ -72,7 +90,8 @@ main() {
   PROJECT_NAME=$(get_project_name)
   PROJECT_DIR="$LOCAL_PATH/$PROJECT_NAME"
   GLOBAL_ENABLED=$([ -n "$GLOBAL_MEMORY" ] && echo "true" || echo "false")
-  GLOBAL_DIR="$LOCAL_PATH/$GLOBAL_MEMORY"
+  SAFE_GLOBAL_MEMORY=$(get_safe_global_dirname "$GLOBAL_MEMORY")
+  GLOBAL_DIR="$LOCAL_PATH/$SAFE_GLOBAL_MEMORY"
   
   log "Project: $PROJECT_DIR"
   [ "$GLOBAL_ENABLED" = "true" ] && log "Global: $GLOBAL_DIR"

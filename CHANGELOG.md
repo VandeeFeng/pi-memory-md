@@ -2,12 +2,20 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
-## [Unreleased]
+## [0.1.34]
+
+God damn, the LLM makes so many logic errors! Even the bash script!
+
+If it isn’t stated very explicitly in the prompt, the LLM’s logic gets confused easily once the context grows a little longer. I’ve noticed that recent LLMs seem noticeably dumber lately—maybe I’m just not paying enough.
+
+This is an emergency patch release that had to be shipped.
 
 ### Changes
 
 - **`memory-init` no longer forces `reference/` directory creation**: initialization now only ensures `core/project` and `core/task`, while `prefer.md` lives directly under `core/`, removing the fixed `reference/` folder requirement.
   The `identity` folder was originally kept as a reference to Letta's design, but through daily use I found it provided very little value, either to the agent or to myself, so I decided to remove it.
+
+  To be precise: the script now only creates `core/project/` and `core/task/` for the project, plus `{globalMemory}/core/task/` when global memory is enabled. Files such as `core/prefer.md`, `core/task/task.md`, `{globalMemory}/core/prefer.md`, and `{globalMemory}/core/task/task.md` are optional and created only if the user chooses the corresponding templates or imports preferences.
 
 ## [0.1.33] - 2026-04-28
 
