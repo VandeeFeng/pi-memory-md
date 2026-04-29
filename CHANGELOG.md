@@ -2,6 +2,13 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
+## [Unreleased]
+
+### Changes
+
+- **`memory-init` no longer forces `reference/` directory creation**: initialization now only ensures `core/project` and `core/task`, while `prefer.md` lives directly under `core/`, removing the fixed `reference/` folder requirement.
+  The `identity` folder was originally kept as a reference to Letta's design, but through daily use I found it provided very little value, either to the agent or to myself, so I decided to remove it.
+
 ## [0.1.33] - 2026-04-28
 
 I'm really happy to have such helpful contributions — everyone's support has helped uncover and fix many issues I couldn't have found on my own.
@@ -25,7 +32,7 @@ The experience of this part is the same as before, even smoother.
 ### Features
 
 - **globalMemory: shared memory directory across projects**: Configures a shared memory folder (default: `global/`) under `localPath` accessible from any project.
-  When enabled, `global/core/user/` (identity.md, prefer.md) and `global/core/project/` files are included in memory context alongside project-specific memory.
+  When enabled, global files such as `global/core/prefer.md` and `global/core/task/` are included in memory context alongside project-specific memory.
   Configure as a string value in `memoryDir.globalMemory` (e.g., `"globalMemory": "global"`).
   When configured, global memory files are also included in the delivered memory hidden message.
 

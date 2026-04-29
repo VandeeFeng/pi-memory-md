@@ -53,12 +53,11 @@ main() {
     # Check memoryDir first, then fallback to top-level
     REPO_URL=$(jq -r '.["pi-memory-md"].memoryDir.repoUrl // .["pi-memory-md"].repoUrl // empty' "$SETTINGS_FILE")
     LOCAL_PATH=$(jq -r '.["pi-memory-md"].memoryDir.localPath // .["pi-memory-md"].localPath // empty' "$SETTINGS_FILE")
-    GLOBAL_ENABLED=$(jq -r '.["pi-memory-md"].memoryDir.globalMemory // .["pi-memory-md"].globalMemory // empty')
-    GLOBAL_ENABLED=$([ -n "$GLOBAL_ENABLED" ] && echo "true" || echo "false")
+    GLOBAL_MEMORY=$(jq -r '.["pi-memory-md"].memoryDir.globalMemory // .["pi-memory-md"].globalMemory // empty' "$SETTINGS_FILE")
   else
     REPO_URL=$(grep -o '"repoUrl"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')
     LOCAL_PATH=$(grep -o '"localPath"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')
-    GLOBAL_ENABLED=$(grep -q '"globalMemory"' "$SETTINGS_FILE" && echo "true" || echo "false")
+    GLOBAL_MEMORY=$(grep -o '"globalMemory"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')
   fi
   
   LOCAL_PATH="${LOCAL_PATH:-$HOME/.pi/memory-md}"
@@ -72,15 +71,16 @@ main() {
   # 2. Calculate directories
   PROJECT_NAME=$(get_project_name)
   PROJECT_DIR="$LOCAL_PATH/$PROJECT_NAME"
-  GLOBAL_DIR="$LOCAL_PATH/global"
+  GLOBAL_ENABLED=$([ -n "$GLOBAL_MEMORY" ] && echo "true" || echo "false")
+  GLOBAL_DIR="$LOCAL_PATH/$GLOBAL_MEMORY"
   
   log "Project: $PROJECT_DIR"
   [ "$GLOBAL_ENABLED" = "true" ] && log "Global: $GLOBAL_DIR"
   
   # 3. Check if already initialized
-  if [ -d "$PROJECT_DIR/reference" ]; then
+  if [ -d "$PROJECT_DIR/core/project" ] || [ -d "$PROJECT_DIR/core/task" ] || [ -f "$PROJECT_DIR/core/prefer.md" ]; then
     log "Memory already initialized at $PROJECT_DIR"
-    log "Delete reference/ directory to re-initialize"
+    log "Remove the existing core entries manually if you want to re-initialize"
     exit 0
   fi
   
@@ -101,11 +101,10 @@ main() {
   # 5. Create directory structure
   log "Creating directories..."
   mkdir -p "$PROJECT_DIR/core/project"
-  mkdir -p "$PROJECT_DIR/reference"
+  mkdir -p "$PROJECT_DIR/core/task"
   
   if [ "$GLOBAL_ENABLED" = "true" ]; then
-    mkdir -p "$GLOBAL_DIR/core/project"
-    mkdir -p "$GLOBAL_DIR/reference"
+    mkdir -p "$GLOBAL_DIR/core/task"
   fi
   
   log "Memory initialized successfully!"

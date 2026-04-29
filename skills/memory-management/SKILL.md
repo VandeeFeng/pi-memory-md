@@ -8,6 +8,7 @@ description: Core memory operations guide for pi-memory-md - create, read, updat
 - **File-based memory**: Each memory is a `.md` file with YAML frontmatter
 - **Git-backed**: Full version control and cross-device sync
 - **Auto-delivery**: Files in `core/` are automatically delivered into context based on the active delivery mode
+- **Minimal fixed core**: `memory-init` now only guarantees `core/project/` and `core/task/`
 - **Organized by purpose**: Fixed structure for core info, flexible for everything else
 
 ## Directory Structure
@@ -16,57 +17,65 @@ description: Core memory operations guide for pi-memory-md - create, read, updat
 
 ```
 {localPath}/
-└── {project-name}/                  # Project memory root
-    ├── core/                        # Auto-delivered into context (selection may be tape-aware)
-    │   ├── user/                    # User information
-    │   │   ├── identity.md          # Who the user is
-    │   │   └── prefer.md            # User habits and code style preferences
-    │   │
-    │   └── project/                 # Project information (pre-created)
-    │       ├── overview.md          # Project overview
-    │       ├── architecture.md      # Architecture and design
-    │       ├── conventions.md       # Code conventions
-    │       └── commands.md          # Common commands
-    │
-    ├── docs/                        # 【AGENT-CREATED】Reference documentation
-    ├── archive/                     # 【AGENT-CREATED】Historical information
-    ├── research/                    # 【AGENT-CREATED】Research findings
-    └── notes/                       # 【AGENT-CREATED】Standalone notes
+├── {globalMemory}/                # Optional shared memory root when globalMemory is enabled
+│   └── core/
+│       ├── prefer.md              # Optional shared preferences file
+│       └── task/
+│           └── task.md            # Optional shared task template
+└── {project-name}/                # Project memory root
+    ├── core/                      # Auto-delivered into context (selection may be tape-aware)
+    │   ├── prefer.md              # Optional project preferences file
+    │   ├── project/               # Project-specific memory folder (pre-created)
+    │   └── task/
+    │       └── task.md            # Optional project task template
+    ├── docs/                      # Agent-created reference documentation
+    ├── archive/                   # Agent-created historical information
+    ├── research/                  # Agent-created research findings
+    └── notes/                     # Agent-created standalone notes
 ```
 
 **Important:** `core/project/` is a pre-defined folder under `core/`. Do NOT create another `project/` folder at the project root level.
 
 ## Core Design: Fixed vs Flexible
 
-### 【FIXED】core/user/ and core/project/
+### Fixed by `memory-init`
 
-These are **pre-defined** and **auto-delivered** as core context:
+These are the only directories `memory-init` guarantees for a project:
+- `core/project/`
+- `core/task/`
 
-**core/user/** - User information (2 fixed files)
-- `identity.md` - Who the user is (name, role, background)
-- `prefer.md` - User habits and code style preferences
+If `globalMemory` is enabled, it also ensures:
+- `{globalMemory}/core/task/`
 
-**core/project/** - Project information
-- `overview.md` - Project overview
-- `architecture.md` - Architecture and design
-- `conventions.md` - Code conventions
-- `commands.md` - Common commands
-- `changelog.md` - Development history
+### Common optional files
 
-**Why fixed?**
-- Always part of the memory delivery flow, no need to remember to load
-- Core identity that defines every interaction
-- Project context needed for all decisions
+These files are common, but created only if the user chooses templates or imports preferences:
+- `core/prefer.md`
+- `core/task/task.md`
+- `{globalMemory}/core/prefer.md`
+- `{globalMemory}/core/task/task.md`
 
-**Rule:** ONLY `user/` and `project/` exist under `core/`. No other folders.
+### Flexible root-level organization
+
+Everything outside `core/` is flexible. Common examples:
+- `docs/`
+- `archive/`
+- `research/`
+- `notes/`
+- any other project-specific folders
 
 ## Decision Tree
 
 ### Does this need to be in EVERY conversation?
 
 **Yes** → Place under `core/`
-- User-related → `core/user/`
-- Project-related → `core/project/`
+- Project preferences → `core/prefer.md`
+- Project tasks/plans → `core/task/`
+- General project knowledge → `core/project/`
+
+**Maybe shared across ALL projects?** → Place under `{globalMemory}/core/` when `globalMemory` is enabled
+- Shared preferences → `{globalMemory}/core/prefer.md`
+- Shared tasks/plans → `{globalMemory}/core/task/`
 
 **No** → Place at project root level (same level as `core/`)
 - Reference docs → `docs/`
@@ -75,7 +84,7 @@ These are **pre-defined** and **auto-delivered** as core context:
 - Notes → `notes/`
 - Other? → Create appropriate folder
 
-**Important:** `core/project/` is a FIXED subdirectory under `core/`. Always use `core/project/` for project-specific memory files, NEVER create a `project/` folder at the root level.
+**Important:** `core/project/` is a fixed subdirectory under `core/`. Always use `core/project/` for project-specific memory files, never create a `project/` folder at the root level.
 
 ## YAML Frontmatter Schema
 
@@ -100,25 +109,25 @@ updated: "2026-02-14"
 
 ## Examples
 
-### Example 1: User Identity (core/user/identity.md)
+### Example 1: Project Preferences (core/prefer.md)
 
 ```bash
 memory_write(
-  path="core/user/identity.md",
-  description="User identity and background",
-  tags=["user", "identity"],
-  content="# User Identity\n\nName: Vandee\nRole: Developer..."
+  path="core/prefer.md",
+  description="Project preferences and working style",
+  tags=["project", "preferences"],
+  content="# Project Preferences\n\n## Communication Style\n- Be concise\n- Show concrete code changes\n\n## Code Style\n- Prefer simple solutions\n- Keep files focused"
 )
 ```
 
-### Example 2: User Preferences (core/user/prefer.md)
+### Example 2: Project Task Memory (core/task/task.md)
 
 ```bash
 memory_write(
-  path="core/user/prefer.md",
-  description="User habits and code style preferences",
-  tags=["user", "preferences"],
-  content="# User Preferences\n\n## Communication Style\n- Be concise\n- Show code examples\n\n## Code Style\n- 2 space indentation\n- Prefer const over var\n- Functional programming"
+  path="core/task/task.md",
+  description="Current project task tracking",
+  tags=["task", "planning"],
+  content="# Current Tasks\n\n- Fix sync issue\n- Update docs"
 )
 ```
 
@@ -133,7 +142,7 @@ memory_write(
 )
 ```
 
-### Example 3: Reference Docs (root level)
+### Example 4: Reference Docs (root level)
 
 ```bash
 memory_write(
@@ -144,7 +153,7 @@ memory_write(
 )
 ```
 
-### Example 4: Archived Decision (root level)
+### Example 5: Archived Decision (root level)
 
 ```bash
 memory_write(
@@ -153,14 +162,6 @@ memory_write(
   tags=["archive", "decision"],
   content="# Auth Redesign\n\n..."
 )
-```
-
-## Reading Memory Files
-
-Use the native `read` tool:
-
-```bash
-read(path="core/user/identity.md")
 ```
 
 ## Listing Memory Files
@@ -184,8 +185,8 @@ To update a file, use `memory_write` with the same path:
 
 ```bash
 memory_write(
-  path="core/user/identity.md",
-  description="Updated user identity",
+  path="core/prefer.md",
+  description="Updated project preferences",
   content="New content..."
 )
 ```
@@ -194,13 +195,16 @@ The extension preserves existing `created` date and updates `updated` automatica
 
 ## Folder Creation Guidelines
 
-### core/ directory - FIXED structure
+### core/ directory - partially fixed structure
 
-**Only two folders exist under `core/`:**
-- `user/` - User identity and preferences
+**Directories guaranteed by `memory-init`:**
 - `project/` - Project-specific information
+- `task/` - Task and planning files
 
-**Do NOT create any other folders under `core/`.**
+**Common optional file at `core/` root:**
+- `prefer.md` - Project preferences
+
+Avoid inventing extra `core/` subfolders unless there is a clear reason and the structure is intentionally being extended.
 
 ### Root level (same level as core/) - COMPLETE freedom
 
@@ -220,18 +224,18 @@ The extension preserves existing `created` date and updates `updated` automatica
 ## Best Practices
 
 ### DO:
-- Use `core/user/identity.md` for user identity
-- Use `core/user/prefer.md` for user habits and code style
-- Use `core/project/` for project-specific information
+- Use `core/prefer.md` for project-level preferences
+- Use `core/task/` for task and planning memory
+- Use `core/project/` for project-specific knowledge meant for regular delivery
+- Use `{globalMemory}/core/` only for truly cross-project memory
 - Use root level for reference, historical, and research content
 - Keep files focused on a single topic
 - Organize root level folders by content type
 
 ### DON'T:
-- Create folders under `core/` other than `user/` and `project/`
-- Create other files under `core/user/` (only `identity.md` and `prefer.md`)
 - Create a `project/` folder at root level (use `core/project/` instead)
-- Put reference docs in `core/` (use root `docs/`)
+- Assume `core/prefer.md` or task files already exist unless templates were created
+- Put reference docs in `core/` when they are not part of recurring context
 - Create giant files (split into focused topics)
 - Mix unrelated content in same file
 
@@ -269,13 +273,6 @@ Use `memory-management` when:
 - Creating reusable patterns and solutions
 - Documenting troubleshooting steps
 
-## Related Skills
-
-- `memory-sync` - Git synchronization operations
-- `memory-init` - Initial repository setup
-- `memory-search` - Finding specific information
-- `memory-check` - Validate folder structure before syncing
-
 ## Before Syncing
 
 **IMPORTANT**: Before running `memory_sync(action="push")`, ALWAYS run `memory_check()` first to verify the folder structure is correct:
@@ -288,4 +285,10 @@ memory_check()
 memory_sync(action="push")
 ```
 
-This prevents accidentally pushing files in wrong locations (e.g., root `project/` instead of `core/project/`).
+## Related Skills
+
+- `memory-sync` - Git synchronization operations
+- `memory-init` - Initial repository setup
+- `memory-search` - Finding specific information
+- `memory-check` - Validate folder structure before syncing
+

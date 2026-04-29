@@ -105,13 +105,12 @@ Markdown content...
 ```
 ~/.pi/memory-md/
 └── project-name/
-    ├── core/
-    │   ├── user/           # Your preferences
-    │   │   ├── identity.md
-    │   │   └── prefer.md
-    │   └── project/        # Project context
-    │       └── tech-stack.md
-    └── reference/          # On-demand docs
+    └── core/
+        ├── prefer.md       # Your preferences
+        ├── project/        # Project context
+        │   └── tech-stack.md
+        └── task/           # Tasks and plans
+            └── task.md
 ```
 
 ## Configuration
@@ -237,7 +236,7 @@ You can also explicitly request operations:
 ```
 You: List all memory files for this project.
 You: Search memory for "typescript" preferences.
-You: Read core/user/identity.md
+You: Read core/prefer.md
 You: Sync my changes to the repository.
 ```
 
@@ -303,10 +302,10 @@ Paths below are relative to that directory.
 
 Available memory files (use read to view full content):
 
-- core/user/identity.md [high priority]
+- core/prefer.md [high priority]
   recent focus: read 12-28
-  Description: User preferences and identity
-  Tags: user, profile
+  Description: User preferences
+  Tags: user, preferences
 
 ---
 
@@ -357,7 +356,7 @@ Recently active project files (full paths from read/edit/write tool usage):
         // "alwaysInclude" is deprecated
         // Files or directories to always include in context (optional, defaults to empty)
         "whitelist": [
-          "core/user",
+          "core/prefer.md",
           "docs/tape-design.md"
         ],
 
