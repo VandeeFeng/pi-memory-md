@@ -2,6 +2,23 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
+## [Unreleased]
+
+For global and shared knowledge, I still personally prefer AGENTS.md + manual management. So I won't add global memory writes to `memory_write`; the native `write` tool + AGENTS.md is already convenient enough.
+
+pi-memory-md should first ensure strong memory management and optimization for the project level — that's the design principle and tradeoff behind this choice.
+
+I still believe that things requiring hand-writing should not be delegated to AI or automation, and the global things do not change very frequently ether.
+
+## Changes
+
+- Clarified native tool path semantics: `memory_write` uses project-memory-relative paths; `memory_list` returns project memory as relative paths and global memory as absolute paths.
+  I think global memory should be maintained more manually with user's guide, while project memory is a better fit for pi-memory-md's native tools.
+  Project memory in pi-memory-md is first meant for AI, and of course also for human. So `memory_write` supports project-level memory files. For `globalMemory`, I personally think it needs more deliberate manual maintenance, so `memory_write` does not support writing to or modifying global memory.
+
+- Refined delivered memory context formatting: it now uses a unified `# Memory Context` header, clearer global/project sections, absolute memory file paths, and a short note that memory files help the agent better understand the project and the user.
+- Commented out legacy built-in memory initialization helpers and removed their tests, since initialization now lives in the `memory-init` skill.
+
 ## [0.1.34]
 
 God damn, the LLM makes so many logic errors! Even the bash script!

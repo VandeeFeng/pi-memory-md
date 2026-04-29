@@ -261,9 +261,9 @@ export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings
   pi.registerTool({
     name: "memory_write",
     label: "Memory Write",
-    description: "Create or update a memory file with YAML frontmatter",
+    description: "Create or update a project memory file with YAML frontmatter",
     parameters: Type.Object({
-      path: Type.String({ description: "Relative path to memory file (e.g., 'core/user/identity.md')" }),
+      path: Type.String({ description: "Project memory relative path (e.g., 'core/project/architecture.md')" }),
       content: Type.String({ description: "Markdown content" }),
       description: Type.String({ description: "Description for frontmatter" }),
       tags: Type.Optional(Type.Array(Type.String())),
@@ -318,14 +318,18 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
   pi.registerTool({
     name: "memory_list",
     label: "Memory List",
-    description: "List all memory files in the repository",
+    description: "List memory files: project paths are relative, global paths are absolute",
     parameters: Type.Object({
-      directory: Type.Optional(Type.String({ description: "Filter by directory (e.g., 'core/user')" })),
+      directory: Type.Optional(Type.String({ description: "Project subdirectory (e.g., 'core/project')" })),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { directory } = params as { directory?: string };
       const projectMemoryDir = getMemoryDir(settings, ctx.cwd);
+
+      function toProjectRelativePaths(files: string[]): string[] {
+        return files.map((filePath) => path.relative(projectMemoryDir, filePath));
+      }
 
       if (directory) {
         const listDir = resolvePathWithin(projectMemoryDir, directory);
@@ -337,52 +341,43 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
           };
         }
 
-        const files = await listMemoryFilesAsync(listDir);
-        const relPaths = files.map((f) => path.relative(projectMemoryDir, f));
+        const files = toProjectRelativePaths(await listMemoryFilesAsync(listDir));
         return {
           content: [
             {
               type: "text",
-              text: `Memory files (${relPaths.length}):\n\n${relPaths.map((p) => `  - ${p}`).join("\n")}`,
+              text: `Memory files (${files.length}):\n\n${files.map((p) => `  - ${p}`).join("\n")}`,
             },
           ],
-          details: { files: relPaths, count: relPaths.length },
+          details: { files, count: files.length },
         };
       }
 
       const globalMemoryDir = getGlobalMemoryDir(settings);
       if (!globalMemoryDir || globalMemoryDir === projectMemoryDir) {
-        const files = await listMemoryFilesAsync(projectMemoryDir);
-        const relPaths = files.map((file) => path.relative(projectMemoryDir, file));
+        const files = toProjectRelativePaths(await listMemoryFilesAsync(projectMemoryDir));
         return {
           content: [
             {
               type: "text",
-              text: `Memory files (${relPaths.length}):\n\n${relPaths.map((p) => `  - ${p}`).join("\n")}`,
+              text: `Memory files (${files.length}):\n\n${files.map((p) => `  - ${p}`).join("\n")}`,
             },
           ],
-          details: { files: relPaths, count: relPaths.length },
+          details: { files, count: files.length },
         };
       }
 
-      const roots = [
-        { prefix: "global", memoryDir: globalMemoryDir },
-        { prefix: "project", memoryDir: projectMemoryDir },
-      ];
-      const relPaths = (
-        await Promise.all(
-          roots.map(async ({ prefix, memoryDir }) => {
-            const files = await listMemoryFilesAsync(memoryDir);
-            return files.map((file) => `${prefix}/${path.relative(memoryDir, file)}`);
-          }),
-        )
-      ).flat();
+      const [globalFiles, projectFiles] = await Promise.all([
+        listMemoryFilesAsync(globalMemoryDir),
+        listMemoryFilesAsync(projectMemoryDir),
+      ]);
+      const files = [...globalFiles, ...toProjectRelativePaths(projectFiles)];
 
       return {
         content: [
-          { type: "text", text: `Memory files (${relPaths.length}):\n\n${relPaths.map((p) => `  - ${p}`).join("\n")}` },
+          { type: "text", text: `Memory files (${files.length}):\n\n${files.map((p) => `  - ${p}`).join("\n")}` },
         ],
-        details: { files: relPaths, count: relPaths.length },
+        details: { files, count: files.length },
       };
     },
 
@@ -707,6 +702,6 @@ export function registerAllMemoryTools(pi: ExtensionAPI, settings: MemoryMdSetti
   registerMemoryWrite(pi, settings);
   registerMemoryList(pi, settings);
   registerMemorySearch(pi, settings);
-  // registerMemoryInit(pi, settings); // TODO: moved to SKILL
+  // registerMemoryInit(pi, settings);
   registerMemoryCheck(pi, settings);
 }

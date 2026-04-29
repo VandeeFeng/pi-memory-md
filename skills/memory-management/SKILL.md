@@ -176,7 +176,7 @@ memory_list()
 memory_list(directory="core/project")
 
 # List only core/ files
-memory_list(directory="system")
+memory_list(directory="core")
 ```
 
 ## Updating Memory Files

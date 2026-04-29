@@ -107,7 +107,7 @@ test("before_agent_start uses plain memory context in message-append mode when t
   );
 
   assert.equal((result as any).message.customType, "pi-memory-md");
-  assert.match((result as any).message.content, /# Project Memory/);
+  assert.match((result as any).message.content, /# Memory Context/);
   assert.equal(secondResult, undefined);
   assert.equal(extension.sentMessages.length, 0);
 });
@@ -134,7 +134,7 @@ test("before_agent_start uses plain memory context in system-prompt mode when ta
   );
 
   assert.match((result as any).systemPrompt, /SYSTEM/);
-  assert.match((result as any).systemPrompt, /# Project Memory/);
+  assert.match((result as any).systemPrompt, /# Memory Context/);
   assert.equal((result as any).message, undefined);
 });
 

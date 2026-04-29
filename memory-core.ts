@@ -5,13 +5,7 @@ import matter from "gray-matter";
 import { DEFAULT_HOOKS, normalizeHooks } from "./hooks.js";
 import { normalizeTapeKeywords } from "./tape/tape-gate.js";
 import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, ParsedFrontmatter } from "./types.js";
-import {
-  DEFAULT_LOCAL_PATH,
-  DEFAULT_TAPE_EXCLUDE_DIRS,
-  expandHomePath,
-  getCurrentDate,
-  getProjectMeta,
-} from "./utils.js";
+import { DEFAULT_LOCAL_PATH, DEFAULT_TAPE_EXCLUDE_DIRS, expandHomePath, getProjectMeta } from "./utils.js";
 
 export * from "./types.js";
 export { DEFAULT_LOCAL_PATH, getCurrentDate } from "./utils.js";
@@ -333,72 +327,55 @@ export function writeMemoryFile(filePath: string, content: string, frontmatter: 
   fs.writeFileSync(filePath, matter.stringify(content, frontmatter));
 }
 
-export function ensureDirectoryStructure(memoryDir: string): void {
-  const dirs = [
-    getMemoryUserDir(memoryDir),
-    path.join(getMemoryCoreDir(memoryDir), "project"),
-    path.join(memoryDir, "reference"),
-  ];
-
-  for (const dir of dirs) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
-
-export function createDefaultFiles(memoryDir: string): void {
-  const identityFile = path.join(getMemoryUserDir(memoryDir), "identity.md");
-  if (!fs.existsSync(identityFile)) {
-    writeMemoryFile(identityFile, "# User Identity\n\nCustomize this file with your information.", {
-      description: "User identity and background",
-      tags: ["user", "identity"],
-      created: getCurrentDate(),
-    });
-  }
-
-  const preferFile = path.join(getMemoryUserDir(memoryDir), "prefer.md");
-  if (!fs.existsSync(preferFile)) {
-    writeMemoryFile(
-      preferFile,
-      "# User Preferences\n\n## Communication Style\n- Be concise\n- Show code examples\n\n## Code Style\n- 2 space indentation\n- Prefer const over var\n- Functional programming preferred",
-      {
-        description: "User habits and code style preferences",
-        tags: ["user", "preferences"],
-        created: getCurrentDate(),
-      },
-    );
-  }
-}
-
-export function initializeMemoryDirectory(memoryDir: string): void {
-  ensureDirectoryStructure(memoryDir);
-  createDefaultFiles(memoryDir);
-}
+// Deprecated after migrating initialization to memory-init skill.
+// Keep this block commented for reference during transition.
+// export function ensureDirectoryStructure(memoryDir: string): void {
+//   const dirs = [
+//     getMemoryUserDir(memoryDir),
+//     path.join(getMemoryCoreDir(memoryDir), "project"),
+//     path.join(memoryDir, "reference"),
+//   ];
+//
+//   for (const dir of dirs) {
+//     fs.mkdirSync(dir, { recursive: true });
+//   }
+// }
+//
+// export function createDefaultFiles(memoryDir: string): void {
+//   const identityFile = path.join(getMemoryUserDir(memoryDir), "identity.md");
+//   if (!fs.existsSync(identityFile)) {
+//     writeMemoryFile(identityFile, "# User Identity\n\nCustomize this file with your information.", {
+//       description: "User identity and background",
+//       tags: ["user", "identity"],
+//       created: getCurrentDate(),
+//     });
+//   }
+//
+//   const preferFile = path.join(getMemoryUserDir(memoryDir), "prefer.md");
+//   if (!fs.existsSync(preferFile)) {
+//     writeMemoryFile(
+//       preferFile,
+//       "# User Preferences\n\n## Communication Style\n- Be concise\n- Show code examples\n\n## Code Style\n- 2 space indentation\n- Prefer const over var\n- Functional programming preferred",
+//       {
+//         description: "User habits and code style preferences",
+//         tags: ["user", "preferences"],
+//         created: getCurrentDate(),
+//       },
+//     );
+//   }
+// }
+//
+// export function initializeMemoryDirectory(memoryDir: string): void {
+//   ensureDirectoryStructure(memoryDir);
+//   createDefaultFiles(memoryDir);
+// }
 
 export function formatMemoryContext(context: string): string {
-  return context.trimStart().startsWith("# Project Memory") ? context : `# Project Memory\n\n${context}`;
+  return context.trimStart().startsWith("# Memory Context") ? context : `# Memory Context\n\n${context}`;
 }
 
 export function countMemoryContextFiles(context: string): number {
   return context.split("\n").filter((line) => line.startsWith("-")).length;
-}
-
-type MemoryContextScope = {
-  label: string;
-  prefix: string;
-  memoryDir: string;
-};
-
-function getMemoryContextScopes(settings: MemoryMdSettings, cwd: string): MemoryContextScope[] {
-  const projectMemoryDir = getMemoryDir(settings, cwd);
-  const globalMemoryDir = getGlobalMemoryDir(settings);
-  const scopes: MemoryContextScope[] = [];
-
-  if (globalMemoryDir && globalMemoryDir !== projectMemoryDir) {
-    scopes.push({ label: "Shared Global Memory", prefix: "global", memoryDir: globalMemoryDir });
-  }
-
-  scopes.push({ label: "Project Memory", prefix: "project", memoryDir: projectMemoryDir });
-  return scopes;
 }
 
 async function readCoreMemoryFiles(
@@ -426,13 +403,7 @@ async function readCoreMemoryFiles(
   };
 }
 
-function appendMemoryFileLines(
-  lines: string[],
-  memoryDir: string,
-  files: string[],
-  memories: Array<MemoryFile | null>,
-  prefix?: string,
-): void {
+function appendMemoryFileLines(lines: string[], files: string[], memories: Array<MemoryFile | null>): void {
   for (let index = 0; index < files.length; index++) {
     const filePath = files[index];
     const memory = memories[index];
@@ -440,60 +411,57 @@ function appendMemoryFileLines(
       continue;
     }
 
-    const relPath = path.relative(memoryDir, filePath);
-    const displayPath = prefix ? `${prefix}/${relPath}` : relPath;
     const { description, tags } = memory.frontmatter;
-    lines.push(`- ${displayPath}`);
+    lines.push(`- ${filePath}`);
     lines.push(`  Description: ${description}`);
     lines.push(`  Tags: ${tags?.join(", ") || "none"}`);
     lines.push("");
   }
 }
 
+type MemoryContextScope = {
+  label: string;
+  memoryDir: string;
+};
+
 async function buildMemoryContextSection(scope: MemoryContextScope): Promise<string[] | null> {
   const coreFiles = await readCoreMemoryFiles(scope.memoryDir);
   if (!coreFiles) return null;
 
-  const lines: string[] = [`## ${scope.label}`, "", `Memory directory: ${scope.memoryDir}`, ""];
-  appendMemoryFileLines(lines, scope.memoryDir, coreFiles.files, coreFiles.memories, scope.prefix);
+  const lines: string[] = [`## ${scope.label}`, "", `${scope.label} directory: ${scope.memoryDir}`, ""];
+  appendMemoryFileLines(lines, coreFiles.files, coreFiles.memories);
   return lines;
 }
 
 export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: string): Promise<string> {
   const projectMemoryDir = getMemoryDir(settings, cwd);
   const globalMemoryDir = getGlobalMemoryDir(settings);
+  const scopes: MemoryContextScope[] = [];
 
-  if (!globalMemoryDir || globalMemoryDir === projectMemoryDir) {
-    const coreFiles = await readCoreMemoryFiles(projectMemoryDir);
-    if (!coreFiles) return "";
-
-    const lines = [
-      "# Project Memory",
-      "",
-      `Memory directory: ${projectMemoryDir}`,
-      "Paths below are relative to that directory.",
-      "",
-      "Available memory files:",
-      "",
-    ];
-    appendMemoryFileLines(lines, projectMemoryDir, coreFiles.files, coreFiles.memories);
-    return lines.join("\n");
+  if (globalMemoryDir && globalMemoryDir !== projectMemoryDir) {
+    scopes.push({
+      label: "Shared Global Memory",
+      memoryDir: globalMemoryDir,
+    });
   }
 
-  const sections = (
-    await Promise.all(getMemoryContextScopes(settings, cwd).map((scope) => buildMemoryContextSection(scope)))
-  ).filter((section): section is string[] => section !== null);
+  scopes.push({
+    label: "Project Memory",
+    memoryDir: projectMemoryDir,
+  });
+
+  const sections = (await Promise.all(scopes.map((scope) => buildMemoryContextSection(scope)))).filter(
+    (section): section is string[] => section !== null,
+  );
 
   if (sections.length === 0) {
     return "";
   }
 
   const lines = [
-    "# Project Memory",
+    "# Memory Context",
     "",
-    `Shared global memory directory: ${globalMemoryDir}`,
-    `Project memory directory: ${projectMemoryDir}`,
-    "Paths below are prefixed with `global/` or `project/` when shared global memory is enabled.",
+    "These memory files can help you better understand the project and the user.",
     "",
     "Available memory files:",
     "",

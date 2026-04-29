@@ -1,4 +1,4 @@
-// Covers settings loading, memory file I/O, initialization, context building, and path safety.
+// Covers settings loading, memory file I/O, context building, and path safety.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -9,11 +9,7 @@ import {
   buildMemoryContextAsync,
   DEFAULT_SETTINGS,
   getGlobalMemoryDir,
-  getMemoryCoreDir,
   getMemoryDir,
-  getMemoryUserDir,
-  initializeMemoryDirectory,
-  isMemoryInitialized,
   loadSettings,
   readMemoryFileAsync,
   writeMemoryFile,
@@ -246,21 +242,6 @@ test("writeMemoryFile writes YAML frontmatter and body that can be read back", a
   assert.equal(memory?.content.trim(), "# Identity\n\nHello");
 });
 
-test("initializeMemoryDirectory creates required directories and default files", () => {
-  const tempDir = createTempDir("pi-memory-md-init");
-  const memoryDir = path.join(tempDir, "memory");
-
-  initializeMemoryDirectory(memoryDir);
-
-  assert.equal(isMemoryInitialized(memoryDir), true);
-  assert.equal(fs.existsSync(getMemoryCoreDir(memoryDir)), true);
-  assert.equal(fs.existsSync(getMemoryUserDir(memoryDir)), true);
-  assert.equal(fs.existsSync(path.join(memoryDir, "reference")), true);
-  assert.equal(fs.existsSync(path.join(memoryDir, "core", "project")), true);
-  assert.equal(fs.existsSync(path.join(memoryDir, "core", "user", "identity.md")), true);
-  assert.equal(fs.existsSync(path.join(memoryDir, "core", "user", "prefer.md")), true);
-});
-
 test("getMemoryDir uses git root name when cwd is inside a repository subdirectory", () => {
   const tempDir = createTempDir("pi-memory-md-memory-dir-git-root");
   const projectRoot = path.join(tempDir, "project-a");
@@ -275,7 +256,7 @@ test("getMemoryDir uses git root name when cwd is inside a repository subdirecto
   assert.equal(getMemoryDir(settings, nestedCwd), path.join(settings.localPath, "project-a"));
 });
 
-test("buildMemoryContextAsync lists only core markdown files with relative paths", async () => {
+test("buildMemoryContextAsync lists only core markdown files with absolute paths", async () => {
   const tempDir = createTempDir("pi-memory-md-context");
   const projectDir = path.join(tempDir, "project-a");
   const settings = {
@@ -298,10 +279,16 @@ test("buildMemoryContextAsync lists only core markdown files with relative paths
 
   const context = await buildMemoryContextAsync(settings, projectDir);
 
-  assert.match(context, /# Project Memory/);
-  assert.match(context, new RegExp(`Memory directory: ${memoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  assert.match(context, /- core\/user\/identity\.md/);
-  assert.match(context, /- core\/project\/roadmap\.md/);
+  assert.match(context, /# Memory Context/);
+  assert.match(context, new RegExp(`Project Memory directory: ${memoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(
+    context,
+    new RegExp(`- ${path.join(memoryDir, "core", "user", "identity.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+  );
+  assert.match(
+    context,
+    new RegExp(`- ${path.join(memoryDir, "core", "project", "roadmap.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+  );
   assert.doesNotMatch(context, /reference\/ignore\.md/);
 });
 
@@ -331,12 +318,20 @@ test("buildMemoryContextAsync includes shared global memory before project memor
 
   assert.match(
     context,
-    new RegExp(`Shared global memory directory: ${globalMemoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    new RegExp(`Shared Global Memory directory: ${globalMemoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   );
   assert.match(context, /## Shared Global Memory/);
-  assert.match(context, /- global\/core\/user\/prefer\.md/);
+  assert.match(
+    context,
+    new RegExp(`- ${path.join(globalMemoryDir, "core", "user", "prefer.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+  );
   assert.match(context, /## Project Memory/);
-  assert.match(context, /- project\/core\/project\/overview\.md/);
+  assert.match(
+    context,
+    new RegExp(
+      `- ${path.join(projectMemoryDir, "core", "project", "overview.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
+  );
   assert.ok(context.indexOf("## Shared Global Memory") < context.indexOf("## Project Memory"));
 });
 

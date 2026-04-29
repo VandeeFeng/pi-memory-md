@@ -66,7 +66,7 @@ You can also use these slash commands directly in pi:
 
 | Command | Description |
 |---------|-------------|
-| `/skill:memory-init` | Initialize memory repository (clone repo, create directory structure, generate default files) |
+| `/skill:memory-init` | Initialize memory repository (clone/sync repo, create minimal core directories, optionally add templates) |
 | `/memory-status` | Show memory repository status (project name, git status, path) |
 | `/memory-refresh` | Refresh memory context from files (rebuild cache and deliver into current session) |
 | `/memory-check` | Check memory folder structure (display directory tree) |
@@ -80,8 +80,8 @@ The LLM can use these tools to interact with memory:
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `memory_sync` | `{action: "pull" / "push" / "status"}` | Git operations |
-| `memory_write` | `{path, content, description, tags?}` | Create/update memory file |
-| `memory_list` | `{directory?: string}` | List all memory files |
+| `memory_write` | `{path, content, description, tags?}` | Write a project memory file by relative path |
+| `memory_list` | `{directory?: string}` | List project memory by relative path; global paths stay absolute |
 | `memory_search` | `{query?, grep?, rg?}` | Search by tags/description and custom grep/ripgrep patterns |
 | `memory_check` | `{}` | Check current project memory folder structure |
 
@@ -104,13 +104,22 @@ Markdown content...
 
 ```
 ~/.pi/memory-md/
+├── global/                 # Optional shared memory when globalMemory is enabled
+│   └── core/
+│       ├── prefer.md       # Optional shared preferences
+│       └── task/
+│           └── task.md     # Optional shared task template
 └── project-name/
-    └── core/
-        ├── prefer.md       # Your preferences
-        ├── project/        # Project context
-        │   └── tech-stack.md
-        └── task/           # Tasks and plans
-            └── task.md
+    ├── core/
+    │   ├── prefer.md       # Optional project preferences
+    │   ├── project/        # Project context
+    │   │   └── tech-stack.md
+    │   └── task/           # Tasks and plans
+    │       └── task.md
+    ├── docs/               # Optional root-level reference docs
+    ├── archive/            # Optional historical info
+    ├── research/           # Optional research notes
+    └── notes/              # Optional standalone notes
 ```
 
 ## Configuration
