@@ -111,6 +111,27 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
   }
 });
 
+test("getGlobalMemoryDir is disabled when globalMemory is not explicitly configured", () => {
+  const tempHome = createTempDir("pi-memory-md-home-no-global-memory");
+  const projectDir = createTempDir("pi-memory-md-project-no-global-memory");
+
+  writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": {
+      localPath: "~/memory-root",
+    },
+  });
+
+  const homedirMock = mock.method(os, "homedir", () => tempHome);
+
+  try {
+    const settings = loadSettings(projectDir);
+    assert.equal(settings.localPath, path.join(tempHome, "memory-root"));
+    assert.equal(getGlobalMemoryDir(settings), null);
+  } finally {
+    homedirMock.mock.restore();
+  }
+});
+
 test("loadSettings falls back to legacy injection when delivery is unset", () => {
   const tempHome = createTempDir("pi-memory-md-home-legacy-delivery");
   const projectDir = createTempDir("pi-memory-md-project-legacy-delivery");

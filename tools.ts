@@ -619,20 +619,25 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
       const projectMemoryDir = getMemoryDir(settings, ctx.cwd);
       const globalMemoryDir = getGlobalMemoryDir(settings);
       const requiredDirs = [
-        ...(globalMemoryDir ? [{ label: "Shared global", path: globalMemoryDir }] : []),
+        ...(globalMemoryDir && fs.existsSync(globalMemoryDir)
+          ? [{ label: "Shared global", path: globalMemoryDir }]
+          : []),
         { label: "Project", path: projectMemoryDir },
       ];
-      const missingDir = requiredDirs.find((dir) => !fs.existsSync(dir.path));
 
-      if (missingDir) {
+      if (!fs.existsSync(projectMemoryDir)) {
+        const missingGlobalMessage =
+          globalMemoryDir && !fs.existsSync(globalMemoryDir)
+            ? `\n\nShared global memory directory not found: ${globalMemoryDir}`
+            : "";
         return {
           content: [
             {
               type: "text",
-              text: `${missingDir.label} memory directory not found: ${missingDir.path}\n\nMemory may not be initialized yet.`,
+              text: `Project memory directory not found: ${projectMemoryDir}${missingGlobalMessage}\n\nMemory may not be initialized yet.`,
             },
           ],
-          details: { exists: false, path: missingDir.path },
+          details: { exists: false, path: projectMemoryDir },
         };
       }
 
@@ -643,7 +648,7 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
           return execSync(`tree -L 3 -I "node_modules" "${memoryDir}"`, { encoding: "utf-8" });
         } catch {
           try {
-            return execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*" | head -20`, {
+            return execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*" 2>/dev/null | head -20`, {
               encoding: "utf-8",
             });
           } catch {
@@ -671,27 +676,40 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
         return count + (match ? Number(match[1]) : 0);
       }, 0);
 
+      const globalMemoryWarning =
+        globalMemoryDir && !fs.existsSync(globalMemoryDir)
+          ? `Warning: shared global memory directory not found: ${globalMemoryDir}\n\n`
+          : "";
+
       return {
         content: [
           {
             type: "text",
-            text: `Memory directory structure for project: ${getProjectMeta(ctx.cwd).name}\n\n${sections.join("\n\n")}`,
+            text: `Memory directory structure for project: ${getProjectMeta(ctx.cwd).name}\n\n${globalMemoryWarning}${sections.join("\n\n")}`,
           },
         ],
-        details: { path: projectMemoryDir, globalMemoryDir, fileCount },
+        details: {
+          path: projectMemoryDir,
+          globalMemoryDir,
+          fileCount,
+          globalMemoryMissing: !!globalMemoryDir && !fs.existsSync(globalMemoryDir),
+        },
       };
     },
 
     renderCall: (_args, theme) => new Text(buildToolCallText("memory_check", {}, theme), 0, 0),
     renderResult: (result, options, theme) => {
       if (options.isPartial) return renderText(theme.fg("warning", "Checking..."));
-      const details = result.details as { exists?: boolean; fileCount?: number };
+      const details = result.details as { exists?: boolean; fileCount?: number; globalMemoryMissing?: boolean };
 
       if (details?.exists === false) {
         return renderCollapsed("Not initialized", getResultText(result), options, theme);
       }
 
-      return renderCollapsed(`Structure: ${details?.fileCount ?? 0} files`, getResultText(result), options, theme);
+      const summary = details?.globalMemoryMissing
+        ? `Structure: ${details?.fileCount ?? 0} files (global missing)`
+        : `Structure: ${details?.fileCount ?? 0} files`;
+      return renderCollapsed(summary, getResultText(result), options, theme);
     },
   });
 }

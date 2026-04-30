@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { readMemoryFileAsync, writeMemoryFile } from "../memory-core.js";
-import { registerMemoryList, registerMemorySearch, registerMemoryWrite } from "../tools.js";
+import { registerMemoryCheck, registerMemoryList, registerMemorySearch, registerMemoryWrite } from "../tools.js";
 import { createTempDir } from "./test-helpers.js";
 
 type RegisteredTool = {
@@ -276,6 +276,36 @@ test("memory_list includes shared global files when global memory is enabled", a
     new RegExp(path.join(globalMemoryDir, "USER.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
   assert.match(allFiles.content[0]?.text ?? "", /core\/project\/overview\.md/);
+});
+
+test("memory_check treats missing global memory as warning when project memory exists", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-check-missing-global");
+  const projectDir = path.join(tempDir, "project");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+    memoryDir: {
+      globalMemory: "global",
+    },
+  };
+  const projectMemoryDir = path.join(settings.localPath, path.basename(projectDir));
+
+  writeMemoryFile(path.join(projectMemoryDir, "core", "project", "overview.md"), "# Overview", {
+    description: "Project overview",
+  });
+
+  const pi = createMockPi();
+  registerMemoryCheck(pi as never, settings);
+
+  const result = (await executeTool(pi, "memory_check", {}, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { exists?: boolean; globalMemoryMissing?: boolean; fileCount?: number };
+  };
+
+  assert.equal(result.details?.exists, undefined);
+  assert.equal(result.details?.globalMemoryMissing, true);
+  assert.equal(result.details?.fileCount, 1);
+  assert.match(result.content[0]?.text ?? "", /Warning: shared global memory directory not found:/);
+  assert.match(result.content[0]?.text ?? "", /## Project memory/);
 });
 
 test("memory_list rejects symlink directories", async () => {

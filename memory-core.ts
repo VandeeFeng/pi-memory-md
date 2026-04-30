@@ -32,7 +32,6 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
   memoryDir: {
     repoUrl: "",
     localPath: DEFAULT_LOCAL_PATH,
-    globalMemory: DEFAULT_GLOBAL_MEMORY_DIRNAME,
   },
   tape: {
     enabled: false,
@@ -221,8 +220,10 @@ export function getMemoryDir(settings: MemoryMdSettings, cwd: string): string {
 }
 
 export function getGlobalMemoryDir(settings: MemoryMdSettings): string | null {
+  if (!Object.hasOwn(settings.memoryDir ?? {}, "globalMemory")) return null;
+
   const globalMemory = settings.memoryDir?.globalMemory;
-  if (!globalMemory) return null;
+  if (globalMemory === undefined || globalMemory === null || globalMemory === "") return null;
 
   const directoryName = globalMemory.trim();
   const safeDirectoryName =

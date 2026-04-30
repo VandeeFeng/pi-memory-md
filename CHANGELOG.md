@@ -2,7 +2,7 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
-## [Unreleased]
+## [0.1.35] - 2026-04-30
 
 For global and shared knowledge, I still personally prefer AGENTS.md + manual management. So I won't add global memory writes to `memory_write`; the native `write` tool + AGENTS.md is already convenient enough.
 
@@ -26,6 +26,11 @@ Those new Markdown files are not mandatory, they can work well alongside the use
 
 - Refined delivered memory context formatting: it now uses a unified `# Memory Context` header, clearer global/project sections, absolute memory file paths, and a short note that memory files help the agent better understand the project and the user.
 - Commented out legacy built-in memory initialization helpers and removed their tests, since initialization now lives in the `memory-init` skill.
+
+## Fixed
+
+- Fixed `memory_check` and global memory enablement detection: shared global memory is now treated as enabled only when `memoryDir.globalMemory` is explicitly configured.
+  When project memory exists but shared global memory is missing, `memory_check` no longer reports `Not initialized`; it continues to show the project memory structure and only warns about the missing shared global directory when global memory was actually enabled by config.
 
 ## [0.1.34]
 

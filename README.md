@@ -156,7 +156,7 @@ Markdown content...
 | `enabled` | `true` | Enable extension |
 | `memoryDir.repoUrl` | Required | Git repository URL |
 | `memoryDir.localPath` | `~/.pi/memory-md` | Local memory clone path |
-| `memoryDir.globalMemory` | `"global"` | Shared memory folder name (relative to `localPath`) |
+| `memoryDir.globalMemory` | disabled | Shared memory folder name (relative to `localPath`), enabled only when explicitly configured |
 | `delivery` | `"message-append"` | Memory delivery mode: `"message-append"`, `"system-prompt"` |
 | `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts |
 | `hooks.sessionEnd` | `[]` | Actions to run when a session ends |
