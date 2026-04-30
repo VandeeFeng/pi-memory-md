@@ -137,12 +137,13 @@ async function cacheInitialContext(
   const { fileLimit = 10, strategy = "smart", memoryScan = DEFAULT_MEMORY_SCAN } = settings.tape?.context ?? {};
   const memoryFiles = await tapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
   const selectedFiles = await tapeRuntime.selector.finalizeContextFiles(memoryFiles);
-  const highlightedFiles = [...new Set(memoryFiles.filter((filePath) => selectedFiles.includes(filePath)))].slice(0, 3);
+
+  const content = await tapeRuntime.selector.buildContextFromFilesAsync(selectedFiles, {
+    highlightedFiles: [...new Set(memoryFiles.filter((filePath) => selectedFiles.includes(filePath)))].slice(0, 3),
+  });
 
   state.initialTapeContext = {
-    content:
-      (await tapeRuntime.selector.buildContextFromFilesAsync(selectedFiles, { highlightedFiles })) +
-      buildTapeHint(settings),
+    content: content + buildTapeHint(settings),
     fileCount: selectedFiles.length,
   };
 }

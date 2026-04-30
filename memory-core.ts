@@ -402,20 +402,36 @@ async function readMemoryFiles(
   };
 }
 
-function appendMemoryFileLines(lines: string[], files: string[], memories: Array<MemoryFile | null>): void {
-  for (let index = 0; index < files.length; index++) {
-    const filePath = files[index];
-    const memory = memories[index];
-    if (!filePath || !memory) {
+export function memoryContextTpl(
+  entries: Array<{ path: string; memory: MemoryFile }> = [],
+  options: { includeHeader?: boolean } = {},
+): string[] {
+  const lines: string[] = [];
+
+  if (options.includeHeader !== false) {
+    lines.push(
+      "# Memory Context",
+      "",
+      "These memory files can help you better understand the project and the user.",
+      "",
+      "Available memory files:",
+      "",
+    );
+  }
+
+  for (const entry of entries) {
+    if (!entry.path || !entry.memory) {
       continue;
     }
 
-    const { description, tags } = memory.frontmatter;
-    lines.push(`- ${filePath}`);
+    const { description, tags } = entry.memory.frontmatter;
+    lines.push(`- ${entry.path}`);
     lines.push(`  Description: ${description}`);
     lines.push(`  Tags: ${tags?.join(", ") || "none"}`);
     lines.push("");
   }
+
+  return lines;
 }
 
 type MemoryContextScope = {
@@ -429,7 +445,14 @@ async function buildMemoryContextSection(scope: MemoryContextScope): Promise<str
   if (!scannedFiles) return null;
 
   const lines: string[] = [`## ${scope.label}`, "", `${scope.label} directory: ${scope.memoryDir}`, ""];
-  appendMemoryFileLines(lines, scannedFiles.files, scannedFiles.memories);
+  lines.push(
+    ...memoryContextTpl(
+      scannedFiles.files
+        .map((filePath, index) => ({ path: filePath, memory: scannedFiles.memories[index] }))
+        .filter((entry): entry is { path: string; memory: MemoryFile } => Boolean(entry.memory)),
+      { includeHeader: false },
+    ),
+  );
   return lines;
 }
 
@@ -459,14 +482,7 @@ export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: s
     return "";
   }
 
-  const lines = [
-    "# Memory Context",
-    "",
-    "These memory files can help you better understand the project and the user.",
-    "",
-    "Available memory files:",
-    "",
-  ];
+  const lines = memoryContextTpl();
 
   for (const section of sections) {
     lines.push(...section);

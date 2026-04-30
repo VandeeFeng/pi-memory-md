@@ -242,7 +242,7 @@ test("MemoryFileSelector finalizeContextFiles applies whitelist and blacklist", 
   assert.deepEqual(files, [whitelistedFile, memoryFile]);
 });
 
-test("MemoryFileSelector buildContextFromFilesAsync renders memory and project files with highlights and line ranges", async () => {
+test("MemoryFileSelector buildContextFromFilesAsync renders highlights and line ranges", async () => {
   const tempDir = createTempDir("pi-memory-md-selector-context");
   const memoryDir = path.join(tempDir, "memory");
   const projectRoot = path.join(tempDir, "project");
@@ -276,8 +276,8 @@ test("MemoryFileSelector buildContextFromFilesAsync renders memory and project f
     lineRangeHours: 6,
   });
 
-  assert.match(context, /# Project Memory/);
-  assert.match(context, /core\/user\/identity\.md \[high priority\]/);
+  assert.match(context, /# Memory Context/);
+  assert.match(context, new RegExp(`${memoryPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\[high priority\\]`));
   // assert.match(context, / {2}recent focus: read 3-6/);  // memory_read removed
   assert.match(context, /Description: Identity/);
   assert.match(context, /Tags: user, profile/);
@@ -319,7 +319,9 @@ test("MemoryFileSelector line ranges follow the effective smart scan window", as
 
   const selector = new MemoryFileSelector(createMockTapeService(entries) as never, memoryDir, projectRoot);
   const files = await selector.selectFilesForContext("smart", 1, { memoryScan: [24, 120] });
-  const context = await selector.buildContextFromFilesAsync(files, { highlightedFiles: files });
+  const context = await selector.buildContextFromFilesAsync(files, {
+    highlightedFiles: files,
+  });
 
   assert.deepEqual(files, [projectFile]);
   assert.match(context, /recent focus: read 50-51, read 40-41, read 30-31, read 20-21, read 10-11/);

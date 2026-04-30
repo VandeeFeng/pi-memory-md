@@ -4,7 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import matter from "gray-matter";
-import { DEFAULT_MEMORY_SCAN, normalizeMemoryScanRange } from "../memory-core.js";
+import { DEFAULT_MEMORY_SCAN, type MemoryFile, memoryContextTpl, normalizeMemoryScanRange } from "../memory-core.js";
 import { getProjectMeta, hoursAgoIso, isPathInside, resolveFrom, toRelativeIfInside, toTimestamp } from "../utils.js";
 import {
   analyzePathAccess,
@@ -200,6 +200,12 @@ async function getRipgrepVisibleProjectPaths(projectRoot: string): Promise<Set<s
 
 // Memory file selection.
 
+type ContextFileEntry = {
+  absolutePath: string;
+  originalPath: string;
+  displayPath: string;
+};
+
 export class MemoryFileSelector {
   private readonly whitelist: string[];
   private readonly blacklist: string[];
@@ -293,7 +299,10 @@ export class MemoryFileSelector {
     options?: { highlightedFiles?: string[]; lineRangeHours?: number },
   ): Promise<string> {
     const { fileEntries, highlightedPaths, rangeMap } = this.prepareContextEntries(filePaths, options);
-    if (fileEntries.length === 0) return "";
+    if (fileEntries.length === 0) {
+      return "";
+    }
+
     return this.renderContextFromEntriesAsync(fileEntries, highlightedPaths, rangeMap);
   }
 
@@ -301,7 +310,7 @@ export class MemoryFileSelector {
     filePaths: string[],
     options?: { highlightedFiles?: string[]; lineRangeHours?: number },
   ): {
-    fileEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>;
+    fileEntries: ContextFileEntry[];
     highlightedPaths: Set<string>;
     rangeMap: Map<string, LineRange[]>;
   } {
@@ -309,22 +318,22 @@ export class MemoryFileSelector {
     const highlightedPaths = new Set(
       (options?.highlightedFiles ?? [])
         .filter((filePath) => this.pathExists(filePath))
-        .map((filePath) => this.toMemoryRelativePath(filePath) ?? filePath),
+        .map((filePath) => path.resolve(this.toAbsolutePath(filePath))),
     );
-    const fileEntries = existingPaths.map((filePath) => ({
-      absolutePath: path.resolve(this.toAbsolutePath(filePath)),
-      originalPath: filePath,
-      displayPath: this.toMemoryRelativePath(filePath) ?? filePath,
-    }));
+    const fileEntries = existingPaths.map((filePath) => {
+      const absolutePath = path.resolve(this.toAbsolutePath(filePath));
+      return {
+        absolutePath,
+        originalPath: filePath,
+        displayPath: absolutePath,
+      };
+    });
     const rangeMap = this.getContextRangeMap(fileEntries, options?.lineRangeHours);
 
     return { fileEntries, highlightedPaths, rangeMap };
   }
 
-  private getContextRangeMap(
-    fileEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>,
-    requestedHours?: number,
-  ): Map<string, LineRange[]> {
+  private getContextRangeMap(fileEntries: ContextFileEntry[], requestedHours?: number): Map<string, LineRange[]> {
     const lineRangeHours = requestedHours ?? this.lastSelectionScanHours;
     const shouldReuseLastScan = requestedHours === undefined && lineRangeHours === this.lastSelectionScanHours;
 
@@ -344,68 +353,110 @@ export class MemoryFileSelector {
   }
 
   private async renderContextFromEntriesAsync(
-    fileEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>,
+    fileEntries: ContextFileEntry[],
     highlightedPaths: Set<string>,
     rangeMap: Map<string, LineRange[]>,
   ): Promise<string> {
-    const lines = this.createContextHeader();
-    const { memoryEntries, projectEntries } = this.splitContextEntries(fileEntries);
+    const lines = memoryContextTpl();
+    const groupedEntries = this.groupContextEntries(fileEntries);
 
-    if (memoryEntries.length > 0) {
-      const frontmatters = await Promise.all(
-        memoryEntries.map((entry) => this.extractFrontmatterAsync(entry.displayPath)),
-      );
-      for (let index = 0; index < memoryEntries.length; index++) {
-        const entry = memoryEntries[index];
-        const frontmatter = frontmatters[index];
-        if (!entry || !frontmatter) continue;
-        this.appendMemoryEntry(lines, entry, highlightedPaths, rangeMap, frontmatter);
-      }
-    }
+    await this.appendMemoryEntriesAsync(lines, groupedEntries.memoryEntries, highlightedPaths, rangeMap);
+    this.appendProjectEntries(
+      lines,
+      groupedEntries.projectEntries,
+      highlightedPaths,
+      rangeMap,
+      groupedEntries.hasMemory,
+    );
 
-    this.appendProjectEntries(lines, projectEntries, highlightedPaths, rangeMap, memoryEntries.length > 0);
     return lines.join("\n");
   }
 
-  private createContextHeader(): string[] {
-    return [
-      "# Project Memory",
-      "",
-      `Memory directory: ${this.memoryDir}`,
-      "Paths below are relative to that directory.",
-      "",
-      "Recent memory files:",
-      "",
-    ];
+  private groupContextEntries(fileEntries: ContextFileEntry[]): {
+    memoryEntries: ContextFileEntry[];
+    projectEntries: ContextFileEntry[];
+    hasMemory: boolean;
+  } {
+    const memoryEntries: ContextFileEntry[] = [];
+    const projectEntries: ContextFileEntry[] = [];
+
+    for (const entry of fileEntries) {
+      if (this.toMemoryRelativePath(entry.absolutePath) !== null) {
+        memoryEntries.push(entry);
+      } else {
+        projectEntries.push(entry);
+      }
+    }
+
+    return {
+      memoryEntries,
+      projectEntries,
+      hasMemory: memoryEntries.length > 0,
+    };
   }
 
-  private splitContextEntries(
-    fileEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>,
-  ): {
-    memoryEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>;
-    projectEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>;
-  } {
-    return {
-      memoryEntries: fileEntries.filter((entry) => !path.isAbsolute(entry.displayPath)),
-      projectEntries: fileEntries.filter((entry) => path.isAbsolute(entry.displayPath)),
-    };
+  private async appendMemoryEntriesAsync(
+    lines: string[],
+    memoryEntries: ContextFileEntry[],
+    highlightedPaths: Set<string>,
+    rangeMap: Map<string, LineRange[]>,
+  ): Promise<void> {
+    if (memoryEntries.length === 0) {
+      return;
+    }
+
+    const frontmatters = await Promise.all(
+      memoryEntries.map((entry) => this.extractFrontmatterAsync(entry.absolutePath)),
+    );
+
+    for (let index = 0; index < memoryEntries.length; index++) {
+      const entry = memoryEntries[index];
+      const frontmatter = frontmatters[index];
+      if (!entry || !frontmatter) continue;
+      this.appendMemoryEntry(lines, entry, highlightedPaths, rangeMap, frontmatter);
+    }
   }
 
   private appendMemoryEntry(
     lines: string[],
-    entry: { absolutePath: string; originalPath: string; displayPath: string },
+    entry: ContextFileEntry,
     highlightedPaths: Set<string>,
     rangeMap: Map<string, LineRange[]>,
     frontmatter: { description: string; tags: string },
   ): void {
-    lines.push(`- ${this.formatPathLabel(entry.displayPath, highlightedPaths)}`);
+    lines.push(...this.renderMemoryEntryLines(entry, highlightedPaths, frontmatter));
     this.appendLineRanges(lines, entry.absolutePath, rangeMap);
-    lines.push(`  Description: ${frontmatter.description}`, `  Tags: ${frontmatter.tags}`, "");
+  }
+
+  private renderMemoryEntryLines(
+    entry: ContextFileEntry,
+    highlightedPaths: Set<string>,
+    frontmatter: { description: string; tags: string },
+  ): string[] {
+    return memoryContextTpl([this.toMemoryContextFile(entry, highlightedPaths, frontmatter)], { includeHeader: false });
+  }
+
+  private toMemoryContextFile(
+    entry: ContextFileEntry,
+    highlightedPaths: Set<string>,
+    frontmatter: { description: string; tags: string },
+  ): { path: string; memory: MemoryFile } {
+    return {
+      path: this.formatPathLabel(entry.displayPath, highlightedPaths),
+      memory: {
+        path: entry.displayPath,
+        frontmatter: {
+          description: frontmatter.description,
+          tags: frontmatter.tags === "none" ? [] : frontmatter.tags.split(", ").filter(Boolean),
+        },
+        content: "",
+      },
+    };
   }
 
   private appendProjectEntries(
     lines: string[],
-    projectEntries: Array<{ absolutePath: string; originalPath: string; displayPath: string }>,
+    projectEntries: ContextFileEntry[],
     highlightedPaths: Set<string>,
     rangeMap: Map<string, LineRange[]>,
     hasMemoryEntries: boolean,
@@ -558,11 +609,9 @@ export class MemoryFileSelector {
     };
   }
 
-  private async extractFrontmatterAsync(relPath: string): Promise<{ description: string; tags: string }> {
-    const fullPath = path.join(this.memoryDir, relPath);
-
+  private async extractFrontmatterAsync(filePath: string): Promise<{ description: string; tags: string }> {
     try {
-      return this.parseFrontmatter(await fs.promises.readFile(fullPath, "utf-8"));
+      return this.parseFrontmatter(await fs.promises.readFile(filePath, "utf-8"));
     } catch {
       return { description: "No description", tags: "none" };
     }
