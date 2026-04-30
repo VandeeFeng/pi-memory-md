@@ -25,38 +25,38 @@ The script will:
 1. Read settings from `.pi/settings.json` or `$PI_CODING_AGENT_DIR/settings.json`
 2. Calculate memory directories
 3. Clone or sync the git repository
-4. Create `core/project/` and `core/task/`
+4. Create `core/project/`
 
 ### Step 2: Configure globalMemory (if applicable)
 
 Read settings from `.pi/settings.json` or `$PI_CODING_AGENT_DIR/settings.json` and check for `globalMemory` configuration.
 
 Then ask user whether they also want to create default global files under the configured `globalMemory` directory:
-- `{globalMemory}/core/prefer.md` from `prefer-template.md`
-- `{globalMemory}/core/task/task.md` from `task-template.md`
+- `{globalMemory}/USER.md` from `user-template.md`
+- `{globalMemory}/MEMORY.md` from `memory-template.md`
+- `{globalMemory}/TASK.md` from `task-template.md`
 
 ### Step 3: Copy Template Files for Project Memory (Optional)
 
-Ask user which templates to create in [templates/](templates/):
+Ask user which project templates to create in [templates/](templates/):
 
 ```
-Which template files would you like to create? (select all that apply)
+Which project template files would you like to create? (select all that apply)
 1. task-template.md - Project tasks and planning template
-2. prefer-template.md - User preferences template
-3. Both
-4. None (skip templates)
+2. user-template.md - Project user profile and preferences template
+3. None (skip project templates)
 ```
 
 If user selects templates, copy them from `templates/` to the target paths:
 
 ```bash
-cp templates/task-template.md {projectMemoryDir}/core/task/task.md
-cp templates/prefer-template.md {projectMemoryDir}/core/prefer.md
+cp templates/task-template.md {projectMemoryDir}/core/TASK.md
+cp templates/user-template.md {projectMemoryDir}/core/USER.md
 ```
 
 ### Step 4: Import Preferences from AGENTS.md (Optional)
 
-This step extracts preferences from AGENTS.md to populate project `core/prefer.md` and, if global memory is enabled, `{globalMemory}/core/prefer.md`.
+This step extracts preferences from AGENTS.md to populate project `core/USER.md` and, if global memory is enabled, `{globalMemory}/USER.md`.
 
 1. **Find AGENTS.md** (check in order):
    - Project root: `{cwd}/AGENTS.md`
@@ -82,23 +82,23 @@ This step extracts preferences from AGENTS.md to populate project `core/prefer.m
    - Code Quality Principles: [1-2 sentence summary]
    - Coding Style: [1-2 sentence summary]
 
-   Include these in project core/prefer.md and, if available, {globalMemory}/core/prefer.md? (yes/no)
+   Include these in project core/USER.md and, if available, {globalMemory}/USER.md? (yes/no)
    ```
 
-5. **If confirmed**, update or create the target preference files with:
-   - `core/prefer.md`
-   - `{globalMemory}/core/prefer.md` if global memory is enabled
+5. **If confirmed**, update or create the target profile files with:
+   - `core/USER.md`
+   - `{globalMemory}/USER.md` if global memory is enabled
    - Extracted content from AGENTS.md
    - Keep the existing frontmatter (description, tags, created)
 
 6. **Ask for additional preferences**:
    ```
-   Any additional preferences to add to prefer.md? (e.g., communication style, specific tools)
+   Any additional preferences to add to USER.md? (e.g., communication style, specific tools)
    ```
 
 ### Step 5: Create Additional Folders (Optional)
 
-Ask user whether they want to create any additional folders beyond `core/project` and `core/task`.
+Ask user whether they want to create any additional folders beyond `core/project`.
 
 Examples:
 - `reference/`
@@ -116,14 +116,14 @@ Call `memory_check` tool to verify setup is correct.
 ```
 {localPath}/
 ├── {globalMemory}/            # (if globalMemory config block exists)
-│   └── core/
-│       ├── prefer.md          # Shared preferences file
-│       └── task/              # Task and planning files
+│   ├── USER.md                # Shared user profile and preferences
+│   ├── MEMORY.md              # Shared durable notes, conventions, and lessons learned
+│   └── TASK.md                # Shared task and planning file
 └── {project-name}/
     └── core/
-        ├── prefer.md          # Project preferences file
+        ├── USER.md            # Project user profile and preferences
         ├── project/           # Project memory files
-        └── task/              # Task and planning files
+        └── TASK.md            # Task and planning file
 ```
 
 ## Workflow Guide
@@ -145,20 +145,23 @@ Check script result: globalMemory enabled?
   └─ YES
       │
       ▼
-  Ensure global task directory exists
+  Ensure global memory directory exists
       │
       ▼
-  Ask: Create {globalMemory}/core/prefer.md and {globalMemory}/core/task/task.md?
+  Ask: Create {globalMemory}/USER.md, {globalMemory}/MEMORY.md, and {globalMemory}/TASK.md?
       │
       ├─ NO ──► Skip global files
       │
       └─ YES
           │
           ▼
-      Copy prefer-template.md to {globalMemory}/core/prefer.md
+      Copy user-template.md to {globalMemory}/USER.md
           │
           ▼
-      Copy task-template.md to {globalMemory}/core/task/task.md
+      Copy memory-template.md to {globalMemory}/MEMORY.md
+          │
+          ▼
+      Copy task-template.md to {globalMemory}/TASK.md
           │
           ▼
 Continue with project setup
@@ -171,7 +174,10 @@ Ask: Which project templates to create?
   └─ Select templates
       │
       ▼
-  Copy selected templates
+  Copy selected project templates
+      │
+      ▼
+  Never create project core/MEMORY.md in this flow
       │
       ▼
 Ask: Import preferences from AGENTS.md?
@@ -184,14 +190,14 @@ Ask: Import preferences from AGENTS.md?
   Read AGENTS.md and extract preferences
       │
       ▼
-  Ask: Confirm import to project core/prefer.md and, if available, {globalMemory}/core/prefer.md?
+  Ask: Confirm import to project core/USER.md and, if available, {globalMemory}/USER.md?
       │
       ├─ NO ──► Ask for additional preferences
       │
       └─ YES
           │
           ▼
-      Update project core/prefer.md and, if available, {globalMemory}/core/prefer.md
+      Update project core/USER.md and, if available, {globalMemory}/USER.md
           │
           ▼
       Ask: Additional preferences?
@@ -221,11 +227,12 @@ DONE
 Copy these templates to start:
 
 - [templates/task-template.md](templates/task-template.md) — Project tasks and planning template
-- [templates/prefer-template.md](templates/prefer-template.md) — Preferences template
+- [templates/user-template.md](templates/user-template.md) — User profile and preferences template
+- [templates/memory-template.md](templates/memory-template.md) — Hermes-inspired durable notes, conventions, and lessons learned template for `globalMemory` only
 
 ## Scripts
 
-- [scripts/memory-init.sh](scripts/memory-init.sh) — Initialize memory repository (clone repo, create directories)
+- [scripts/memory-init.sh](scripts/memory-init.sh) — Initialize memory repository (clone repo, create minimal directories)
 
 ## Related Skills
 

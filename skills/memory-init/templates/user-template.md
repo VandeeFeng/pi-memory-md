@@ -1,10 +1,10 @@
 ---
-description: User habits and code style preferences
-tags: [user, preferences]
+description: User profile, habits, and preferences
+tags: [user, profile, preferences]
 created: {created}
 ---
 
-# User Preferences
+# User Profile
 
 ## Communication Style
 - Be concise

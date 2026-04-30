@@ -236,12 +236,9 @@ test("memory_list returns absolute paths and supports directory filtering", asyn
   };
 
   assert.equal(allFiles.details?.count, 2);
-  assert.deepEqual(
-    (allFiles.details?.files ?? []).sort(),
-    [path.join(memoryDir, "core", "project", "roadmap.md"), path.join(memoryDir, "core", "user", "identity.md")].sort(),
-  );
+  assert.deepEqual((allFiles.details?.files ?? []).sort(), ["core/project/roadmap.md", "core/user/identity.md"].sort());
   assert.equal(userFiles.details?.count, 1);
-  assert.deepEqual(userFiles.details?.files, [path.join(memoryDir, "core", "user", "identity.md")]);
+  assert.deepEqual(userFiles.details?.files, ["core/user/identity.md"]);
   assert.match(allFiles.content[0]?.text ?? "", /Memory files \(2\):/);
 });
 
@@ -257,8 +254,8 @@ test("memory_list includes shared global files when global memory is enabled", a
   const globalMemoryDir = path.join(settings.localPath, "global");
   const projectMemoryDir = path.join(settings.localPath, path.basename(projectDir));
 
-  writeMemoryFile(path.join(globalMemoryDir, "core", "user", "prefer.md"), "# Preferences", {
-    description: "Global preferences",
+  writeMemoryFile(path.join(globalMemoryDir, "USER.md"), "# User Profile", {
+    description: "Global user profile and preferences",
   });
   writeMemoryFile(path.join(projectMemoryDir, "core", "project", "overview.md"), "# Overview", {
     description: "Project overview",
@@ -273,18 +270,12 @@ test("memory_list includes shared global files when global memory is enabled", a
   };
 
   assert.equal(allFiles.details?.count, 2);
-  assert.deepEqual(allFiles.details?.files, [
-    path.join(globalMemoryDir, "core", "user", "prefer.md"),
-    path.join(projectMemoryDir, "core", "project", "overview.md"),
-  ]);
+  assert.deepEqual(allFiles.details?.files, [path.join(globalMemoryDir, "USER.md"), "core/project/overview.md"]);
   assert.match(
     allFiles.content[0]?.text ?? "",
-    new RegExp(path.join(globalMemoryDir, "core", "user", "prefer.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    new RegExp(path.join(globalMemoryDir, "USER.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
-  assert.match(
-    allFiles.content[0]?.text ?? "",
-    new RegExp(path.join(projectMemoryDir, "core", "project", "overview.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-  );
+  assert.match(allFiles.content[0]?.text ?? "", /core\/project\/overview\.md/);
 });
 
 test("memory_list rejects symlink directories", async () => {

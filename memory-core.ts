@@ -351,10 +351,10 @@ export function writeMemoryFile(filePath: string, content: string, frontmatter: 
 //     });
 //   }
 //
-//   const preferFile = path.join(getMemoryUserDir(memoryDir), "prefer.md");
-//   if (!fs.existsSync(preferFile)) {
+//   const userFile = path.join(getMemoryUserDir(memoryDir), "USER.md");
+//   if (!fs.existsSync(userFile)) {
 //     writeMemoryFile(
-//       preferFile,
+//       userFile,
 //       "# User Preferences\n\n## Communication Style\n- Be concise\n- Show code examples\n\n## Code Style\n- 2 space indentation\n- Prefer const over var\n- Functional programming preferred",
 //       {
 //         description: "User habits and code style preferences",
@@ -378,13 +378,11 @@ export function countMemoryContextFiles(context: string): number {
   return context.split("\n").filter((line) => line.startsWith("-")).length;
 }
 
-async function readCoreMemoryFiles(
+async function readMemoryFiles(
   memoryDir: string,
 ): Promise<{ files: string[]; memories: Array<MemoryFile | null> } | null> {
-  const coreDir = getMemoryCoreDir(memoryDir);
-
   try {
-    const stat = await fs.promises.stat(coreDir);
+    const stat = await fs.promises.stat(memoryDir);
     if (!stat.isDirectory()) {
       return null;
     }
@@ -392,7 +390,7 @@ async function readCoreMemoryFiles(
     return null;
   }
 
-  const files = await listMemoryFilesAsync(coreDir);
+  const files = await listMemoryFilesAsync(memoryDir);
   if (files.length === 0) {
     return null;
   }
@@ -422,14 +420,15 @@ function appendMemoryFileLines(lines: string[], files: string[], memories: Array
 type MemoryContextScope = {
   label: string;
   memoryDir: string;
+  scanDir?: string;
 };
 
 async function buildMemoryContextSection(scope: MemoryContextScope): Promise<string[] | null> {
-  const coreFiles = await readCoreMemoryFiles(scope.memoryDir);
-  if (!coreFiles) return null;
+  const scannedFiles = await readMemoryFiles(scope.scanDir ?? scope.memoryDir);
+  if (!scannedFiles) return null;
 
   const lines: string[] = [`## ${scope.label}`, "", `${scope.label} directory: ${scope.memoryDir}`, ""];
-  appendMemoryFileLines(lines, coreFiles.files, coreFiles.memories);
+  appendMemoryFileLines(lines, scannedFiles.files, scannedFiles.memories);
   return lines;
 }
 
@@ -448,6 +447,7 @@ export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: s
   scopes.push({
     label: "Project Memory",
     memoryDir: projectMemoryDir,
+    scanDir: getMemoryCoreDir(projectMemoryDir),
   });
 
   const sections = (await Promise.all(scopes.map((scope) => buildMemoryContextSection(scope)))).filter(

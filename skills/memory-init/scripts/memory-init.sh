@@ -97,7 +97,7 @@ main() {
   [ "$GLOBAL_ENABLED" = "true" ] && log "Global: $GLOBAL_DIR"
   
   # 3. Check if already initialized
-  if [ -d "$PROJECT_DIR/core/project" ] || [ -d "$PROJECT_DIR/core/task" ] || [ -f "$PROJECT_DIR/core/prefer.md" ]; then
+  if [ -d "$PROJECT_DIR/core/project" ] || [ -f "$PROJECT_DIR/core/TASK.md" ] || [ -f "$PROJECT_DIR/core/USER.md" ] || [ -f "$PROJECT_DIR/core/MEMORY.md" ]; then
     log "Memory already initialized at $PROJECT_DIR"
     log "Remove the existing core entries manually if you want to re-initialize"
     exit 0
@@ -120,10 +120,9 @@ main() {
   # 5. Create directory structure
   log "Creating directories..."
   mkdir -p "$PROJECT_DIR/core/project"
-  mkdir -p "$PROJECT_DIR/core/task"
   
   if [ "$GLOBAL_ENABLED" = "true" ]; then
-    mkdir -p "$GLOBAL_DIR/core/task"
+    mkdir -p "$GLOBAL_DIR"
   fi
   
   log "Memory initialized successfully!"

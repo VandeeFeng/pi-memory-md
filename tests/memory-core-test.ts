@@ -305,9 +305,9 @@ test("buildMemoryContextAsync includes shared global memory before project memor
   const globalMemoryDir = getGlobalMemoryDir(settings);
 
   assert.ok(globalMemoryDir);
-  writeMemoryFile(path.join(globalMemoryDir, "core", "user", "prefer.md"), "# Preferences", {
-    description: "Global preferences",
-    tags: ["global"],
+  writeMemoryFile(path.join(globalMemoryDir, "USER.md"), "# User Profile", {
+    description: "Global user profile and preferences",
+    tags: ["global", "user", "profile"],
   });
   writeMemoryFile(path.join(projectMemoryDir, "core", "project", "overview.md"), "# Overview", {
     description: "Project overview",
@@ -323,7 +323,7 @@ test("buildMemoryContextAsync includes shared global memory before project memor
   assert.match(context, /## Shared Global Memory/);
   assert.match(
     context,
-    new RegExp(`- ${path.join(globalMemoryDir, "core", "user", "prefer.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    new RegExp(`- ${path.join(globalMemoryDir, "USER.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   );
   assert.match(context, /## Project Memory/);
   assert.match(

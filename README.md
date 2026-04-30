@@ -105,17 +105,15 @@ Markdown content...
 ```
 ~/.pi/memory-md/
 ├── global/                 # Optional shared memory when globalMemory is enabled
-│   └── core/
-│       ├── prefer.md       # Optional shared preferences
-│       └── task/
-│           └── task.md     # Optional shared task template
+│   ├── USER.md             # Optional shared user profile and preferences
+│   ├── MEMORY.md           # Optional shared durable notes, conventions, and lessons learned
+│   └── TASK.md             # Optional shared task template
 └── project-name/
     ├── core/
-    │   ├── prefer.md       # Optional project preferences
-    │   ├── project/        # Project context
-    │   │   └── tech-stack.md
-    │   └── task/           # Tasks and plans
-    │       └── task.md
+    │   ├── USER.md         # Optional project user profile and preferences
+    │   ├── TASK.md         # Optional project task template
+    │   └── project/        # Project context
+    │       └── tech-stack.md
     ├── docs/               # Optional root-level reference docs
     ├── archive/            # Optional historical info
     ├── research/           # Optional research notes
@@ -247,7 +245,7 @@ You can also explicitly request operations:
 ```
 You: List all memory files for this project.
 You: Search memory for "typescript" preferences.
-You: Read core/prefer.md
+You: Read core/USER.md
 You: Sync my changes to the repository.
 ```
 
@@ -313,10 +311,10 @@ Paths below are relative to that directory.
 
 Available memory files (use read to view full content):
 
-- core/prefer.md [high priority]
+- core/USER.md [high priority]
   recent focus: read 12-28
-  Description: User preferences
-  Tags: user, preferences
+  Description: User profile and preferences
+  Tags: user, profile, preferences
 
 ---
 
@@ -367,7 +365,7 @@ Recently active project files (full paths from read/edit/write tool usage):
         // "alwaysInclude" is deprecated
         // Files or directories to always include in context (optional, defaults to empty)
         "whitelist": [
-          "core/prefer.md",
+          "core/USER.md",
           "docs/tape-design.md"
         ],
 

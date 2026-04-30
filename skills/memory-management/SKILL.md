@@ -8,7 +8,7 @@ description: Core memory operations guide for pi-memory-md - create, read, updat
 - **File-based memory**: Each memory is a `.md` file with YAML frontmatter
 - **Git-backed**: Full version control and cross-device sync
 - **Auto-delivery**: Files in `core/` are automatically delivered into context based on the active delivery mode
-- **Minimal fixed core**: `memory-init` now only guarantees `core/project/` and `core/task/`
+- **Minimal fixed core**: `memory-init` now only guarantees `core/project/`
 - **Organized by purpose**: Fixed structure for core info, flexible for everything else
 
 ## Directory Structure
@@ -18,16 +18,15 @@ description: Core memory operations guide for pi-memory-md - create, read, updat
 ```
 {localPath}/
 ├── {globalMemory}/                # Optional shared memory root when globalMemory is enabled
-│   └── core/
-│       ├── prefer.md              # Optional shared preferences file
-│       └── task/
-│           └── task.md            # Optional shared task template
+│   ├── USER.md                    # Optional shared user profile and preferences
+│   ├── MEMORY.md                  # Optional shared durable notes, conventions, and lessons learned
+│   └── TASK.md                    # Optional shared task template
 └── {project-name}/                # Project memory root
     ├── core/                      # Auto-delivered into context (selection may be tape-aware)
-    │   ├── prefer.md              # Optional project preferences file
-    │   ├── project/               # Project-specific memory folder (pre-created)
-    │   └── task/
-    │       └── task.md            # Optional project task template
+    │   ├── USER.md                # Optional project user profile and preferences
+    │   ├── MEMORY.md              # Optional project durable notes, conventions, and lessons learned
+    │   ├── TASK.md                # Optional project task template
+    │   └── project/               # Project-specific memory folder (pre-created)
     ├── docs/                      # Agent-created reference documentation
     ├── archive/                   # Agent-created historical information
     ├── research/                  # Agent-created research findings
@@ -42,18 +41,19 @@ description: Core memory operations guide for pi-memory-md - create, read, updat
 
 These are the only directories `memory-init` guarantees for a project:
 - `core/project/`
-- `core/task/`
 
 If `globalMemory` is enabled, it also ensures:
-- `{globalMemory}/core/task/`
+- `{globalMemory}/`
 
 ### Common optional files
 
 These files are common, but created only if the user chooses templates or imports preferences:
-- `core/prefer.md`
-- `core/task/task.md`
-- `{globalMemory}/core/prefer.md`
-- `{globalMemory}/core/task/task.md`
+- `core/USER.md`
+- `core/MEMORY.md`
+- `core/TASK.md`
+- `{globalMemory}/USER.md`
+- `{globalMemory}/MEMORY.md`
+- `{globalMemory}/TASK.md`
 
 ### Flexible root-level organization
 
@@ -69,13 +69,15 @@ Everything outside `core/` is flexible. Common examples:
 ### Does this need to be in EVERY conversation?
 
 **Yes** → Place under `core/`
-- Project preferences → `core/prefer.md`
-- Project tasks/plans → `core/task/`
+- User profile and preferences → `core/USER.md`
+- Durable project notes, conventions, and lessons learned → `core/MEMORY.md`
+- Project tasks/plans → `core/TASK.md`
 - General project knowledge → `core/project/`
 
-**Maybe shared across ALL projects?** → Place under `{globalMemory}/core/` when `globalMemory` is enabled
-- Shared preferences → `{globalMemory}/core/prefer.md`
-- Shared tasks/plans → `{globalMemory}/core/task/`
+**Maybe shared across ALL projects?** → Place under `{globalMemory}/` when `globalMemory` is enabled
+- Shared user profile and preferences → `{globalMemory}/USER.md`
+- Shared durable notes, conventions, and lessons learned → `{globalMemory}/MEMORY.md`
+- Shared tasks/plans → `{globalMemory}/TASK.md`
 
 **No** → Place at project root level (same level as `core/`)
 - Reference docs → `docs/`
@@ -109,22 +111,22 @@ updated: "2026-02-14"
 
 ## Examples
 
-### Example 1: Project Preferences (core/prefer.md)
+### Example 1: User Profile and Preferences (core/USER.md)
 
 ```bash
 memory_write(
-  path="core/prefer.md",
-  description="Project preferences and working style",
-  tags=["project", "preferences"],
-  content="# Project Preferences\n\n## Communication Style\n- Be concise\n- Show concrete code changes\n\n## Code Style\n- Prefer simple solutions\n- Keep files focused"
+  path="core/USER.md",
+  description="User profile and working preferences",
+  tags=["user", "profile", "preferences"],
+  content="# User Profile\n\n## Communication Style\n- Be concise\n- Show concrete code changes\n\n## Code Style\n- Prefer simple solutions\n- Keep files focused"
 )
 ```
 
-### Example 2: Project Task Memory (core/task/task.md)
+### Example 2: Project Task Memory (core/TASK.md)
 
 ```bash
 memory_write(
-  path="core/task/task.md",
+  path="core/TASK.md",
   description="Current project task tracking",
   tags=["task", "planning"],
   content="# Current Tasks\n\n- Fix sync issue\n- Update docs"
@@ -185,8 +187,8 @@ To update a file, use `memory_write` with the same path:
 
 ```bash
 memory_write(
-  path="core/prefer.md",
-  description="Updated project preferences",
+  path="core/USER.md",
+  description="Updated user profile and preferences",
   content="New content..."
 )
 ```
@@ -199,10 +201,11 @@ The extension preserves existing `created` date and updates `updated` automatica
 
 **Directories guaranteed by `memory-init`:**
 - `project/` - Project-specific information
-- `task/` - Task and planning files
+- `TASK.md` - Task and planning file
 
-**Common optional file at `core/` root:**
-- `prefer.md` - Project preferences
+**Common optional files at `core/` root:**
+- `USER.md` - User profile and preferences
+- `MEMORY.md` - Durable notes, conventions, and lessons learned
 
 Avoid inventing extra `core/` subfolders unless there is a clear reason and the structure is intentionally being extended.
 
@@ -224,17 +227,18 @@ Avoid inventing extra `core/` subfolders unless there is a clear reason and the 
 ## Best Practices
 
 ### DO:
-- Use `core/prefer.md` for project-level preferences
-- Use `core/task/` for task and planning memory
+- Use `core/USER.md` for user profile and preferences
+- Use `core/MEMORY.md` for durable notes, conventions, and lessons learned
+- Use `core/TASK.md` for task and planning memory
 - Use `core/project/` for project-specific knowledge meant for regular delivery
-- Use `{globalMemory}/core/` only for truly cross-project memory
+- Use `{globalMemory}/` only for truly cross-project memory
 - Use root level for reference, historical, and research content
 - Keep files focused on a single topic
 - Organize root level folders by content type
 
 ### DON'T:
 - Create a `project/` folder at root level (use `core/project/` instead)
-- Assume `core/prefer.md` or task files already exist unless templates were created
+- Assume `core/USER.md`, `core/MEMORY.md`, or task files already exist unless templates were created
 - Put reference docs in `core/` when they are not part of recurring context
 - Create giant files (split into focused topics)
 - Mix unrelated content in same file

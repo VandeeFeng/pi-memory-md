@@ -10,7 +10,15 @@ pi-memory-md should first ensure strong memory management and optimization for t
 
 I still believe that things requiring hand-writing should not be delegated to AI or automation, and the global things do not change very frequently ether.
 
+At the outset, I didn’t want `pi-memory-md` to become overly complex. It should be a compatible memory assistant tool, and lately I’ve been continuously experimenting with and refining that compatibility.
+
+Those new Markdown files are not mandatory, they can work well alongside the user’s custom AGENTS.md.
+
 ## Changes
+
+- Updated memory layout naming and initialization paths: shared global files now live directly under `{globalMemory}/` as `USER.md`, `MEMORY.md`, and `TASK.md`, while project task memory now uses `core/TASK.md` instead of `core/task/task.md`.
+  `MEMORY.md` is only offered for `globalMemory`, and preference content is consolidated into `USER.md` instead of separate `prefer.md` files.
+  This keeps the structure closer to agent conventions like Hermes/OpenClaw and only affects newly initialized files and context selection behavior, not existing memory files.
 
 - Clarified native tool path semantics: `memory_write` uses project-memory-relative paths; `memory_list` returns project memory as relative paths and global memory as absolute paths.
   I think global memory should be maintained more manually with user's guide, while project memory is a better fit for pi-memory-md's native tools.
