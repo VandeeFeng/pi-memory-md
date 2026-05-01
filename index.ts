@@ -82,6 +82,7 @@ function ensureTapeRuntime(
   const runtimeKey = [tapeBasePath, project.name, sessionId].join("::");
 
   if (!state.activeTapeRuntime || state.activeTapeRuntime.cacheKey !== runtimeKey) {
+    state.activeTapeRuntime?.service.detachSessionTree();
     const service = TapeService.create(tapeBasePath, project.name, sessionId, ctx.cwd);
     service.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
 
@@ -345,6 +346,10 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    const activeTapeRuntime = state.activeTapeRuntime;
+    state.activeTapeRuntime = null;
+    activeTapeRuntime?.service.detachSessionTree();
+
     if (getHookActions(settings, "sessionEnd").length === 0 || !settings.localPath) {
       return;
     }

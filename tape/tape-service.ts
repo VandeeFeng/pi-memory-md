@@ -110,6 +110,11 @@ export class TapeService {
     this.syncSessionTreeLabels();
   }
 
+  detachSessionTree(): void {
+    this.sessionManager = null;
+    this.labelWriter = null;
+  }
+
   recordSessionStart(reason: "startup" | "reload" | "new" | "resume" | "fork" = "startup"): TapeAnchor {
     const hasExistingEntries = (this.sessionManager?.getEntries().length ?? 0) > 0;
     const anchorName =

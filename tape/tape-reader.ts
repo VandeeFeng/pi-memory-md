@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { SessionEntry, SessionHeader } from "@mariozechner/pi-coding-agent";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
-import { toTimestamp } from "../utils.js";
+import { expandHomePath, resolveFrom, toTimestamp } from "../utils.js";
 
 const DEFAULT_CACHE_SIZE = 100;
 
@@ -62,8 +62,13 @@ const sessionParseCache = new LRUCache<
   FileStatCache<{ header: SessionHeader; entries: SessionEntry[] } | null>
 >();
 
-function getSessionsDir(): string {
-  return path.join(getAgentDir(), "sessions");
+function getSessionParentDir(cwd: string): string {
+  const sessionDir = process.env.PI_CODING_AGENT_SESSION_DIR?.trim();
+  if (!sessionDir) {
+    return path.join(getAgentDir(), "sessions");
+  }
+
+  return resolveFrom(cwd, expandHomePath(sessionDir));
 }
 
 function encodeSessionPath(cwd: string): string {
@@ -71,7 +76,7 @@ function encodeSessionPath(cwd: string): string {
 }
 
 export function getSessionDir(cwd: string): string {
-  return path.join(getSessionsDir(), encodeSessionPath(cwd));
+  return path.join(getSessionParentDir(cwd), encodeSessionPath(cwd));
 }
 
 function getDirectoryMtimeMs(dirPath: string): number | null {

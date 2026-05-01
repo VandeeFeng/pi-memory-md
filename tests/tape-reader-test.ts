@@ -51,6 +51,39 @@ test("getSessionFilePaths reuses the cached file list until the directory change
   }
 });
 
+test("PI_CODING_AGENT_SESSION_DIR takes precedence over PI_CODING_AGENT_DIR for session lookup", () => {
+  const cwd = createTempDir("pi-memory-md-tape-reader-env-cwd");
+  const agentDir = createTempDir("pi-memory-md-tape-reader-env-agent");
+  const sessionRoot = createTempDir("pi-memory-md-tape-reader-env-sessions");
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const previousSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  process.env.PI_CODING_AGENT_SESSION_DIR = sessionRoot;
+
+  try {
+    const encodedPath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+    const configuredSessionDir = path.join(sessionRoot, encodedPath);
+    const defaultSessionDir = path.join(agentDir, "sessions", encodedPath);
+    fs.mkdirSync(configuredSessionDir, { recursive: true });
+    fs.mkdirSync(defaultSessionDir, { recursive: true });
+
+    const configuredFile = path.join(configuredSessionDir, "configured.jsonl");
+    writeSessionFile(path.join(defaultSessionDir, "default.jsonl"), "session-1", []);
+    writeSessionFile(configuredFile, "session-2", []);
+
+    assert.deepEqual(getSessionFilePaths(cwd), [configuredFile]);
+    assert.equal(getSessionFilePath(cwd, "session-2"), configuredFile);
+    assert.equal(getSessionFilePath(cwd, "session-1"), null);
+  } finally {
+    process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    if (previousSessionDir === undefined) {
+      delete process.env.PI_CODING_AGENT_SESSION_DIR;
+    } else {
+      process.env.PI_CODING_AGENT_SESSION_DIR = previousSessionDir;
+    }
+  }
+});
+
 test("getSessionFilePath reuses cached header lookups and invalidates on header change", () => {
   const cwd = createTempDir("pi-memory-md-tape-reader-header-cwd");
   const agentDir = createTempDir("pi-memory-md-tape-reader-header-agent");

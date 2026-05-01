@@ -4,8 +4,14 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ## [Unreleased]
 
+Pi is moving so fast now. I missed the releases for just one week, and there were already so many new features.
+
+I don't know whether this is a good thing or a bad thing for Pi.
+
 ## Changed
 
+- Tape session lookup now respects `PI_CODING_AGENT_SESSION_DIR` before falling back to `PI_CODING_AGENT_DIR/sessions`, because pi `0.71.0` added `PI_CODING_AGENT_SESSION_DIR` for configuring session storage from the environment. See [docs/usage.md#environment-variables](https://github.com/badlogic/pi-mono/blob/v0.71.0/docs/usage.md#environment-variables).
+- Tape runtime now detaches captured `sessionManager` references on session shutdown or runtime replacement via `TapeService.detachSessionTree()`, and clears the active tape runtime during shutdown to avoid reusing stale session-bound objects. See [v0.69.0](https://github.com/badlogic/pi-mono/releases/tag/v0.69.0)
 - Updated TypeBox imports from `@sinclair/typebox` to `typebox` to match pi `0.69.0+`, where pi switched to the new TypeBox package name.
 
 ## [0.1.35] - 2026-04-30
