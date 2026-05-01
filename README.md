@@ -327,6 +327,44 @@ Recently active project files (full paths from read/edit/write tool usage):
 💡 Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.
 ```
 
+### Tape Anchors
+
+Anchors are named checkpoints that correspond to pi session entries, marking important transitions in your conversation. They enable efficient context reconstruction and are mirrored into pi `/tree` labels:
+
+<img src="docs/pi-tree.png" width="400" />
+
+Each line in the tape anchor store is a JSON record:
+```json
+{"id":"1234567890-abc123","timestamp":"2026-04-04T12:00:00.000Z","name":"task/begin","type":"handoff","meta":{"summary":"Working on feature X","purpose":"feature","trigger":"manual"},"sessionId":"019dbd12-90b7-72b1-a88d-843706db32de","sessionEntryId":"446b6c33"}
+```
+
+Each anchor has:
+- **`id`**: A stable unique identifier, auto-generated from `sessionEntryId:timestamp:name`
+- **`name`**: A human-readable label (e.g., `session/new`, `task/begin`)
+- **`type`**: Anchor type - `session` for lifecycle anchors, `handoff` for manual/semantic transitions
+- **`sessionId`**: The pi session this anchor belongs to
+- **`sessionEntryId`**: The associated session entry ID for tree mirroring
+- **`timestamp`**: ISO timestamp of when the anchor was created
+- **`meta`**: Optional metadata including `summary`, `trigger`, `keywords`, `purpose`. `purpose` is a 1-2 word label (e.g., `feature`, `review`, `deploy`). `trigger` can be `direct` (agent auto), `keyword` (configured keywords matched), or `manual` (explicit user/tool call)
+
+In short, tape anchors are markers that connect user intent with conversation history. When a user asks the agent to retrieve relevant information from a large memory space, the real query is often not a precise string match. It is more often a vague intention, decision, or task transition that appeared earlier in the conversation. Anchors preserve those moments as explicit markers, which can be more useful than only optimizing RAG-style retrieval over raw text or database records.
+
+Stored within pi session entries, tape anchors link intent back to the exact place where it appeared in the session history and to the larger body of memory data around it. This makes important moments precisely locatable and traceable: context delivery can reconstruct the relevant memory path from the anchor instead of searching through everything blindly. It can then select relevant memory files and recently active project files around those points, optionally including concise `recent focus` hints like `read 340-420` or `edit 390-399`.
+
+Instead of asking the LLM to infer the user's intent from vague semantic signals later, it is better to record that intent when the user expresses it.
+
+Large context windows do not remove the need for careful context control. For a specific task, the most useful context is still the context that has been selected and shaped precisely. Before relying on RAG, traditional marking, indexing, and search discipline still matter. The quality of text given to the LLM, and the way that information is recorded and managed, directly affect how relevant the model's answers will be once the context grows large.
+
+Beyond context engineering, `tape anchors` is an implementation of text recording and management.
+
+Keywords make this intent-recording process more practical. They act as lightweight signals for moments when the user is likely expressing an important intention, decision, or transition. Instead of waiting for future retrieval to guess what mattered, keyword detection can guide the agent to create a keyword anchor at the moment the intent appears.
+
+Keyword detection sends a hidden message that asks the agent to consider creating a keyword anchor, and the agent can still refuse when the anchor would not be useful. Anchor names are also mirrored into pi `/tree` labels for the session nodes they attach to, with stale labels cleaned up before resync.
+
+Lifecycle anchors (`session/*`) are created automatically, while handoff anchors can be created manually via `/memory-anchor`. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked, so the agent will not create anchors on its own. Keyword-matched hidden instructions and `/memory-anchor` still work, keeping explicit user control available.
+
+The combination of anchors and keywords closes the loop: intent -> memory data -> intent, while keeping automation under user control. Prompts should evolve into intent.
+
 ### Config Guide
 
 ```json
@@ -404,36 +442,6 @@ Recently active project files (full paths from read/edit/write tool usage):
   }
 }
 ```
-
-### Tape Anchors
-
-Anchors are named checkpoints that correspond to pi session entries, marking important transitions in your conversation. They enable efficient context reconstruction and are mirrored into pi `/tree` labels:
-
-<img src="docs/pi-tree.png" width="400" />
-
-Each line in the tape anchor store is a JSON record:
-```json
-{"id":"1234567890-abc123","timestamp":"2026-04-04T12:00:00.000Z","name":"task/begin","type":"handoff","meta":{"summary":"Working on feature X","purpose":"feature","trigger":"manual"},"sessionId":"019dbd12-90b7-72b1-a88d-843706db32de","sessionEntryId":"446b6c33"}
-```
-
-Each anchor has:
-- **`id`**: A stable unique identifier, auto-generated from `sessionEntryId:timestamp:name`
-- **`name`**: A human-readable label (e.g., `session/new`, `task/begin`)
-- **`type`**: Anchor type - `session` for lifecycle anchors, `handoff` for manual/semantic transitions
-- **`sessionId`**: The pi session this anchor belongs to
-- **`sessionEntryId`**: The associated session entry ID for tree mirroring
-- **`timestamp`**: ISO timestamp of when the anchor was created
-- **`meta`**: Optional metadata including `summary`, `trigger`, `keywords`, `purpose`. `purpose` is a 1-2 word label (e.g., `feature`, `review`, `deploy`). `trigger` can be `direct` (agent auto), `keyword` (configured keywords matched), or `manual` (explicit user/tool call)
-
-In a word, tape anchors are markers that help the agent organize context more effectively according to the user's intention.
-
-Tape anchors are stored as points within pi session entries. The context delivery then selects relevant memory files and recently active project files based on configured strategy, optionally including concise `recent focus` hints like `read 340-420` or `edit 390-399`.
-
-Lifecycle anchors (`session/*`) are created automatically, while handoff anchors can be created via `/memory-anchor` manually. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked, which means the agent will not create anchors automatically, though keyword-matched hidden instructions and `/memory-anchor` still work.
-
-Keyword detection can send a hidden message to guide the agent to create a keyword anchor, but the agent may refuse when unnecessary.Anchor names are also mirrored into pi `/tree` labels for the session nodes they attach to, with stale labels cleaned up before resync.
-
-The combination of anchors and keywords balances the agent's autonomy with user control.
 
 ### Tape Tools (Anchor-based Context)
 
