@@ -10,6 +10,7 @@ I don't know whether this is a good thing or a bad thing for Pi.
 
 ## Changed
 
+- `tape_handoff` is now blocked in `manual` anchor mode before execution unless a keyword match or manual handoff match is present — preventing unauthorized direct calls while preserving keyword-triggered and explicit manual handoffs.
 - Tape session lookup now respects `PI_CODING_AGENT_SESSION_DIR` before falling back to `PI_CODING_AGENT_DIR/sessions`, because pi `0.71.0` added `PI_CODING_AGENT_SESSION_DIR` for configuring session storage from the environment. See [docs/usage.md#environment-variables](https://github.com/badlogic/pi-mono/blob/v0.71.0/docs/usage.md#environment-variables).
 - Tape runtime now detaches captured `sessionManager` references on session shutdown or runtime replacement via `TapeService.detachSessionTree()`, and clears the active tape runtime during shutdown to avoid reusing stale session-bound objects. See [v0.69.0](https://github.com/badlogic/pi-mono/releases/tag/v0.69.0)
 - Updated TypeBox imports from `@sinclair/typebox` to `typebox` to match pi `0.69.0+`, where pi switched to the new TypeBox package name.

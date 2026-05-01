@@ -18,6 +18,7 @@ import {
   detectKeywordHandoff,
   type KeywordHandoffInstruction,
   resolveTapeGate,
+  shouldBlockTapeHandoffCall,
   type TapeGateResult,
 } from "./tape/tape-gate.js";
 import { MemoryFileSelector } from "./tape/tape-selector.js";
@@ -241,6 +242,15 @@ function buildTapeHint(settings: MemoryMdSettings): string {
 }
 
 function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
+  pi.on("tool_call", async (event) => {
+    if (event.toolName !== "tape_handoff") return;
+
+    const reason = shouldBlockTapeHandoffCall(settings, state, event.input.name);
+    if (!reason) return;
+
+    return { block: true, reason };
+  });
+
   pi.on("session_start", async (event, ctx) => {
     ensureTapeRuntime(settings, state, ctx, { recordSessionStart: true, sessionStartReason: event.reason });
 

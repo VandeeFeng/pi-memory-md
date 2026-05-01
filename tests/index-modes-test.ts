@@ -180,6 +180,57 @@ test("before_agent_start uses tape context in message-append mode and queues key
   assert.equal(extension.sentMessages[1]?.message.customType, "pi-memory-md-tape-keyword");
 });
 
+test("tool_call blocks direct tape_handoff in manual mode before execution", async () => {
+  const homeDir = createTempDir("pi-memory-md-index-mode-home-tool-call");
+  const projectDir = createTempDir("pi-memory-md-index-mode-project-tool-call");
+  const localPath = path.join(homeDir, "memory-root");
+  createProjectMemory(projectDir, localPath);
+  initGitRepo(projectDir);
+
+  writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": {
+      localPath,
+      tape: {
+        enabled: true,
+        anchor: { mode: "manual", keywords: { global: ["tape"] } },
+      },
+    },
+  });
+
+  const extension = bootExtension(homeDir, projectDir);
+  const toolCall = extension.handlers.get("tool_call");
+  const beforeAgentStart = extension.handlers.get("before_agent_start");
+
+  const directResult = await toolCall?.(
+    { toolName: "tape_handoff", toolCallId: "call-1", input: { name: "task/direct" } },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
+
+  await beforeAgentStart?.(
+    { prompt: "please help with tape labels", systemPrompt: "SYSTEM" },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
+  const keywordResult = await toolCall?.(
+    { toolName: "tape_handoff", toolCallId: "call-2", input: { name: "handoff/other" } },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
+
+  await beforeAgentStart?.(
+    { prompt: "please help with tape labels", systemPrompt: "SYSTEM" },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
+  const keywordAnchorName = String(extension.sentMessages.at(-1)?.message.content).match(/- name: "([^"]+)"/)?.[1];
+  const allowedResult = await toolCall?.(
+    { toolName: "tape_handoff", toolCallId: "call-3", input: { name: keywordAnchorName } },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
+
+  assert.equal((directResult as any).block, true);
+  assert.match((directResult as any).reason, /tape_handoff is disabled/);
+  assert.equal((keywordResult as any).block, true);
+  assert.equal(allowedResult, undefined);
+});
+
 test("before_agent_start skips tape delivery and anchor recording when onlyGit is true outside git repos", async () => {
   const homeDir = createTempDir("pi-memory-md-index-mode-home-git-only");
   const projectDir = createTempDir("pi-memory-md-index-mode-project-git-only");

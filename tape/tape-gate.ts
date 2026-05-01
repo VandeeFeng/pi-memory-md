@@ -1,5 +1,7 @@
 import path from "node:path";
+import type { MemoryMdSettings } from "../types.js";
 import { formatTimeSuffix, getProjectMeta, isPathInside, type ProjectMeta } from "../utils.js";
+import type { PendingHandoffMatch } from "./tape-tools.js";
 import type { TapeConfig, TapeKeywordConfig } from "./tape-types.js";
 
 // Resolve tape gate state from cwd and settings.
@@ -18,6 +20,26 @@ export type KeywordHandoffInstruction = {
   anchorName: string;
   message: string;
 };
+
+export function shouldBlockTapeHandoffCall(
+  settings: MemoryMdSettings,
+  state: { pendingHandoffMatch: PendingHandoffMatch | null },
+  name: unknown,
+): string | null {
+  const handoffMode = settings.tape?.anchor?.mode ?? "auto";
+  if (handoffMode !== "manual") return null;
+
+  const handoffMatch = state.pendingHandoffMatch;
+  if (handoffMatch?.trigger === "manual") return null;
+
+  if (handoffMatch?.trigger === "keyword" && handoffMatch.instruction.anchorName === name) return null;
+
+  if (handoffMatch?.trigger === "keyword") {
+    state.pendingHandoffMatch = null;
+  }
+
+  return 'tape_handoff is disabled when tape.anchor.mode="manual" unless a keyword or manual handoff match is present.';
+}
 
 export function resolveTapeGate(cwd: string, tape?: TapeConfig): TapeGateResult {
   const absoluteCwd = path.resolve(cwd);
