@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import { setImmediate as waitForNextTick } from "node:timers/promises";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type {
+  BeforeAgentStartEvent,
+  BeforeAgentStartEventResult,
+  ExtensionAPI,
+  ExtensionContext,
+} from "@mariozechner/pi-coding-agent";
 import { getHookActions, runHookTrigger } from "./hooks.js";
 import {
   buildMemoryContextAsync,
@@ -117,6 +122,33 @@ async function runHookAction(pi: ExtensionAPI, settings: MemoryMdSettings, actio
   }
 }
 
+function notifyHookResults(
+  ctx: ExtensionContext,
+  settings: MemoryMdSettings,
+  phase: "sessionStart" | "sessionEnd",
+  results: Awaited<ReturnType<typeof runHookTrigger>>,
+): void {
+  if (!settings.repoUrl) return;
+
+  const label = phase === "sessionStart" ? "start" : "end";
+  for (const { action, result } of results) {
+    if (result.success && !result.updated) continue;
+    ctx.ui.notify(`${result.message} (${label}/${action})`, result.success ? "info" : "error");
+  }
+}
+
+function runHookTriggerWithNotify(
+  pi: ExtensionAPI,
+  settings: MemoryMdSettings,
+  ctx: ExtensionContext,
+  phase: "sessionStart" | "sessionEnd",
+): ReturnType<typeof runHookTrigger> {
+  return runHookTrigger(settings, phase, (action) => runHookAction(pi, settings, action)).then((results) => {
+    notifyHookResults(ctx, settings, phase, results);
+    return results;
+  });
+}
+
 async function cacheInitialContext(
   settings: MemoryMdSettings,
   state: ExtensionState,
@@ -193,17 +225,7 @@ function initDeliveryContent(
   }
 
   if (options.runSessionStartHooks && settings.localPath && getHookActions(settings, "sessionStart").length > 0) {
-    state.sessionStartHookPromise = runHookTrigger(settings, "sessionStart", (action) =>
-      runHookAction(pi, settings, action),
-    ).then((results) => {
-      if (settings.repoUrl) {
-        for (const { action, result } of results) {
-          if (result.success && !result.updated) continue;
-          ctx.ui.notify(`${result.message} (start/${action})`, result.success ? "info" : "error");
-        }
-      }
-      return results;
-    });
+    state.sessionStartHookPromise = runHookTriggerWithNotify(pi, settings, ctx, "sessionStart");
   } else {
     state.sessionStartHookPromise = null;
   }
@@ -239,6 +261,92 @@ function buildTapeHint(settings: MemoryMdSettings): string {
   }
 
   return `\n\n${lines.join("\n")}\n`;
+}
+
+async function prepareBeforeAgentStart(
+  pi: ExtensionAPI,
+  settings: MemoryMdSettings,
+  state: ExtensionState,
+  ctx: ExtensionContext,
+): Promise<void> {
+  ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
+
+  const needsContextInit = !state.initialMemoryContext && !state.initialTapeContext && !state.contextWarmupPromise;
+  if (needsContextInit) {
+    const initialized = initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: false });
+    if (!initialized && !state.contextWarmupPromise) {
+      state.contextWarmupPromise = Promise.resolve();
+    }
+  }
+
+  if (state.contextWarmupPromise) await state.contextWarmupPromise;
+
+  if (state.sessionStartHookPromise) {
+    await state.sessionStartHookPromise;
+    state.sessionStartHookPromise = null;
+  }
+}
+
+function handleTapeBeforeAgentStart(
+  pi: ExtensionAPI,
+  settings: MemoryMdSettings,
+  state: ExtensionState,
+  ctx: ExtensionContext,
+  event: BeforeAgentStartEvent,
+): { tapeEnabled: boolean; tapeActive: boolean } {
+  const tapeEnabled = settings.tape?.enabled === true;
+  const tapeActive = state.tapeGate?.enabled === true && state.activeTapeRuntime !== null;
+  const keywordHandoff = tapeActive ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
+
+  if (state.pendingHandoffMatch?.trigger !== "manual") {
+    state.pendingHandoffMatch = keywordHandoff ? { trigger: "keyword", instruction: keywordHandoff } : null;
+  }
+
+  if (keywordHandoff) {
+    ctx.ui.notify(`Tape keyword detected: ${keywordHandoff.primary}`, "info");
+  }
+
+  queueKeywordHandoffMessage(pi, keywordHandoff);
+  return { tapeEnabled, tapeActive };
+}
+
+function deliverStartupContext(
+  settings: MemoryMdSettings,
+  state: ExtensionState,
+  ctx: ExtensionContext,
+  event: BeforeAgentStartEvent,
+  tapeState: { tapeEnabled: boolean; tapeActive: boolean },
+): BeforeAgentStartEventResult | undefined {
+  const mode = settings.delivery ?? settings.injection ?? "message-append";
+  const shouldDeliverInitialContext = mode === "system-prompt" || !state.hasDeliveredInitialContext;
+
+  if (tapeState.tapeActive && state.initialTapeContext && shouldDeliverInitialContext) {
+    const { content, fileCount } = state.initialTapeContext;
+    ctx.ui.notify(`Tape mode: ${fileCount} memory files delivered (${mode})`, "info");
+
+    if (mode === "system-prompt") {
+      return { systemPrompt: `${event.systemPrompt}\n\n${content}` };
+    }
+
+    state.hasDeliveredInitialContext = true;
+    return { message: { customType: "pi-memory-md-tape", content, display: false } };
+  }
+
+  if (tapeState.tapeEnabled && !tapeState.tapeActive) return undefined;
+
+  if (state.initialMemoryContext && shouldDeliverInitialContext) {
+    const { content, fileCount } = state.initialMemoryContext;
+    ctx.ui.notify(`Memory delivered: ${fileCount} files (${mode})`, "info");
+
+    if (mode === "message-append") {
+      state.hasDeliveredInitialContext = true;
+      return { message: { customType: "pi-memory-md", content, display: false } };
+    }
+
+    return { systemPrompt: `${event.systemPrompt}\n\n${content}` };
+  }
+
+  return undefined;
 }
 
 function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
@@ -278,81 +386,9 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
-
-    const needsContextInit = !state.initialMemoryContext && !state.initialTapeContext && !state.contextWarmupPromise;
-
-    if (needsContextInit) {
-      const initialized = initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: false });
-      if (!initialized && !state.contextWarmupPromise) {
-        state.contextWarmupPromise = Promise.resolve();
-      }
-    }
-
-    if (state.contextWarmupPromise) {
-      await state.contextWarmupPromise;
-    }
-
-    if (state.sessionStartHookPromise) {
-      await state.sessionStartHookPromise;
-      state.sessionStartHookPromise = null;
-    }
-
-    const mode = settings.delivery ?? settings.injection ?? "message-append";
-    const shouldDeliverInitialContext = mode === "system-prompt" || !state.hasDeliveredInitialContext;
-    const tapeEnabled = settings.tape?.enabled;
-    const tapeActive = state.tapeGate?.enabled === true && state.activeTapeRuntime !== null;
-    const keywordHandoff = tapeActive ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
-
-    if (state.pendingHandoffMatch?.trigger !== "manual") {
-      state.pendingHandoffMatch = keywordHandoff ? { trigger: "keyword", instruction: keywordHandoff } : null;
-    }
-
-    if (keywordHandoff) {
-      ctx.ui.notify(`Tape keyword detected: ${keywordHandoff.primary}`, "info");
-    }
-
-    queueKeywordHandoffMessage(pi, keywordHandoff);
-
-    if (tapeActive && state.initialTapeContext && shouldDeliverInitialContext) {
-      const { content, fileCount } = state.initialTapeContext;
-
-      ctx.ui.notify(`Tape mode: ${fileCount} memory files delivered (${mode})`, "info");
-
-      if (mode === "system-prompt") {
-        return { systemPrompt: `${event.systemPrompt}\n\n${content}` };
-      }
-
-      state.hasDeliveredInitialContext = true;
-      return {
-        message: { customType: "pi-memory-md-tape", content, display: false },
-      };
-    }
-
-    if (tapeEnabled && !tapeActive) {
-      return;
-    }
-
-    if (state.initialMemoryContext && shouldDeliverInitialContext) {
-      const { content, fileCount } = state.initialMemoryContext;
-
-      ctx.ui.notify(`Memory delivered: ${fileCount} files (${mode})`, "info");
-
-      if (mode === "message-append") {
-        state.hasDeliveredInitialContext = true;
-        return {
-          message: {
-            customType: "pi-memory-md",
-            content,
-            display: false,
-          },
-        };
-      }
-
-      return { systemPrompt: `${event.systemPrompt}\n\n${content}` };
-    }
-
-    return undefined;
+    await prepareBeforeAgentStart(pi, settings, state, ctx);
+    const tapeState = handleTapeBeforeAgentStart(pi, settings, state, ctx, event);
+    return deliverStartupContext(settings, state, ctx, event, tapeState);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
@@ -370,14 +406,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       return;
     }
 
-    const results = await runHookTrigger(settings, "sessionEnd", (action) => runHookAction(pi, settings, action));
-
-    if (settings.repoUrl) {
-      for (const { action, result } of results) {
-        if (result.success && !result.updated) continue;
-        ctx.ui.notify(`${result.message} (end/${action})`, result.success ? "info" : "error");
-      }
-    }
+    await runHookTriggerWithNotify(pi, settings, ctx, "sessionEnd");
   });
 }
 
@@ -421,7 +450,7 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
     },
   });
 
-  // TODO: memory-init moved to SKILL
+  // memory-init moved to SKILL
   // pi.registerCommand("memory-init", {
   //   description: "Initialize memory repository",
   //   handler: async (_args, ctx) => {
