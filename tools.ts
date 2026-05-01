@@ -3,7 +3,7 @@ import path from "node:path";
 import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import {
   getCurrentDate,
   getGlobalMemoryDir,

@@ -2,6 +2,12 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
+## [Unreleased]
+
+## Changed
+
+- Updated TypeBox imports from `@sinclair/typebox` to `typebox` to match pi `0.69.0+`, where pi switched to the new TypeBox package name.
+
 ## [0.1.35] - 2026-04-30
 
 For global and shared knowledge, I still personally prefer AGENTS.md + manual management. So I won't add global memory writes to `memory_write`; the native `write` tool + AGENTS.md is already convenient enough.
