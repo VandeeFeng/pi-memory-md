@@ -8,8 +8,19 @@ Pi is moving so fast now. I missed the releases for just one week, and there wer
 
 I don't know whether this is a good thing or a bad thing for Pi.
 
+`memory_write` tool is also a bad design. In the beginning, it was just like `memory_read` — both started as skill + script. Now I'm back to that original simple pattern.
+
+As pi versions move forward, the custom TUI rendering can run into a few small bugs, and frankly, that's not where I want to spend my energy. The behavior implemented by `memory_write` does not really need to be a tool; apart from looking a little nicer, the custom TUI rendering does not add much practical value.
+
+With these skills, users can customize their own slash commands based on their needs.
+
+## New Features
+
+- **`memory-import` skill**: New skill for importing durable knowledge from URLs, folders, or files into pi-memory-md. Uses `npx defuddle` for web content extraction, analyzes sources before writing, asks for focus confirmation, and generates memories directly via `memory_write` with proper description, tags, and source references.
+
 ## Changed
 
+- **`memory-write` skill**: Replaced the removed `memory_write` tool. Now uses bundled `scripts/memory-write.sh` to resolve memory directory, create files with validated frontmatter (`description`, `tags`, `created`, `updated`), and refresh `updated` timestamps on edits. Preserves YAML frontmatter when updating existing memories.
 - `tape_handoff` is now blocked in `manual` anchor mode before execution unless a keyword match or manual handoff match is present — preventing unauthorized direct calls while preserving keyword-triggered and explicit manual handoffs.
 - Tape session lookup now respects `PI_CODING_AGENT_SESSION_DIR` before falling back to `PI_CODING_AGENT_DIR/sessions`, because pi `0.71.0` added `PI_CODING_AGENT_SESSION_DIR` for configuring session storage from the environment. See [docs/usage.md#environment-variables](https://github.com/badlogic/pi-mono/blob/v0.71.0/docs/usage.md#environment-variables).
 - Tape runtime now detaches captured `sessionManager` references on session shutdown or runtime replacement via `TapeService.detachSessionTree()`, and clears the active tape runtime during shutdown to avoid reusing stale session-bound objects. See [v0.69.0](https://github.com/badlogic/pi-mono/releases/tag/v0.69.0)

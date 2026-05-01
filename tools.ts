@@ -5,18 +5,15 @@ import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 import {
-  getCurrentDate,
   getGlobalMemoryDir,
   getMemoryCoreDir,
   getMemoryDir,
   // initializeMemoryDirectory, // TODO: unused after memory-init moved to SKILL
   isMemoryInitialized,
   listMemoryFilesAsync,
-  readMemoryFileAsync,
-  writeMemoryFile,
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
-import type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
+import type { MemoryMdSettings } from "./types.js";
 import { getProjectMeta, hasSymlinkInPath, resolvePathWithin } from "./utils.js";
 
 // Re-export types for convenience
@@ -72,32 +69,33 @@ function renderCollapsed(summary: string, fullText: string, options: { expanded:
   return renderText(theme.fg("success", summary) + buildExpandHint(fullText.split("\n").length, theme));
 }
 
-function renderMemoryResult(
-  result: { content: Array<{ type: string; text?: string }>; details?: unknown },
-  options: { expanded: boolean; isPartial: boolean },
-  theme: Theme,
-  defaults?: { description?: string; tags?: string[] },
-): Text {
-  if (options.isPartial) return renderText(theme.fg("warning", "Reading..."));
-  const details = result.details as
-    | { error?: boolean; frontmatter?: { description?: string; tags?: string[] } }
-    | undefined;
-  if (details?.error) return renderText(theme.fg("error", getResultText(result) || "Error"));
-
-  const description = defaults?.description || details?.frontmatter?.description || "Memory file";
-  const tags = defaults?.tags || details?.frontmatter?.tags || [];
-  const text = getResultText(result);
-
-  if (!options.expanded) {
-    const summary = `${theme.fg("success", description)}\n${theme.fg("muted", `Tags: ${tags.join(", ") || "none"}`)}`;
-    return renderText(summary + buildExpandHint(text.split("\n").length + 2, theme));
-  }
-
-  return renderText(
-    theme.fg("success", description) +
-      `\n${theme.fg("muted", `Tags: ${tags.join(", ") || "none"}`)}\n${theme.fg("toolOutput", text)}`,
-  );
-}
+// Deprecated with memory_write tool; kept for transition reference.
+// function renderMemoryResult(
+//   result: { content: Array<{ type: string; text?: string }>; details?: unknown },
+//   options: { expanded: boolean; isPartial: boolean },
+//   theme: Theme,
+//   defaults?: { description?: string; tags?: string[] },
+// ): Text {
+//   if (options.isPartial) return renderText(theme.fg("warning", "Reading..."));
+//   const details = result.details as
+//     | { error?: boolean; frontmatter?: { description?: string; tags?: string[] } }
+//     | undefined;
+//   if (details?.error) return renderText(theme.fg("error", getResultText(result) || "Error"));
+//
+//   const description = defaults?.description || details?.frontmatter?.description || "Memory file";
+//   const tags = defaults?.tags || details?.frontmatter?.tags || [];
+//   const text = getResultText(result);
+//
+//   if (!options.expanded) {
+//     const summary = `${theme.fg("success", description)}\n${theme.fg("muted", `Tags: ${tags.join(", ") || "none"}`)}`;
+//     return renderText(summary + buildExpandHint(text.split("\n").length + 2, theme));
+//   }
+//
+//   return renderText(
+//     theme.fg("success", description) +
+//       `\n${theme.fg("muted", `Tags: ${tags.join(", ") || "none"}`)}\n${theme.fg("toolOutput", text)}`,
+//   );
+// }
 
 function renderSyncResult(
   result: { content: Array<{ type: string; text?: string }>; details?: unknown },
@@ -257,62 +255,64 @@ export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings)
 //   });
 // }
 
-export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings): void {
-  pi.registerTool({
-    name: "memory_write",
-    label: "Memory Write",
-    description: "Create or update a project memory file with YAML frontmatter",
-    parameters: Type.Object({
-      path: Type.String({ description: "Project memory relative path (e.g., 'core/project/architecture.md')" }),
-      content: Type.String({ description: "Markdown content" }),
-      description: Type.String({ description: "Description for frontmatter" }),
-      tags: Type.Optional(Type.Array(Type.String())),
-    }),
-
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const {
-        path: relPath,
-        content,
-        description,
-        tags,
-      } = params as { path: string; content: string; description: string; tags?: string[] };
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const fullPath = resolvePathWithin(memoryDir, relPath);
-
-      if (!fullPath || hasSymlinkInPath(memoryDir, fullPath)) {
-        return {
-          content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
-          details: { error: true },
-        };
-      }
-
-      const existing = await readMemoryFileAsync(fullPath);
-
-      const frontmatter: MemoryFrontmatter = {
-        ...existing?.frontmatter,
-        description,
-        created: existing?.frontmatter.created || getCurrentDate(),
-        updated: getCurrentDate(),
-        ...(tags && { tags }),
-      };
-
-      writeMemoryFile(fullPath, content, frontmatter);
-      return {
-        content: [{ type: "text", text: `Memory file written: ${relPath}` }],
-        details: { path: fullPath, frontmatter },
-      };
-    },
-
-    renderCall: (args, theme) => new Text(buildToolCallText("memory_write", args, theme), 0, 0),
-    renderResult: (result, options, theme) => {
-      const details = result.details as { frontmatter?: { description?: string; tags?: string[] } };
-      return renderMemoryResult(result, options, theme, {
-        description: details?.frontmatter?.description,
-        tags: details?.frontmatter?.tags,
-      });
-    },
-  });
-}
+// Deprecated after migrating memory writes to the memory-write skill.
+// Keep this block commented for reference during transition.
+// export function registerMemoryWrite(pi: ExtensionAPI, settings: MemoryMdSettings): void {
+//   pi.registerTool({
+//     name: "memory_write",
+//     label: "Memory Write",
+//     description: "Create or update a project memory file with YAML frontmatter",
+//     parameters: Type.Object({
+//       path: Type.String({ description: "Project memory relative path (e.g., 'core/project/architecture.md')" }),
+//       content: Type.String({ description: "Markdown content" }),
+//       description: Type.String({ description: "Description for frontmatter" }),
+//       tags: Type.Optional(Type.Array(Type.String())),
+//     }),
+//
+//     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+//       const {
+//         path: relPath,
+//         content,
+//         description,
+//         tags,
+//       } = params as { path: string; content: string; description: string; tags?: string[] };
+//       const memoryDir = getMemoryDir(settings, ctx.cwd);
+//       const fullPath = resolvePathWithin(memoryDir, relPath);
+//
+//       if (!fullPath || hasSymlinkInPath(memoryDir, fullPath)) {
+//         return {
+//           content: [{ type: "text", text: `Invalid memory path: ${relPath}` }],
+//           details: { error: true },
+//         };
+//       }
+//
+//       const existing = await readMemoryFileAsync(fullPath);
+//
+//       const frontmatter: MemoryFrontmatter = {
+//         ...existing?.frontmatter,
+//         description,
+//         created: existing?.frontmatter.created || getCurrentDate(),
+//         updated: getCurrentDate(),
+//         ...(tags && { tags }),
+//       };
+//
+//       writeMemoryFile(fullPath, content, frontmatter);
+//       return {
+//         content: [{ type: "text", text: `Memory file written: ${relPath}` }],
+//         details: { path: fullPath, frontmatter },
+//       };
+//     },
+//
+//     renderCall: (args, theme) => new Text(buildToolCallText("memory_write", args, theme), 0, 0),
+//     renderResult: (result, options, theme) => {
+//       const details = result.details as { frontmatter?: { description?: string; tags?: string[] } };
+//       return renderMemoryResult(result, options, theme, {
+//         description: details?.frontmatter?.description,
+//         tags: details?.frontmatter?.tags,
+//       });
+//     },
+//   });
+// }
 
 export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   pi.registerTool({
@@ -717,7 +717,7 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
 export function registerAllMemoryTools(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   registerMemorySync(pi, settings);
   // registerMemoryRead(pi, settings);
-  registerMemoryWrite(pi, settings);
+  // registerMemoryWrite(pi, settings);
   registerMemoryList(pi, settings);
   registerMemorySearch(pi, settings);
   // registerMemoryInit(pi, settings);

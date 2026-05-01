@@ -38,10 +38,11 @@
       "./index.ts"
     ],
     "skills": [
+      "./skills/memory-import/SKILL.md",
       "./skills/memory-init/SKILL.md",
-      "./skills/memory-management/SKILL.md",
       "./skills/memory-sync/SKILL.md",
-      "./skills/memory-search/SKILL.md"
+      "./skills/memory-search/SKILL.md",
+      "./skills/memory-write/SKILL.md"
     ]
   },
   "files": [

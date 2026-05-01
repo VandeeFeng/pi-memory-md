@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { readMemoryFileAsync, writeMemoryFile } from "../memory-core.js";
-import { registerMemoryCheck, registerMemoryList, registerMemorySearch, registerMemoryWrite } from "../tools.js";
+import { writeMemoryFile } from "../memory-core.js";
+import { registerMemoryCheck, registerMemoryList, registerMemorySearch } from "../tools.js";
 import { createTempDir } from "./test-helpers.js";
 
 type RegisteredTool = {
@@ -123,6 +123,8 @@ async function executeTool(pi: MockPi, name: string, params: Record<string, unkn
 //   assert.equal(result.details?.error, true);
 // });
 
+// Deprecated after migrating memory writes to the memory-write skill.
+/*
 test("memory_write creates a file and preserves created while updating description and tags", async () => {
   const tempDir = createTempDir("pi-memory-md-tools-write");
   const projectDir = path.join(tempDir, "project");
@@ -214,6 +216,7 @@ test("memory_write rejects symlink paths", async () => {
   assert.match(result.content[0]?.text ?? "", /Invalid memory path/);
   assert.equal(result.details?.error, true);
 });
+*/
 
 test("memory_list returns absolute paths and supports directory filtering", async () => {
   const tempDir = createTempDir("pi-memory-md-tools-list");
