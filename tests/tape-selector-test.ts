@@ -276,15 +276,15 @@ test("MemoryFileSelector buildContextFromFilesAsync renders highlights and line 
     lineRangeHours: 6,
   });
 
-  assert.match(context, /# Memory Context/);
-  assert.match(context, new RegExp(`${memoryPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\[high priority\\]`));
+  assert.match(context, /<memory_context mode="tape">/);
+  assert.match(context, new RegExp(`- path: ${memoryPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   // assert.match(context, / {2}recent focus: read 3-6/);  // memory_read removed
-  assert.match(context, /Description: Identity/);
-  assert.match(context, /Tags: user, profile/);
-  assert.match(context, /Recently active project files/);
+  assert.match(context, /description: Identity/);
+  assert.match(context, /tags: user, profile/);
+  assert.match(context, /<active_project_files>/);
   assert.match(context, new RegExp(projectFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(context, / {2}recent focus: read 20-22, edit 12-14/);
-  assert.match(context, /\[high priority\]/);
+  assert.match(context, /priority: high/);
 });
 
 test("MemoryFileSelector line ranges follow the effective smart scan window", async () => {

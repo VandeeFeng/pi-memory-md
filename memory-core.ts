@@ -372,7 +372,9 @@ export function writeMemoryFile(filePath: string, content: string, frontmatter: 
 // }
 
 export function formatMemoryContext(context: string): string {
-  return context.trimStart().startsWith("# Memory Context") ? context : `# Memory Context\n\n${context}`;
+  return context.trimStart().startsWith("<memory_context")
+    ? context
+    : `<memory_context mode="normal">\n${context}\n</memory_context>`;
 }
 
 export function countMemoryContextFiles(context: string): number {
@@ -402,21 +404,29 @@ async function readMemoryFiles(
   };
 }
 
+export function memoryFileEntryTpl(entry: {
+  path: string;
+  description?: string;
+  tags?: string[] | string;
+  priority?: "normal" | "high";
+}): string[] {
+  const tags = Array.isArray(entry.tags) ? entry.tags.join(", ") : entry.tags;
+  return [
+    `- path: ${entry.path}`,
+    `  priority: ${entry.priority ?? "normal"}`,
+    `  description: ${entry.description || "No description"}`,
+    `  tags: ${tags || "none"}`,
+  ];
+}
+
 export function memoryContextTpl(
   entries: Array<{ path: string; memory: MemoryFile }> = [],
-  options: { includeHeader?: boolean } = {},
+  options: { includeHeader?: boolean; mode?: "normal" | "tape" } = {},
 ): string[] {
   const lines: string[] = [];
 
   if (options.includeHeader !== false) {
-    lines.push(
-      "# Memory Context",
-      "",
-      "These memory files can help you better understand the project and the user.",
-      "",
-      "Available memory files:",
-      "",
-    );
+    lines.push(`<memory_context mode="${options.mode ?? "normal"}">`);
   }
 
   for (const entry of entries) {
@@ -425,10 +435,7 @@ export function memoryContextTpl(
     }
 
     const { description, tags } = entry.memory.frontmatter;
-    lines.push(`- ${entry.path}`);
-    lines.push(`  Description: ${description}`);
-    lines.push(`  Tags: ${tags?.join(", ") || "none"}`);
-    lines.push("");
+    lines.push(...memoryFileEntryTpl({ path: entry.path, description, tags }));
   }
 
   return lines;
@@ -444,15 +451,14 @@ async function buildMemoryContextSection(scope: MemoryContextScope): Promise<str
   const scannedFiles = await readMemoryFiles(scope.scanDir ?? scope.memoryDir);
   if (!scannedFiles) return null;
 
-  const lines: string[] = [`## ${scope.label}`, "", `${scope.label} directory: ${scope.memoryDir}`, ""];
-  lines.push(
-    ...memoryContextTpl(
-      scannedFiles.files
-        .map((filePath, index) => ({ path: filePath, memory: scannedFiles.memories[index] }))
-        .filter((entry): entry is { path: string; memory: MemoryFile } => Boolean(entry.memory)),
-      { includeHeader: false },
-    ),
-  );
+  const source = scope.label === "Shared Global Memory" ? "global" : "project";
+  const lines: string[] = [`<memory_files source="${source}" directory="${scope.memoryDir}">`];
+  const entries = scannedFiles.files
+    .map((filePath, index) => ({ path: filePath, memory: scannedFiles.memories[index] }))
+    .filter((entry): entry is { path: string; memory: MemoryFile } => Boolean(entry.memory));
+
+  lines.push(...memoryContextTpl(entries, { includeHeader: false }));
+  lines.push("</memory_files>");
   return lines;
 }
 
@@ -482,11 +488,12 @@ export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: s
     return "";
   }
 
-  const lines = memoryContextTpl();
+  const lines = memoryContextTpl([], { mode: "normal" });
 
   for (const section of sections) {
     lines.push(...section);
   }
 
+  lines.push("</memory_context>");
   return lines.join("\n");
 }

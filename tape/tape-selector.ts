@@ -4,7 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import matter from "gray-matter";
-import { DEFAULT_MEMORY_SCAN, type MemoryFile, memoryContextTpl, normalizeMemoryScanRange } from "../memory-core.js";
+import { DEFAULT_MEMORY_SCAN, memoryFileEntryTpl, normalizeMemoryScanRange } from "../memory-core.js";
 import { getProjectMeta, hoursAgoIso, isPathInside, resolveFrom, toRelativeIfInside, toTimestamp } from "../utils.js";
 import {
   analyzePathAccess,
@@ -357,18 +357,13 @@ export class MemoryFileSelector {
     highlightedPaths: Set<string>,
     rangeMap: Map<string, LineRange[]>,
   ): Promise<string> {
-    const lines = memoryContextTpl();
+    const lines = ['<memory_context mode="tape">'];
     const groupedEntries = this.groupContextEntries(fileEntries);
 
     await this.appendMemoryEntriesAsync(lines, groupedEntries.memoryEntries, highlightedPaths, rangeMap);
-    this.appendProjectEntries(
-      lines,
-      groupedEntries.projectEntries,
-      highlightedPaths,
-      rangeMap,
-      groupedEntries.hasMemory,
-    );
+    this.appendProjectEntries(lines, groupedEntries.projectEntries, highlightedPaths, rangeMap);
 
+    lines.push("</memory_context>");
     return lines.join("\n");
   }
 
@@ -401,7 +396,10 @@ export class MemoryFileSelector {
     highlightedPaths: Set<string>,
     rangeMap: Map<string, LineRange[]>,
   ): Promise<void> {
+    lines.push("<memory_files>");
+
     if (memoryEntries.length === 0) {
+      lines.push("empty", "</memory_files>");
       return;
     }
 
@@ -415,6 +413,8 @@ export class MemoryFileSelector {
       if (!entry || !frontmatter) continue;
       this.appendMemoryEntry(lines, entry, highlightedPaths, rangeMap, frontmatter);
     }
+
+    lines.push("</memory_files>");
   }
 
   private appendMemoryEntry(
@@ -433,25 +433,13 @@ export class MemoryFileSelector {
     highlightedPaths: Set<string>,
     frontmatter: { description: string; tags: string },
   ): string[] {
-    return memoryContextTpl([this.toMemoryContextFile(entry, highlightedPaths, frontmatter)], { includeHeader: false });
-  }
-
-  private toMemoryContextFile(
-    entry: ContextFileEntry,
-    highlightedPaths: Set<string>,
-    frontmatter: { description: string; tags: string },
-  ): { path: string; memory: MemoryFile } {
-    return {
-      path: this.formatPathLabel(entry.displayPath, highlightedPaths),
-      memory: {
-        path: entry.displayPath,
-        frontmatter: {
-          description: frontmatter.description,
-          tags: frontmatter.tags === "none" ? [] : frontmatter.tags.split(", ").filter(Boolean),
-        },
-        content: "",
-      },
-    };
+    const priority = highlightedPaths.has(entry.absolutePath) ? "high" : "normal";
+    return memoryFileEntryTpl({
+      path: entry.displayPath,
+      priority,
+      description: frontmatter.description,
+      tags: frontmatter.tags,
+    });
   }
 
   private appendProjectEntries(
@@ -459,30 +447,21 @@ export class MemoryFileSelector {
     projectEntries: ContextFileEntry[],
     highlightedPaths: Set<string>,
     rangeMap: Map<string, LineRange[]>,
-    hasMemoryEntries: boolean,
   ): void {
+    lines.push("<active_project_files>");
+
     if (projectEntries.length === 0) {
+      lines.push("empty", "</active_project_files>");
       return;
     }
 
-    if (hasMemoryEntries) {
-      lines.push("---", "");
-    } else {
-      lines.push("", "");
-    }
-
-    lines.push("Recently active project files (full paths from read/edit/write tool usage):", "");
-
     for (const entry of projectEntries) {
-      lines.push(`- ${this.formatPathLabel(entry.displayPath, highlightedPaths)}`);
+      const priority = highlightedPaths.has(entry.absolutePath) ? "high" : "normal";
+      lines.push(`- path: ${entry.displayPath}`, `  priority: ${priority}`);
       this.appendLineRanges(lines, entry.absolutePath, rangeMap);
     }
 
-    lines.push("");
-  }
-
-  private formatPathLabel(filePath: string, highlightedPaths: Set<string>): string {
-    return highlightedPaths.has(filePath) ? `${filePath} [high priority]` : filePath;
+    lines.push("</active_project_files>");
   }
 
   private appendLineRanges(lines: string[], absolutePath: string, rangeMap: Map<string, LineRange[]>): void {

@@ -20,6 +20,7 @@ With these skills, users can customize their own slash commands based on their n
 
 ## Changed
 
+- Refined delivered context formatting to compact XML-like sections with `mode="normal" | "tape"`, unified memory file entries, and clearer global/project source markers, making context easier for LLMs to parse.
 - **`memory-write` skill**: Replaced the removed `memory_write` tool. Now uses bundled `scripts/memory-write.sh` to resolve memory directory, create files with validated frontmatter (`description`, `tags`, `created`, `updated`), and refresh `updated` timestamps on edits. Preserves YAML frontmatter when updating existing memories.
 - `tape_handoff` is now blocked in `manual` anchor mode before execution unless a keyword match or manual handoff match is present — preventing unauthorized direct calls while preserving keyword-triggered and explicit manual handoffs.
 - Tape session lookup now respects `PI_CODING_AGENT_SESSION_DIR` before falling back to `PI_CODING_AGENT_DIR/sessions`, because pi `0.71.0` added `PI_CODING_AGENT_SESSION_DIR` for configuring session storage from the environment. See [docs/usage.md#environment-variables](https://github.com/badlogic/pi-mono/blob/v0.71.0/docs/usage.md#environment-variables).

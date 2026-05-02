@@ -300,15 +300,20 @@ test("buildMemoryContextAsync lists only core markdown files with absolute paths
 
   const context = await buildMemoryContextAsync(settings, projectDir);
 
-  assert.match(context, /# Memory Context/);
-  assert.match(context, new RegExp(`Project Memory directory: ${memoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(context, /<memory_context mode="normal">/);
   assert.match(
     context,
-    new RegExp(`- ${path.join(memoryDir, "core", "user", "identity.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    new RegExp(`<memory_files source="project" directory="${memoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">`),
   );
   assert.match(
     context,
-    new RegExp(`- ${path.join(memoryDir, "core", "project", "roadmap.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    new RegExp(`- path: ${path.join(memoryDir, "core", "user", "identity.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+  );
+  assert.match(
+    context,
+    new RegExp(
+      `- path: ${path.join(memoryDir, "core", "project", "roadmap.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
   );
   assert.doesNotMatch(context, /reference\/ignore\.md/);
 });
@@ -339,21 +344,20 @@ test("buildMemoryContextAsync includes shared global memory before project memor
 
   assert.match(
     context,
-    new RegExp(`Shared Global Memory directory: ${globalMemoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    new RegExp(`<memory_files source="global" directory="${globalMemoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">`),
   );
-  assert.match(context, /## Shared Global Memory/);
   assert.match(
     context,
-    new RegExp(`- ${path.join(globalMemoryDir, "USER.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    new RegExp(`- path: ${path.join(globalMemoryDir, "USER.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   );
-  assert.match(context, /## Project Memory/);
+  assert.match(context, /<memory_files source="project"/);
   assert.match(
     context,
     new RegExp(
-      `- ${path.join(projectMemoryDir, "core", "project", "overview.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+      `- path: ${path.join(projectMemoryDir, "core", "project", "overview.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
     ),
   );
-  assert.ok(context.indexOf("## Shared Global Memory") < context.indexOf("## Project Memory"));
+  assert.ok(context.indexOf('source="global"') < context.indexOf('source="project"'));
 });
 
 test("buildMemoryContextAsync returns empty string when core directory is missing", async () => {
