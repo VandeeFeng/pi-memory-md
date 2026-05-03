@@ -51,6 +51,7 @@ export interface SyncResult {
   success: boolean;
   message: string;
   updated?: boolean;
+  level?: "info" | "warning" | "error";
 }
 
 export type ParsedFrontmatter = GrayMatterFile<string>["data"];

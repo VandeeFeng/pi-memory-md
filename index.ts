@@ -133,7 +133,7 @@ function notifyHookResults(
   const label = phase === "sessionStart" ? "start" : "end";
   for (const { action, result } of results) {
     if (result.success && !result.updated) continue;
-    ctx.ui.notify(`${result.message} (${label}/${action})`, result.success ? "info" : "error");
+    ctx.ui.notify(`${result.message} (${label}/${action})`, result.level ?? (result.success ? "info" : "error"));
   }
 }
 
@@ -376,7 +376,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       state.tapeToolsRegistered = true;
     }
 
-    if (event.reason === "new" || event.reason === "fork") {
+    if (event.previousSessionFile && (event.reason === "new" || event.reason === "fork")) {
       state.sessionStartHookPromise = null;
       initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: false });
       return;

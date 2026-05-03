@@ -86,7 +86,7 @@ function setupMemoryProject(homeDir: string, projectDir: string): { localPath: s
   return { localPath, memoryDir };
 }
 
-test("session_start registers tape tools only once and skips start hooks for new/fork sessions", async () => {
+test("session_start registers tape tools only once and skips start hooks for replaced new/fork sessions", async () => {
   const homeDir = createTempDir("pi-memory-md-lifecycle-home-1");
   const projectDir = createTempDir("pi-memory-md-lifecycle-project-1");
   const { localPath } = setupMemoryProject(homeDir, projectDir);
@@ -107,11 +107,54 @@ test("session_start registers tape tools only once and skips start hooks for new
   const sessionStart = harness.handlers.get("session_start");
   assert.ok(sessionStart);
 
-  await sessionStart?.({ reason: "new" }, { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() });
-  await sessionStart?.({ reason: "fork" }, { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() });
+  await sessionStart?.(
+    { reason: "new", previousSessionFile: "/tmp/old-session.jsonl" },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
+  await sessionStart?.(
+    { reason: "fork", previousSessionFile: "/tmp/old-session.jsonl" },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
 
   assert.equal(harness.execCalls.length, 0);
   assert.equal(harness.registeredTools.filter((name) => name === "tape_handoff").length, 1);
+});
+
+test("session_start runs start hooks for startup-created new sessions", async () => {
+  const homeDir = createTempDir("pi-memory-md-lifecycle-home-startup-new");
+  const projectDir = createTempDir("pi-memory-md-lifecycle-project-startup-new");
+  const { localPath } = setupMemoryProject(homeDir, projectDir);
+  initGitRepo(localPath);
+
+  writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": {
+      localPath,
+      repoUrl: "https://github.com/acme/memory.git",
+      hooks: { sessionStart: ["pull"] },
+    },
+  });
+
+  const harness = bootExtension(homeDir, projectDir, async (_command, args) => {
+    const gitCommand = args.join(" ");
+    if (gitCommand === "fetch") return { stdout: "" };
+    if (gitCommand === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
+    if (gitCommand === "rev-list --count HEAD..@{u}") return { stdout: "0\n" };
+    throw new Error(`Unexpected git call: ${gitCommand}`);
+  });
+
+  const sessionStart = harness.handlers.get("session_start");
+  const beforeAgentStart = harness.handlers.get("before_agent_start");
+
+  await sessionStart?.({ reason: "new" }, { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() });
+  await beforeAgentStart?.(
+    { prompt: "hello", systemPrompt: "SYSTEM" },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
+
+  assert.deepEqual(
+    harness.execCalls.map((call) => call.args.join(" ")),
+    ["fetch", "rev-parse --abbrev-ref @{u}", "rev-list --count HEAD..@{u}"],
+  );
 });
 
 test("session_start runs start hooks for resume-like sessions and before_agent_start waits for them", async () => {
@@ -129,11 +172,15 @@ test("session_start runs start hooks for resume-like sessions and before_agent_s
     },
   });
 
+  let behindChecks = 0;
   const harness = bootExtension(homeDir, projectDir, async (_command, args) => {
     const gitCommand = args.join(" ");
+    if (gitCommand === "fetch") return { stdout: "" };
     if (gitCommand === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
-    if (gitCommand === "rev-parse HEAD") return { stdout: "abc123\n" };
-    if (gitCommand === "rev-parse @{u}") return { stdout: "def456\n" };
+    if (gitCommand === "rev-list --count HEAD..@{u}") {
+      behindChecks += 1;
+      return { stdout: behindChecks === 1 ? "1\n" : "0\n" };
+    }
     if (gitCommand === "pull --rebase --autostash") return { stdout: "Updating abc123..def456\nFast-forward\n" };
     throw new Error(`Unexpected git call: ${gitCommand}`);
   });
@@ -149,7 +196,14 @@ test("session_start runs start hooks for resume-like sessions and before_agent_s
 
   assert.deepEqual(
     harness.execCalls.map((call) => call.args.join(" ")),
-    ["rev-parse --abbrev-ref @{u}", "rev-parse HEAD", "rev-parse @{u}", "pull --rebase --autostash"],
+    [
+      "fetch",
+      "rev-parse --abbrev-ref @{u}",
+      "rev-list --count HEAD..@{u}",
+      "pull --rebase --autostash",
+      "rev-parse --abbrev-ref @{u}",
+      "rev-list --count HEAD..@{u}",
+    ],
   );
   assert.equal((result as any).message.customType, "pi-memory-md");
   assert.equal(

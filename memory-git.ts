@@ -19,15 +19,13 @@ async function hasUpstreamBranch(pi: ExtensionAPI, cwd: string): Promise<boolean
   return upstreamResult.success;
 }
 
-async function isAlreadyAtUpstream(pi: ExtensionAPI, cwd: string): Promise<boolean> {
-  if (!(await hasUpstreamBranch(pi, cwd))) return false;
+async function getBehindCount(pi: ExtensionAPI, cwd: string): Promise<number | null> {
+  if (!(await hasUpstreamBranch(pi, cwd))) return null;
 
-  const [headResult, trackedResult] = await Promise.all([
-    gitExec(pi, cwd, ["rev-parse", "HEAD"]),
-    gitExec(pi, cwd, ["rev-parse", "@{u}"]),
-  ]);
+  const behindResult = await gitExec(pi, cwd, ["rev-list", "--count", "HEAD..@{u}"]);
+  if (!behindResult.success) return null;
 
-  return headResult.success && trackedResult.success && headResult.stdout.trim() === trackedResult.stdout.trim();
+  return Number(behindResult.stdout.trim() || "0");
 }
 
 async function hasCommitsToPush(pi: ExtensionAPI, cwd: string): Promise<boolean> {
@@ -81,7 +79,12 @@ export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSetting
       return { success: false, message: `Directory exists but is not a git repo: ${localPath}` };
     }
 
-    if (await isAlreadyAtUpstream(pi, localPath)) {
+    const fetchResult = await gitExec(pi, localPath, ["fetch"]);
+    if (fetchResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
+    if (!fetchResult.success) return { success: false, message: fetchResult.stdout || "Fetch failed" };
+
+    const behindCount = await getBehindCount(pi, localPath);
+    if (behindCount === 0) {
       return { success: true, message: `[${repoName}] is already latest`, updated: false };
     }
 
@@ -89,7 +92,18 @@ export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSetting
     if (pullResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
     if (!pullResult.success) return { success: false, message: pullResult.stdout || "Pull failed" };
 
-    const updated = pullResult.stdout.includes("Updating") || pullResult.stdout.includes("Fast-forward");
+    if (behindCount !== null && behindCount > 0) {
+      const remainingBehindCount = await getBehindCount(pi, localPath);
+      if (remainingBehindCount && remainingBehindCount > 0) {
+        return {
+          success: false,
+          message: `Pull did not update [${repoName}], still behind by ${remainingBehindCount} commit(s). Please resolve these git issues manually.`,
+          level: "warning",
+        };
+      }
+    }
+
+    const updated = behindCount !== null && behindCount > 0;
 
     return {
       success: true,

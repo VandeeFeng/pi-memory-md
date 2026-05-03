@@ -16,7 +16,7 @@ With these skills, users can customize their own slash commands based on their n
 
 ## New Features
 
-- **`memory-import` skill**: New skill for importing durable knowledge from URLs, folders, or files into pi-memory-md. Uses `npx defuddle` for web content extraction, analyzes sources before writing, asks for focus confirmation, and generates memories directly via `memory_write` with proper description, tags, and source references.
+- **`memory-import` skill**: New skill for importing durable knowledge from URLs, folders, or files into pi-memory-md. Uses `npx defuddle` for web content extraction, analyzes sources before writing, asks for focus confirmation, and generates memories directly via `memory-write` skill with proper description, tags, and source references.
 
 ## Changed
 
@@ -26,6 +26,11 @@ With these skills, users can customize their own slash commands based on their n
 - Tape session lookup now respects `PI_CODING_AGENT_SESSION_DIR` before falling back to `PI_CODING_AGENT_DIR/sessions`, because pi `0.71.0` added `PI_CODING_AGENT_SESSION_DIR` for configuring session storage from the environment. See [docs/usage.md#environment-variables](https://github.com/badlogic/pi-mono/blob/v0.71.0/docs/usage.md#environment-variables).
 - Tape runtime now detaches captured `sessionManager` references on session shutdown or runtime replacement via `TapeService.detachSessionTree()`, and clears the active tape runtime during shutdown to avoid reusing stale session-bound objects. See [v0.69.0](https://github.com/badlogic/pi-mono/releases/tag/v0.69.0)
 - Updated TypeBox imports from `@sinclair/typebox` to `typebox` to match pi `0.69.0+`, where pi switched to the new TypeBox package name.
+
+## Fixed
+
+- Clarified `session_start` handling for `/new` and `/fork` sessions with `previousSessionFile`: memory context is delivered without rerunning session-start hooks, avoiding duplicate hook execution while preserving handoff context. This follows pi's documented lifecycle where `/new` emits `session_start { reason: "new", previousSessionFile? }` and `/fork` emits `session_start { reason: "fork", previousSessionFile }`. See [pi extension lifecycle](https://github.com/badlogic/pi-mono/blob/v0.72.0/packages/coding-agent/docs/extensions.md#lifecycle-overview) and [session_start](https://github.com/badlogic/pi-mono/blob/v0.72.0/packages/coding-agent/docs/extensions.md#session_start).
+- Fixed git sync update detection replacing fragile `git pull` output parsing (`Updating` / `Fast-forward`) with an explicit upstream behind count from `git rev-list --count HEAD..@{u}` after `fetch`: repos already at upstream now return `updated: false` before `pull`, successful pulls are marked updated only when the repo was actually behind, and a post-pull behind check warns users to resolve git issues manually if commits remain behind upstream.
 
 ## [0.1.35] - 2026-04-30
 

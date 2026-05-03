@@ -96,14 +96,14 @@ test("syncRepository fails when local directory exists but is not a git repo", a
   assert.equal(pi.calls.length, 0);
 });
 
-test("syncRepository returns already latest when HEAD matches upstream", async () => {
+test("syncRepository returns already latest when there are no upstream commits to pull", async () => {
   const localPath = createTempDir("pi-memory-md-sync-latest");
   initGitRepo(localPath);
   const pi = createMockPi((call) => {
     const command = call.args.join(" ");
+    if (command === "fetch") return { stdout: "" };
     if (command === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
-    if (command === "rev-parse HEAD") return { stdout: "abc123\n" };
-    if (command === "rev-parse @{u}") return { stdout: "abc123\n" };
+    if (command === "rev-list --count HEAD..@{u}") return { stdout: "0\n" };
     throw new Error(`Unexpected command: ${command}`);
   });
 
@@ -116,6 +116,58 @@ test("syncRepository returns already latest when HEAD matches upstream", async (
     success: true,
     message: "[memory] is already latest",
     updated: false,
+  });
+});
+
+test("syncRepository pulls only when upstream has commits", async () => {
+  const localPath = createTempDir("pi-memory-md-sync-behind");
+  initGitRepo(localPath);
+  let behindChecks = 0;
+  const pi = createMockPi((call) => {
+    const command = call.args.join(" ");
+    if (command === "fetch") return { stdout: "" };
+    if (command === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
+    if (command === "rev-list --count HEAD..@{u}") {
+      behindChecks += 1;
+      return { stdout: behindChecks === 1 ? "2\n" : "0\n" };
+    }
+    if (command === "pull --rebase --autostash") return { stdout: "Updating abc123..def456\n" };
+    throw new Error(`Unexpected command: ${command}`);
+  });
+
+  const result = await syncRepository(pi as never, {
+    localPath,
+    repoUrl: "https://github.com/acme/memory.git",
+  });
+
+  assert.deepEqual(result, {
+    success: true,
+    message: "Pulled latest changes from [memory]",
+    updated: true,
+  });
+});
+
+test("syncRepository fails when pull leaves repository behind", async () => {
+  const localPath = createTempDir("pi-memory-md-sync-still-behind");
+  initGitRepo(localPath);
+  const pi = createMockPi((call) => {
+    const command = call.args.join(" ");
+    if (command === "fetch") return { stdout: "" };
+    if (command === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
+    if (command === "rev-list --count HEAD..@{u}") return { stdout: "1\n" };
+    if (command === "pull --rebase --autostash") return { stdout: "Already up to date.\n" };
+    throw new Error(`Unexpected command: ${command}`);
+  });
+
+  const result = await syncRepository(pi as never, {
+    localPath,
+    repoUrl: "https://github.com/acme/memory.git",
+  });
+
+  assert.deepEqual(result, {
+    success: false,
+    message: "Pull did not update [memory], still behind by 1 commit(s)",
+    level: "warning",
   });
 });
 
