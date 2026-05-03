@@ -430,26 +430,6 @@ function buildManualAnchorMessage(prompt: string): string {
 }
 
 function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
-  pi.registerCommand("memory-status", {
-    description: "Show memory repository status",
-    handler: async (_args, ctx) => {
-      const project = getProjectMeta(ctx.cwd);
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      if (!isMemoryInitialized(memoryDir)) {
-        ctx.ui.notify(`Memory: ${project.name} | Not initialized | Use /memory-init to set up`, "info");
-        return;
-      }
-
-      const result = await gitExec(pi, settings.localPath!, ["status", "--porcelain"]);
-      const isDirty = result.stdout.trim().length > 0;
-
-      ctx.ui.notify(
-        `Memory: ${project.name} | Repo: ${isDirty ? "Uncommitted changes" : "Clean"} | Path: ${memoryDir}`,
-        isDirty ? "warning" : "info",
-      );
-    },
-  });
-
   // memory-init moved to SKILL
   // pi.registerCommand("memory-init", {
   //   description: "Initialize memory repository",
@@ -508,31 +488,58 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
   });
 
   pi.registerCommand("memory-check", {
-    description: "Check memory folder structure",
-    handler: async (_args, ctx) => {
+    description: "Check memory repository status and folder structure",
+    handler: async (args, ctx) => {
+      const project = getProjectMeta(ctx.cwd);
       const memoryDir = getMemoryDir(settings, ctx.cwd);
 
-      if (!fs.existsSync(memoryDir)) {
-        ctx.ui.notify(`Memory directory not found: ${memoryDir}`, "error");
+      if (!isMemoryInitialized(memoryDir)) {
+        ctx.ui.notify(
+          `Memory: ${project.name} | Repo: Not initialized | Use /memory-init to set up | Path: ${memoryDir}`,
+          "info",
+        );
         return;
       }
 
+      const result = await gitExec(pi, settings.localPath!, ["status", "--porcelain"]);
+      const isDirty = result.stdout.trim().length > 0;
+      ctx.ui.notify(
+        `Memory: ${project.name} | Repo: ${isDirty ? "Uncommitted changes" : "Clean"} | Path: ${memoryDir}`,
+        isDirty ? "warning" : "info",
+      );
+
       const { execSync } = await import("node:child_process");
+      const requestedTreeOutputLines = Number.parseInt(args.trim(), 10);
+      const maxTreeOutputLines =
+        Number.isFinite(requestedTreeOutputLines) && requestedTreeOutputLines > 0 ? requestedTreeOutputLines : 25;
       let treeOutput = "";
 
       try {
-        treeOutput = execSync(`tree -L 3 -I "node_modules" "${memoryDir}"`, { encoding: "utf-8" });
+        execSync("command -v tree", { encoding: "utf-8" });
+        const treePreview = execSync(
+          `tree -L 3 -I "node_modules" --noreport "${memoryDir}" | head -n ${maxTreeOutputLines + 1}`,
+          { encoding: "utf-8" },
+        );
+        const summary = execSync(
+          `find "${memoryDir}" -maxdepth 3 -not -path "*/node_modules/*" -printf "%y\n" | awk '/d/{d++} /f/{f++} END {printf "%s directories, %s files", d - 1, f}'`,
+          { encoding: "utf-8" },
+        );
+        const treeOutputLines = treePreview.trim().split("\n");
+        treeOutput =
+          treeOutputLines.length > maxTreeOutputLines
+            ? `${summary}\n\n${treeOutputLines.slice(0, maxTreeOutputLines).join("\n")}\n...`
+            : treePreview.trim();
       } catch {
         try {
           treeOutput = execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*"`, {
             encoding: "utf-8",
-          });
+          }).trim();
         } catch {
           treeOutput = "Unable to generate directory tree.";
         }
       }
 
-      ctx.ui.notify(treeOutput.trim(), "info");
+      ctx.ui.notify(treeOutput, "info");
     },
   });
 

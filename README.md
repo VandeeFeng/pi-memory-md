@@ -90,11 +90,8 @@ The LLM automatically:
 
 You can also use these slash commands directly in pi:
 
-| Command | Description |
-|---------|-------------|
-| `/memory-status` | Show memory repository status (project name, git status, path) |
-| `/memory-refresh` | Refresh memory context from files (rebuild cache and deliver into current session) |
-| `/memory-check` | Check memory folder structure (display directory tree) |
+- `/memory-refresh`: Refresh memory context from files (rebuild cache and deliver into current session)
+- `/memory-check [max-lines]`: Check memory repository status (project name, git status, path) and folder structure (tree output defaults to 25 lines)
 
 ### Built-in Tools & SKILLs
 

@@ -206,7 +206,7 @@ Ask: Import preferences from AGENTS.md?
 Ask: Create any additional folders?
   │
   ▼
-Verify with /memory-status
+Verify with /memory-check
   │
   ▼
 DONE

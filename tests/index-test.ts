@@ -38,7 +38,7 @@ test("memoryMdExtension does not register memory-anchor when tape is disabled", 
   }
 
   // TODO: memory-init commented out (moved to SKILL)
-  assert.deepEqual(registeredCommands, ["memory-status", /*"memory-init",*/ "memory-refresh", "memory-check"]);
+  assert.deepEqual(registeredCommands, ["memory-refresh", "memory-check"]);
   assert.equal(registeredCommands.includes("memory-anchor"), false);
 });
 

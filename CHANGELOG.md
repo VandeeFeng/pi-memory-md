@@ -20,6 +20,7 @@ With these skills, users can customize their own slash commands based on their n
 
 ## Changed
 
+- Removed `/memory-status` and merged its repository status output into `/memory-check`. `/memory-check` now shows status first, keeps dirty repo warnings separate from the tree output, and accepts an optional max-line argument such as `/memory-check 30` (default: 25) to avoid dumping too much tree output into the terminal.
 - Refined delivered context formatting to compact XML-like sections with `mode="normal" | "tape"`, unified memory file entries, and clearer global/project source markers, making context easier for LLMs to parse.
 - **`memory-write` skill**: Replaced the removed `memory_write` tool. Now uses bundled `scripts/memory-write.sh` to resolve memory directory, create files with validated frontmatter (`description`, `tags`, `created`, `updated`), and refresh `updated` timestamps on edits. Preserves YAML frontmatter when updating existing memories.
 - `tape_handoff` is now blocked in `manual` anchor mode before execution unless a keyword match or manual handoff match is present — preventing unauthorized direct calls while preserving keyword-triggered and explicit manual handoffs.

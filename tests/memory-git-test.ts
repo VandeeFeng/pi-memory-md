@@ -166,7 +166,7 @@ test("syncRepository fails when pull leaves repository behind", async () => {
 
   assert.deepEqual(result, {
     success: false,
-    message: "Pull did not update [memory], still behind by 1 commit(s)",
+    message: "Pull did not update [memory], still behind by 1 commit(s). Please resolve these git issues manually.",
     level: "warning",
   });
 });
