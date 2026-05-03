@@ -9,7 +9,7 @@ Use this skill to curate durable memory from external sources. Do not treat impo
 
 ## Core rule
 
-Analyze first, ask when focus is unclear, then generate confirmed memories directly with `memory_write`.
+Analyze first, ask when focus is unclear, then generate confirmed memories using the `memory-write` skill.
 
 ## Workflow
 
@@ -18,7 +18,7 @@ Analyze first, ask when focus is unclear, then generate confirmed memories direc
 3. Build a source profile: summary, detected topics, useful memory areas, and risks/noise.
 4. Ask the user what to preserve unless they already gave a clear focus.
 5. Ask the user to confirm the final memory folder/file path, and provide 3 concrete path options.
-6. Generate memories directly with `memory_write`, using confirmed paths, descriptions, tags, source refs, and concise content.
+6. Generate memories with the `memory-write` skill, using confirmed paths, descriptions, tags, source refs, and concise content.
 7. Ask before running `memory_sync` unless the user requested sync.
 
 ## Source inspection
@@ -85,7 +85,7 @@ Pick one, or provide a custom folder/file path.
 ## Write rules
 
 - Use concise, topic-based paths such as `core/project/<topic>.md` or `notes/<slug>.md`.
-- Use `memory_write` for each memory, passing `description` as a string and `tags` as a string array.
+- Use the `memory-write` skill for each memory, with `description` as a string and `tags` as a string array.
 - Prefer existing project memory structure when known.
 - Avoid overwriting existing memories unless the user explicitly approves an update.
 - When updating an existing memory, read it first and merge rather than replacing blindly.
@@ -109,3 +109,7 @@ Avoid importing:
 - Secrets, credentials, tokens, or `.env` content
 - Large unfiltered transcripts or generated artifacts
 
+## Related Skills
+
+- `memory-write`: Create or update pi-memory-md memory files with proper metadata and path handling.
+- `memory-sync`: Sync memory repository changes after imports when the user requests or confirms synchronization.
