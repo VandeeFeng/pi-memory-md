@@ -196,7 +196,7 @@ export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings)
         const result = await pushRepository(pi, settings);
         return {
           content: [{ type: "text", text: result.message }],
-          details: { success: result.success, committed: result.updated ?? false },
+          details: { success: result.success, pushed: result.updated ?? false },
         };
       }
 

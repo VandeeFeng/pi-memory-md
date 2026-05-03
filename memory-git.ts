@@ -181,7 +181,7 @@ export async function pushRepository(pi: ExtensionAPI, settings: MemoryMdSetting
   }
 
   if (!hasChanges && !(await hasCommitsToPush(pi, localPath))) {
-    return { success: true, message: `[${repoName}] already up to date`, updated: false };
+    return { success: true, message: `[${repoName}] has no memory changes to push`, updated: false };
   }
 
   const pushResult = await gitExec(pi, localPath, ["push"]);
@@ -194,7 +194,7 @@ export async function pushRepository(pi: ExtensionAPI, settings: MemoryMdSetting
 
   return {
     success: true,
-    message: hasChanges ? `Committed and pushed changes to [${repoName}]` : `[${repoName}] already up to date`,
-    updated: hasChanges,
+    message: `[${repoName}] pushed memory changes`,
+    updated: true,
   };
 }

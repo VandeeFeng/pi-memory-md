@@ -246,7 +246,7 @@ test("session_shutdown runs end hooks only when memory is initialized", async ()
     true,
   );
   assert.equal(
-    ui.notifications.some((item) => item.message.includes("Committed and pushed changes to [memory] (end/push)")),
+    ui.notifications.some((item) => item.message.includes("[memory] pushed memory changes (end/push)")),
     true,
   );
 

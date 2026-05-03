@@ -241,7 +241,7 @@ test("pushRepository fails when git repository is not initialized", async () => 
   assert.equal(pi.calls.length, 0);
 });
 
-test("pushRepository returns already up to date when there are no changes and nothing to push", async () => {
+test("pushRepository returns no memory changes when there is nothing to push", async () => {
   const localPath = createTempDir("pi-memory-md-push-clean");
   initGitRepo(localPath);
   const pi = createMockPi((call) => {
@@ -259,7 +259,7 @@ test("pushRepository returns already up to date when there are no changes and no
 
   assert.deepEqual(result, {
     success: true,
-    message: "[memory] already up to date",
+    message: "[memory] has no memory changes to push",
     updated: false,
   });
 });
@@ -283,7 +283,7 @@ test("pushRepository adds, commits, and pushes when there are local changes", as
 
   assert.deepEqual(result, {
     success: true,
-    message: "Committed and pushed changes to [memory]",
+    message: "[memory] pushed memory changes",
     updated: true,
   });
   assert.deepEqual(
