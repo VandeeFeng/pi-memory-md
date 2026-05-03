@@ -157,7 +157,8 @@ When tape mode is enabled, the same delivery mode still applies, but tape change
 
 ## Hooks
 
-- `sessionStart: ["pull"]`: pull latest memory before the first prompt.
+- `sessionStart: ["pull"]`: sync from upstream, fresh fetch/pull evidence within 12 hours skips another fetch.
+  This avoids repeated network checks on every new session while still refreshing upstream periodically.
 - `sessionEnd: ["push"]`: commit and push memory when the session ends.
 
 More trigger actions will be added later, even custom hooks.
@@ -200,7 +201,7 @@ More trigger actions will be added later, even custom hooks.
 | `memoryDir.localPath` | `~/.pi/memory-md` | Local memory clone path |
 | `memoryDir.globalMemory` | disabled | Shared memory folder name (relative to `localPath`), enabled only when explicitly configured |
 | `delivery` | `"message-append"` | Memory delivery mode: `"message-append"`, `"system-prompt"` |
-| `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts |
+| `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts, `pull` syncs from upstream and skips another fetch when `FETCH_HEAD` is fresh within 12 hours |
 | `hooks.sessionEnd` | `[]` | Actions to run when a session ends |
 | `tape.enabled` | `false` | Enable tape mode for dynamic context selection |
 

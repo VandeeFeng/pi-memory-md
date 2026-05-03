@@ -35,7 +35,8 @@ I also removed `memory-sync` and `memory-search` skills, their behavior is fully
 ## Fixed
 
 - Clarified `session_start` handling for `/new` and `/fork` sessions with `previousSessionFile`: memory context is delivered without rerunning session-start hooks, avoiding duplicate hook execution while preserving handoff context. This follows pi's documented lifecycle where `/new` emits `session_start { reason: "new", previousSessionFile? }` and `/fork` emits `session_start { reason: "fork", previousSessionFile }`. See [pi extension lifecycle](https://github.com/badlogic/pi-mono/blob/v0.72.0/packages/coding-agent/docs/extensions.md#lifecycle-overview) and [session_start](https://github.com/badlogic/pi-mono/blob/v0.72.0/packages/coding-agent/docs/extensions.md#session_start).
-- Fixed git sync update detection replacing fragile `git pull` output parsing (`Updating` / `Fast-forward`) with an explicit upstream behind count from `git rev-list --count HEAD..@{u}` after `fetch`: repos already at upstream now return `updated: false` before `pull`, successful pulls are marked updated only when the repo was actually behind, and a post-pull behind check warns users to resolve git issues manually if commits remain behind upstream.
+- Optimized git sync checks with a 12-hour `FETCH_HEAD` freshness window: recent fetch/pull evidence skips another `git fetch`, stale or missing evidence refreshes upstream first, behind detection still uses `git rev-list --count HEAD..@{u}`, and updates now run `git rebase --autostash @{u}` to avoid the extra fetch performed by `git pull --rebase --autostash`. A post-update behind check still warns users to resolve git issues manually if commits remain behind upstream.
+  This avoids repeated network checks on every new session while still refreshing upstream periodically.
 
 ## [0.1.35] - 2026-04-30
 

@@ -5,6 +5,7 @@ import type { GitResult, MemoryMdSettings, SyncResult } from "./types.js";
 import { DEFAULT_LOCAL_PATH, formatCommitTimestamp, getProjectMeta } from "./utils.js";
 
 const TIMEOUT_MS = 10000;
+const FETCH_TTL_MS = 12 * 60 * 60 * 1000;
 const TIMEOUT_MESSAGE =
   "Unable to connect to git repository, connection timeout (10s). Please check your network connection or try again later.";
 
@@ -35,6 +36,23 @@ async function hasCommitsToPush(pi: ExtensionAPI, cwd: string): Promise<boolean>
   if (!aheadResult.success) return true;
 
   return Number(aheadResult.stdout.trim() || "0") > 0;
+}
+
+async function shouldFetch(pi: ExtensionAPI, cwd: string): Promise<boolean> {
+  const fetchHeadResult = await gitExec(pi, cwd, ["rev-parse", "--git-path", "FETCH_HEAD"]);
+  if (!fetchHeadResult.success) return true;
+
+  const fetchHeadPath = fetchHeadResult.stdout.trim();
+  if (!fetchHeadPath) return true;
+
+  const absolutePath = path.isAbsolute(fetchHeadPath) ? fetchHeadPath : path.join(cwd, fetchHeadPath);
+
+  try {
+    const stat = fs.statSync(absolutePath);
+    return Date.now() - stat.mtimeMs > FETCH_TTL_MS;
+  } catch {
+    return true;
+  }
 }
 
 export async function gitExec(
@@ -79,18 +97,20 @@ export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSetting
       return { success: false, message: `Directory exists but is not a git repo: ${localPath}` };
     }
 
-    const fetchResult = await gitExec(pi, localPath, ["fetch"]);
-    if (fetchResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
-    if (!fetchResult.success) return { success: false, message: fetchResult.stdout || "Fetch failed" };
+    if (await shouldFetch(pi, localPath)) {
+      const fetchResult = await gitExec(pi, localPath, ["fetch"]);
+      if (fetchResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
+      if (!fetchResult.success) return { success: false, message: fetchResult.stdout || "Fetch failed" };
+    }
 
     const behindCount = await getBehindCount(pi, localPath);
     if (behindCount === 0) {
       return { success: true, message: `[${repoName}] is already latest`, updated: false };
     }
 
-    const pullResult = await gitExec(pi, localPath, ["pull", "--rebase", "--autostash"]);
-    if (pullResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
-    if (!pullResult.success) return { success: false, message: pullResult.stdout || "Pull failed" };
+    const updateResult = await gitExec(pi, localPath, ["rebase", "--autostash", "@{u}"]);
+    if (updateResult.timeout) return { success: false, message: TIMEOUT_MESSAGE };
+    if (!updateResult.success) return { success: false, message: updateResult.stdout || "Update failed" };
 
     if (behindCount !== null && behindCount > 0) {
       const remainingBehindCount = await getBehindCount(pi, localPath);

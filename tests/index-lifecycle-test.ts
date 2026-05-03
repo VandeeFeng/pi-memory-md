@@ -136,6 +136,7 @@ test("session_start runs start hooks for startup-created new sessions", async ()
 
   const harness = bootExtension(homeDir, projectDir, async (_command, args) => {
     const gitCommand = args.join(" ");
+    if (gitCommand === "rev-parse --git-path FETCH_HEAD") return { stdout: ".git/FETCH_HEAD\n" };
     if (gitCommand === "fetch") return { stdout: "" };
     if (gitCommand === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
     if (gitCommand === "rev-list --count HEAD..@{u}") return { stdout: "0\n" };
@@ -153,7 +154,7 @@ test("session_start runs start hooks for startup-created new sessions", async ()
 
   assert.deepEqual(
     harness.execCalls.map((call) => call.args.join(" ")),
-    ["fetch", "rev-parse --abbrev-ref @{u}", "rev-list --count HEAD..@{u}"],
+    ["rev-parse --git-path FETCH_HEAD", "fetch", "rev-parse --abbrev-ref @{u}", "rev-list --count HEAD..@{u}"],
   );
 });
 
@@ -175,13 +176,14 @@ test("session_start runs start hooks for resume-like sessions and before_agent_s
   let behindChecks = 0;
   const harness = bootExtension(homeDir, projectDir, async (_command, args) => {
     const gitCommand = args.join(" ");
+    if (gitCommand === "rev-parse --git-path FETCH_HEAD") return { stdout: ".git/FETCH_HEAD\n" };
     if (gitCommand === "fetch") return { stdout: "" };
     if (gitCommand === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
     if (gitCommand === "rev-list --count HEAD..@{u}") {
       behindChecks += 1;
       return { stdout: behindChecks === 1 ? "1\n" : "0\n" };
     }
-    if (gitCommand === "pull --rebase --autostash") return { stdout: "Updating abc123..def456\nFast-forward\n" };
+    if (gitCommand === "rebase --autostash @{u}") return { stdout: "Successfully rebased\n" };
     throw new Error(`Unexpected git call: ${gitCommand}`);
   });
   const sessionStart = harness.handlers.get("session_start");
@@ -197,10 +199,11 @@ test("session_start runs start hooks for resume-like sessions and before_agent_s
   assert.deepEqual(
     harness.execCalls.map((call) => call.args.join(" ")),
     [
+      "rev-parse --git-path FETCH_HEAD",
       "fetch",
       "rev-parse --abbrev-ref @{u}",
       "rev-list --count HEAD..@{u}",
-      "pull --rebase --autostash",
+      "rebase --autostash @{u}",
       "rev-parse --abbrev-ref @{u}",
       "rev-list --count HEAD..@{u}",
     ],

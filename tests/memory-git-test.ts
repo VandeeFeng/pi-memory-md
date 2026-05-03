@@ -101,6 +101,7 @@ test("syncRepository returns already latest when there are no upstream commits t
   initGitRepo(localPath);
   const pi = createMockPi((call) => {
     const command = call.args.join(" ");
+    if (command === "rev-parse --git-path FETCH_HEAD") return { stdout: ".git/FETCH_HEAD\n" };
     if (command === "fetch") return { stdout: "" };
     if (command === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
     if (command === "rev-list --count HEAD..@{u}") return { stdout: "0\n" };
@@ -119,19 +120,49 @@ test("syncRepository returns already latest when there are no upstream commits t
   });
 });
 
+test("syncRepository skips fetch when FETCH_HEAD is fresh", async () => {
+  const localPath = createTempDir("pi-memory-md-sync-fresh-fetch-head");
+  initGitRepo(localPath);
+  fs.writeFileSync(path.join(localPath, ".git", "FETCH_HEAD"), "fresh\n");
+
+  const pi = createMockPi((call) => {
+    const command = call.args.join(" ");
+    if (command === "rev-parse --git-path FETCH_HEAD") return { stdout: ".git/FETCH_HEAD\n" };
+    if (command === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
+    if (command === "rev-list --count HEAD..@{u}") return { stdout: "0\n" };
+    throw new Error(`Unexpected command: ${command}`);
+  });
+
+  const result = await syncRepository(pi as never, {
+    localPath,
+    repoUrl: "https://github.com/acme/memory.git",
+  });
+
+  assert.deepEqual(result, {
+    success: true,
+    message: "[memory] is already latest",
+    updated: false,
+  });
+  assert.equal(
+    pi.calls.some((call) => call.args.join(" ") === "fetch"),
+    false,
+  );
+});
+
 test("syncRepository pulls only when upstream has commits", async () => {
   const localPath = createTempDir("pi-memory-md-sync-behind");
   initGitRepo(localPath);
   let behindChecks = 0;
   const pi = createMockPi((call) => {
     const command = call.args.join(" ");
+    if (command === "rev-parse --git-path FETCH_HEAD") return { stdout: ".git/FETCH_HEAD\n" };
     if (command === "fetch") return { stdout: "" };
     if (command === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
     if (command === "rev-list --count HEAD..@{u}") {
       behindChecks += 1;
       return { stdout: behindChecks === 1 ? "2\n" : "0\n" };
     }
-    if (command === "pull --rebase --autostash") return { stdout: "Updating abc123..def456\n" };
+    if (command === "rebase --autostash @{u}") return { stdout: "Successfully rebased\n" };
     throw new Error(`Unexpected command: ${command}`);
   });
 
@@ -152,10 +183,11 @@ test("syncRepository fails when pull leaves repository behind", async () => {
   initGitRepo(localPath);
   const pi = createMockPi((call) => {
     const command = call.args.join(" ");
+    if (command === "rev-parse --git-path FETCH_HEAD") return { stdout: ".git/FETCH_HEAD\n" };
     if (command === "fetch") return { stdout: "" };
     if (command === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
     if (command === "rev-list --count HEAD..@{u}") return { stdout: "1\n" };
-    if (command === "pull --rebase --autostash") return { stdout: "Already up to date.\n" };
+    if (command === "rebase --autostash @{u}") return { stdout: "Already up to date.\n" };
     throw new Error(`Unexpected command: ${command}`);
   });
 
