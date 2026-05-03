@@ -57,72 +57,119 @@ Session Start
     ↓
 4. Deliver memory index via `message-append` or `system-prompt`
     ↓
-5. LLM reads full file content via tools when needed
+5. LLM reads full file content when needed
 ```
 
-## Slash Commands In Pi
+## Usage Examples
+
+Simply talk to pi - the LLM will automatically use memory tools/skiils when appropriate:
+
+```
+You: Save my preference for 2-space indentation in TypeScript files to memory.
+
+Pi: [Creates or updates a memory markdown file with the standard file tools]
+```
+
+You can also explicitly request operations:
+
+```
+You: List all memory files for this project.
+You: Search memory for "typescript" preferences.
+You: Read core/USER.md
+You: Sync my changes to the repository.
+```
+
+The LLM automatically:
+- Reads memory index at session start (appended to conversation)
+- Creates or updates memory markdown files when you ask to remember something
+- Syncs changes when needed
+
+## Available Capabilities
+
+### Slash Commands In Pi
 
 You can also use these slash commands directly in pi:
 
 | Command | Description |
 |---------|-------------|
-| `/skill:memory-init` | Initialize memory repository (clone/sync repo, create minimal core directories, optionally add templates) |
 | `/memory-status` | Show memory repository status (project name, git status, path) |
 | `/memory-refresh` | Refresh memory context from files (rebuild cache and deliver into current session) |
 | `/memory-check` | Check memory folder structure (display directory tree) |
 
-## Available Tools
+### Built-in Tools & SKILLs
 
-The LLM can use these tools to interact with memory:
+The LLM can use these tools and [skills](skills/) to interact with memory:
 
-### Memory Management Tools
+#### Memory Management Tools
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `memory_sync` | `{action: "pull" / "push" / "status"}` | Git operations |
-| `memory_write` | `{path, content, description, tags?}` | Write a project memory file by relative path |
 | `memory_list` | `{directory?: string}` | List project memory by relative path; global paths stay absolute |
 | `memory_search` | `{query?, grep?, rg?}` | Search by tags/description and custom grep/ripgrep patterns |
 | `memory_check` | `{}` | Check current project memory folder structure |
 
-## Memory File Format
+#### Memory SKILLs
 
-```markdown
----
-description: "User identity and background"
-tags: ["user", "identity"]
-created: "2026-02-14"
-updated: "2026-02-14"
----
+| Skill | Description |
+|-------|-------------|
+| `memory-init` | Initialize the memory repository, clone/sync git, and create the basic directory structure |
+| `memory-import` | Curate durable memory from URLs, folders, or files after confirming what should be preserved |
+| `memory-write` | Create or update memory markdown files with valid frontmatter using native file tools |
+| `memory-sync` | Guide git pull/push/status workflows for the memory repository |
+| `memory-search` | Search and retrieve memory files with tag/description, grep, or ripgrep workflows |
 
-# Your Content Here
+User can easily extend their own workflows with these skills. Although this sacrifices some stability, it improves flexibility and user autonomy. This is a deliberate tradeoff after my careful consideration.
 
-Markdown content...
+## Memory Delivery Modes
+
+The extension supports two base modes for delivering memory into the conversation.
+When tape mode is disabled, behavior is exactly as described below.
+When tape mode is enabled, the same delivery mode still applies, but tape changes how memory files are selected.
+
+### 1. Message Append (Default)
+
+```
+{
+  "pi-memory-md": {
+    ...
+    "delivery": "message-append"
+  }
+}
 ```
 
-## Directory Structure
+- Memory is sent as a custom message delivered only once per session (on first agent turn)
+- Not visible in the TUI (`display: false` in pi-tui)
+  This hidden message is delivered in the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
+- Persists in the session history
+- **Pros**: Lower token usage, memory persists naturally in conversation
+- **Cons**: Only visible when the model scrolls back to earlier messages
+
+### 2. System Prompt
 
 ```
-~/.pi/memory-md/
-├── global/                 # Optional shared memory when globalMemory is enabled
-│   ├── USER.md             # Optional shared user profile and preferences
-│   ├── MEMORY.md           # Optional shared durable notes, conventions, and lessons learned
-│   └── TASK.md             # Optional shared task template
-└── project-name/
-    ├── core/
-    │   ├── USER.md         # Optional project user profile and preferences
-    │   ├── TASK.md         # Optional project task template
-    │   └── project/        # Project context
-    │       └── tech-stack.md
-    ├── docs/               # Optional root-level reference docs
-    ├── archive/            # Optional historical info
-    ├── research/           # Optional research notes
-    └── notes/              # Optional standalone notes
+{
+  "pi-memory-md": {
+    ...
+    "delivery": "system-prompt"
+  }
+}
 ```
 
-## Configuration
+- Memory is appended to the system prompt delivered on every agent turn
+- **Pros**: Memory always present in system context
+- **Cons**: Higher token usage (repeated on every prompt)
 
-```json
+## Hooks
+
+- `sessionStart: ["pull"]`: pull latest memory before the first prompt.
+- `sessionEnd: ["push"]`: commit and push memory when the session ends.
+
+More trigger actions will be added later, even custom hooks.
+
+## Full Configuration
+
+```
 {
   "pi-memory-md": {
     // "enabled": false,
@@ -166,7 +213,7 @@ When settings change, run `/reload` to apply them.
 
 Legacy config is still supported:
 
-```json
+```
 {
   "autoSync": {
     "onSessionStart": true
@@ -174,85 +221,42 @@ Legacy config is still supported:
 }
 ```
 
-```json
+```
 {
   "localPath": "~/.pi/memory-md",
   "repoUrl": "git@github.com:username/repo.git", // Or HTTPS format
 }
 ```
 
-### Hooks
+## Memory File Format
 
-- `sessionStart: ["pull"]`: pull latest memory before the first prompt.
-- `sessionEnd: ["push"]`: commit and push memory when the session ends.
+```markdown
+---
+description: "User identity and background"
+tags: ["user", "identity"]
+created: "2026-02-14"
+updated: "2026-02-14"
+---
 
-More trigger actions can be added later, even custom hooks.
-
-### Memory Delivery Modes
-
-The extension supports two base modes for delivering memory into the conversation.
-When tape mode is disabled, behavior is exactly as described below.
-When tape mode is enabled, the same delivery mode still applies, but tape changes how memory files are selected.
-
-#### 1. Message Append (Default)
-
-```json
-{
-  "pi-memory-md": {
-    ...
-    "delivery": "message-append"
-  }
-}
+Markdown content...
 ```
 
-- Memory is sent as a custom message before the user's first message
-- Not visible in the TUI (`display: false` in pi-tui)
-- This hidden message is delivered in the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
-- Persists in the session history
-- Delivered only once per session (on first agent turn)
-- **Pros**: Lower token usage, memory persists naturally in conversation
-- **Cons**: Only visible when the model scrolls back to earlier messages
-
-#### 2. System Prompt
-
-```json
-{
-  "pi-memory-md": {
-    ...
-    "delivery": "system-prompt"
-  }
-}
-```
-
-- Memory is appended to the system prompt
-- Rebuilt and delivered on every agent turn
-- Always visible to the model in the system context
-- **Pros**: Memory always present in system context, no need to scroll back
-- **Cons**: Higher token usage (repeated on every prompt)
-
-## Usage Examples
-
-Simply talk to pi - the LLM will automatically use memory tools when appropriate:
+## Directory Structure
 
 ```
-You: Save my preference for 2-space indentation in TypeScript files to memory.
-
-Pi: [Uses memory_write tool to save your preference]
+~/.pi/memory-md/
+├── global/                 # Optional shared memory when globalMemory is enabled
+│   ├── USER.md             # Optional shared user profile and preferences
+│   ├── MEMORY.md           # Optional shared durable notes, conventions, and lessons learned
+│   └── TASK.md             # Optional shared task template
+└── project-name/           # git rev-parse --show-toplevel
+    ├── core/
+    │   ├── USER.md         # Optional project user profile and preferences
+    │   ├── TASK.md         # Optional project task template
+    │   └── project/        # Project memory
+    │       └── tech-stack.md
+    └── notes/              # Optional other custom directories
 ```
-
-You can also explicitly request operations:
-
-```
-You: List all memory files for this project.
-You: Search memory for "typescript" preferences.
-You: Read core/USER.md
-You: Sync my changes to the repository.
-```
-
-The LLM automatically:
-- Reads memory index at session start (appended to conversation)
-- Writes new information when you ask to remember something
-- Syncs changes when needed
 
 ## Tape Mode (Dynamic Context Delivery)
 
@@ -266,7 +270,7 @@ More details [tape-design](docs/tape-design.md) / [中文版](docs/tape-design.z
 
 Minimal setting:
 
-```json
+```
 {
   "pi-memory-md": {
     ...
@@ -282,9 +286,13 @@ Minimal setting:
   }
 }
 ```
-Then use `/memory-anchor` to create an anchor manually, or let anchors be created automatically when configured keywords are triggered.
+Then use `/memory-anchor` to create an anchor manually, or let anchors be created automatically when configured keywords are triggered. If `manual` mode is off, capable models may also create anchors autonomously when they judge it useful.
 
 If you want to jump to the conversation around an anchor and restart from there, `/tree` and the anchors in this session are all there with a customizable anchor label in pi TUI.
+
+> **Note**: pi-memory-md does not create labels through pi's built-in label API. These anchor labels are only displayed in the `/tree` UI. Built-in pi labels are written into session records, and this project intentionally avoids that invasive design.
+>
+> This may cause some unnecessary runtime memory usage, but I consider the tradeoff necessary.
 
 ### Tape vs Delivery Modes
 
@@ -302,28 +310,22 @@ With tape enabled, the delivered content is still a memory index/summary for the
 
 A delivered tape hidden message looks like:
 
-```md
-# Project Memory
-
-Memory directory: /home/user/.pi/memory-md/my-project
-
-Paths below are relative to that directory.
-
-Available memory files (use read to view full content):
-
-- core/USER.md [high priority]
+```xml
+<memory_context mode="tape">
+<memory_files>
+- path: core/USER.md
+  priority: high
+  description: User profile and preferences
+  tags: user, profile, preferences
   recent focus: read 12-28
-  Description: User profile and preferences
-  Tags: user, profile, preferences
-
----
-
-Recently active project files (full paths from read/edit/write tool usage):
-
-- /path/to/project/tape/tape-selector.ts [high priority]
+</memory_files>
+<active_project_files>
+- path: /path/to/project/tape/tape-selector.ts
+  priority: high
   recent focus: read 340-420, read 590-677, edit 340-399
+</active_project_files>
+</memory_context>
 
----
 💡 Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.
 ```
 
@@ -363,11 +365,13 @@ Keyword detection sends a hidden message that asks the agent to consider creatin
 
 Lifecycle anchors (`session/*`) are created automatically, while handoff anchors can be created manually via `/memory-anchor`. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked, so the agent will not create anchors on its own. Keyword-matched hidden instructions and `/memory-anchor` still work, keeping explicit user control available.
 
-The combination of anchors and keywords closes the loop: intent -> memory data -> intent, while keeping automation under user control. Prompts should evolve into intent.
+The combination of anchors and keywords closes the loop: intent -> memory data -> intent, while keeping automation under user control.
 
-### Config Guide
+Prompts should evolve into intent.
 
-```json
+### Full Configuration
+
+```
 {
   "pi-memory-md": {
     ...
