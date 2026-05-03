@@ -113,8 +113,6 @@ The LLM can use these tools and [skills](skills/) to interact with memory:
 | `memory-init` | Initialize the memory repository, clone/sync git, and create the basic directory structure |
 | `memory-import` | Curate durable memory from URLs, folders, or files after confirming what should be preserved |
 | `memory-write` | Create or update memory markdown files with valid frontmatter using native file tools |
-| `memory-sync` | Guide git pull/push/status workflows for the memory repository |
-| `memory-search` | Search and retrieve memory files with tag/description, grep, or ripgrep workflows |
 
 User can easily extend their own workflows with these skills. Although this sacrifices some stability, it improves flexibility and user autonomy. This is a deliberate tradeoff after my careful consideration.
 

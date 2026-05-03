@@ -14,9 +14,10 @@ import {
   formatMemoryContext,
   getMemoryCoreDir,
   getMemoryDir,
+  getMemoryMeta,
   // initializeMemoryDirectory, // TODO: unused after memory-init moved to SKILL
-  isMemoryInitialized,
   loadSettings,
+  renderMemoryTree,
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import {
@@ -32,7 +33,7 @@ import type { PendingHandoffMatch } from "./tape/tape-tools.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
-import { getProjectMeta, getTapeBasePath } from "./utils.js";
+import { getTapeBasePath } from "./utils.js";
 
 type CachedContext = { content: string; fileCount: number };
 
@@ -490,56 +491,30 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
   pi.registerCommand("memory-check", {
     description: "Check memory repository status and folder structure",
     handler: async (args, ctx) => {
-      const project = getProjectMeta(ctx.cwd);
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
+      const info = await getMemoryMeta(settings, ctx.cwd);
 
-      if (!isMemoryInitialized(memoryDir)) {
+      if (!info.initialized) {
         ctx.ui.notify(
-          `Memory: ${project.name} | Repo: Not initialized | Use /memory-init to set up | Path: ${memoryDir}`,
+          `Memory: ${info.name} | Repo: Not initialized | Use /memory-init to set up | Path: ${info.memoryPath}`,
           "info",
         );
         return;
       }
 
-      const result = await gitExec(pi, settings.localPath!, ["status", "--porcelain"]);
-      const isDirty = result.stdout.trim().length > 0;
+      const statusResult = settings.localPath
+        ? await gitExec(pi, settings.localPath, ["status", "--porcelain"])
+        : { stdout: "", success: false };
+      const isDirty = statusResult.stdout.trim().length > 0;
+      const repoStatus = settings.localPath ? (isDirty ? "Uncommitted changes" : "Clean") : "Not configured";
       ctx.ui.notify(
-        `Memory: ${project.name} | Repo: ${isDirty ? "Uncommitted changes" : "Clean"} | Path: ${memoryDir}`,
+        `Memory: ${info.name} | Repo: ${repoStatus} | Files: ${info.project.fileCount ?? 0} | Path: ${info.memoryPath}`,
         isDirty ? "warning" : "info",
       );
 
-      const { execSync } = await import("node:child_process");
       const requestedTreeOutputLines = Number.parseInt(args.trim(), 10);
       const maxTreeOutputLines =
         Number.isFinite(requestedTreeOutputLines) && requestedTreeOutputLines > 0 ? requestedTreeOutputLines : 25;
-      let treeOutput = "";
-
-      try {
-        execSync("command -v tree", { encoding: "utf-8" });
-        const treePreview = execSync(
-          `tree -L 3 -I "node_modules" --noreport "${memoryDir}" | head -n ${maxTreeOutputLines + 1}`,
-          { encoding: "utf-8" },
-        );
-        const summary = execSync(
-          `find "${memoryDir}" -maxdepth 3 -not -path "*/node_modules/*" -printf "%y\n" | awk '/d/{d++} /f/{f++} END {printf "%s directories, %s files", d - 1, f}'`,
-          { encoding: "utf-8" },
-        );
-        const treeOutputLines = treePreview.trim().split("\n");
-        treeOutput =
-          treeOutputLines.length > maxTreeOutputLines
-            ? `${summary}\n\n${treeOutputLines.slice(0, maxTreeOutputLines).join("\n")}\n...`
-            : treePreview.trim();
-      } catch {
-        try {
-          treeOutput = execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*"`, {
-            encoding: "utf-8",
-          }).trim();
-        } catch {
-          treeOutput = "Unable to generate directory tree.";
-        }
-      }
-
-      ctx.ui.notify(treeOutput, "info");
+      ctx.ui.notify(renderMemoryTree(info.memoryPath, maxTreeOutputLines), "info");
     },
   });
 

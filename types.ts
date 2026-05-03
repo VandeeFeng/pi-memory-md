@@ -19,6 +19,32 @@ export interface MemoryFile {
   content: string;
 }
 
+export interface ProjectMeta {
+  cwd: string;
+  gitRoot: string | null;
+  root: string;
+  name: string;
+  isWorktree: boolean;
+  mainRoot?: string;
+}
+
+export interface MemoryMeta extends ProjectMeta {
+  initialized: boolean;
+  memoryPath: string;
+  project: {
+    scope: "project";
+    dir: string;
+    exists: boolean;
+    fileCount: number;
+  };
+  global: {
+    scope: "global";
+    dir: string | null;
+    exists: boolean;
+    fileCount: number | null;
+  };
+}
+
 export type HookTrigger = "sessionStart" | "sessionEnd";
 export type BuiltinHookAction = "pull" | "push";
 export type HookAction = BuiltinHookAction | (string & {});

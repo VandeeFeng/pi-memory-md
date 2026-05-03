@@ -14,12 +14,16 @@ As pi versions move forward, the custom TUI rendering can run into a few small b
 
 With these skills, users can customize their own slash commands based on their needs.
 
+I also removed `memory-sync` and `memory-search` skills, their behavior is fully covered by the native `memory_sync` and `memory_search` tool.As LLM capabilities improve, tool descriptions and the other metadata around tools are already clear enough to guide the model's decisions, so these skills shouldn't occupy valuable context window space.
+
 ## New Features
 
 - **`memory-import` skill**: New skill for importing durable knowledge from URLs, folders, or files into pi-memory-md. Uses `npx defuddle` for web content extraction, analyzes sources before writing, asks for focus confirmation, and generates memories directly via `memory-write` skill with proper description, tags, and source references.
 
 ## Changed
-
+- Removed the `memory-sync` and `memory-search` skills. Sync and search are now covered by the native `memory_sync` and `memory_search` tools, avoiding duplicate skill/tool designs.
+- Refined memory metadata around a unified `MemoryMeta` model shared by tools and commands, covering project metadata, project memory, global memory, initialization state, and file counts.
+- Simplified `memory_check` tool output for LLM use: it now returns concise project/global memory paths and file lists without tree output, while keeping lightweight renderer details only for UI summaries.
 - Removed `/memory-status` and merged its repository status output into `/memory-check`. `/memory-check` now shows status first, keeps dirty repo warnings separate from the tree output, and accepts an optional max-line argument such as `/memory-check 30` (default: 25) to avoid dumping too much tree output into the terminal.
 - Refined delivered context formatting to compact XML-like sections with `mode="normal" | "tape"`, unified memory file entries, and clearer global/project source markers, making context easier for LLMs to parse.
 - **`memory-write` skill**: Replaced the removed `memory_write` tool. Now uses bundled `scripts/memory-write.sh` to resolve memory directory, create files with validated frontmatter (`description`, `tags`, `created`, `updated`), and refresh `updated` timestamps on edits. Preserves YAML frontmatter when updating existing memories.

@@ -95,4 +95,3 @@ memory_search({
 - `memory-management` - Read and write files
 - `memory-sync` - Git synchronization
 - `memory-init` - Initial repository setup
-- `tape-mode` - Conversation history search

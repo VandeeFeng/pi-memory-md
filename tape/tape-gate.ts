@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { MemoryMdSettings } from "../types.js";
-import { formatTimeSuffix, getProjectMeta, isPathInside, type ProjectMeta } from "../utils.js";
+import type { MemoryMdSettings, ProjectMeta } from "../types.js";
+import { formatTimeSuffix, getProjectMeta, isPathInside } from "../utils.js";
 import type { PendingHandoffMatch } from "./tape-tools.js";
 import type { TapeConfig, TapeKeywordConfig } from "./tape-types.js";
 

@@ -5,11 +5,9 @@ import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 import {
-  getGlobalMemoryDir,
   getMemoryCoreDir,
-  getMemoryDir,
-  // initializeMemoryDirectory, // TODO: unused after memory-init moved to SKILL
-  isMemoryInitialized,
+  getMemoryMeta,
+  // initializeMemoryDirectory, // unused after memory-init moved to SKILL
   listMemoryFilesAsync,
 } from "./memory-core.js";
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
@@ -144,20 +142,28 @@ export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings)
   pi.registerTool({
     name: "memory_sync",
     label: "Memory Sync",
-    description: "Synchronize memory repository with git (pull/push/status)",
+    description:
+      "Synchronize the memory git repository. Use status to inspect changes. Do not run pull or push unless the user explicitly asks for sync/pull/push.",
     parameters: Type.Object({
       action: Type.Union([Type.Literal("pull"), Type.Literal("push"), Type.Literal("status")], {
-        description: "Action to perform",
+        description: "Action to perform: status, pull, or push",
       }),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { action } = params as { action: "pull" | "push" | "status" };
-      const localPath = settings.localPath!;
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
+      if (!settings.localPath) {
+        return {
+          content: [{ type: "text", text: "Memory localPath is not configured." }],
+          details: { success: false, initialized: false },
+        };
+      }
+
+      const localPath = settings.localPath;
+      const memoryMeta = await getMemoryMeta(settings, ctx.cwd);
       if (action === "status") {
         const memoryRepo = getProjectMeta(localPath);
-        const initialized = isMemoryInitialized(memoryDir) && memoryRepo.gitRoot === memoryRepo.cwd;
+        const initialized = memoryMeta.initialized && memoryRepo.gitRoot === memoryRepo.cwd;
         if (!initialized) {
           return {
             content: [{ type: "text", text: "Memory repository not initialized. Use memory_init to set up." }],
@@ -325,16 +331,16 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { directory } = params as { directory?: string };
-      const projectMemoryDir = getMemoryDir(settings, ctx.cwd);
+      const memoryMeta = await getMemoryMeta(settings, ctx.cwd);
 
       function toProjectRelativePaths(files: string[]): string[] {
-        return files.map((filePath) => path.relative(projectMemoryDir, filePath));
+        return files.map((filePath) => path.relative(memoryMeta.memoryPath, filePath));
       }
 
       if (directory) {
-        const listDir = resolvePathWithin(projectMemoryDir, directory);
+        const listDir = resolvePathWithin(memoryMeta.memoryPath, directory);
 
-        if (!listDir || hasSymlinkInPath(projectMemoryDir, listDir)) {
+        if (!listDir || hasSymlinkInPath(memoryMeta.memoryPath, listDir)) {
           return {
             content: [{ type: "text", text: `Invalid memory directory: ${directory}` }],
             details: { files: [], count: 0, error: true },
@@ -353,9 +359,8 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
         };
       }
 
-      const globalMemoryDir = getGlobalMemoryDir(settings);
-      if (!globalMemoryDir || globalMemoryDir === projectMemoryDir) {
-        const files = toProjectRelativePaths(await listMemoryFilesAsync(projectMemoryDir));
+      if (!memoryMeta.global.dir || memoryMeta.global.dir === memoryMeta.memoryPath) {
+        const files = toProjectRelativePaths(await listMemoryFilesAsync(memoryMeta.memoryPath));
         return {
           content: [
             {
@@ -368,8 +373,8 @@ export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings)
       }
 
       const [globalFiles, projectFiles] = await Promise.all([
-        listMemoryFilesAsync(globalMemoryDir),
-        listMemoryFilesAsync(projectMemoryDir),
+        listMemoryFilesAsync(memoryMeta.global.dir),
+        listMemoryFilesAsync(memoryMeta.memoryPath),
       ]);
       const files = [...globalFiles, ...toProjectRelativePaths(projectFiles)];
 
@@ -390,35 +395,55 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
   pi.registerTool({
     name: "memory_search",
     label: "Memory Search",
-    description: "Search memory files by tags, description, or custom grep/rg pattern",
+    description:
+      "Search memory files. Defaults to project memory. Use query for frontmatter tags/descriptions, grep or rg for full-text markdown search.",
     parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Search query for tags and description" })),
-      grep: Type.Optional(Type.String({ description: "Custom grep pattern (use with tool: 'grep')" })),
-      rg: Type.Optional(Type.String({ description: "Custom ripgrep pattern (use with tool: 'rg')" })),
+      query: Type.Optional(Type.String({ description: "Search tags and frontmatter description, not full content" })),
+      grep: Type.Optional(Type.String({ description: "Full-text grep regex for markdown memory files" })),
+      rg: Type.Optional(Type.String({ description: "Full-text ripgrep pattern for markdown memory files" })),
+      scope: Type.Optional(
+        Type.Union([Type.Literal("project"), Type.Literal("global"), Type.Literal("all")], {
+          description: "Memory scope to search. Defaults to project.",
+        }),
+      ),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { query, grep, rg } = params as {
+      const {
+        query,
+        grep,
+        rg,
+        scope = "project",
+      } = params as {
         query?: string;
         grep?: string;
         rg?: string;
+        scope?: "project" | "global" | "all";
       };
-      const memoryDir = getMemoryDir(settings, ctx.cwd);
-      const coreDir = getMemoryCoreDir(memoryDir);
+      const memoryMeta = await getMemoryMeta(settings, ctx.cwd);
+      const searchRoots = [
+        ...(scope === "project" || scope === "all" ? [{ label: "project", memoryDir: memoryMeta.memoryPath }] : []),
+        ...(memoryMeta.global.dir &&
+        memoryMeta.global.dir !== memoryMeta.memoryPath &&
+        (scope === "global" || scope === "all")
+          ? [{ label: "global", memoryDir: memoryMeta.global.dir }]
+          : []),
+      ].map((root) => ({ ...root, coreDir: getMemoryCoreDir(root.memoryDir) }));
+      const existingRoots = searchRoots.filter((root) => fs.existsSync(root.coreDir));
       const sections: string[] = [];
-      const matchedFiles = new Set<string>();
+      const matchedFiles = new Map<string, string>();
 
-      if (!fs.existsSync(coreDir)) {
+      if (existingRoots.length === 0) {
         return {
-          content: [{ type: "text", text: `Memory directory not found: ${coreDir}` }],
-          details: { files: [], count: 0 },
+          content: [{ type: "text", text: `Memory directory not found for scope: ${scope}` }],
+          details: { files: [], count: 0, scope },
         };
       }
 
       if (!query && !grep && !rg) {
         return {
           content: [{ type: "text", text: "Provide query, grep, or rg to search memory files." }],
-          details: { files: [], count: 0 },
+          details: { files: [], count: 0, scope },
         };
       }
 
@@ -431,14 +456,19 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
               text: `Search pattern too long (${customPattern.length}). Max length is ${MAX_SEARCH_PATTERN_LENGTH}.`,
             },
           ],
-          details: { files: [], count: 0, error: true },
+          details: { files: [], count: 0, scope, error: true },
         };
       }
 
       const escapedQuery = query ? query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : null;
       const searchLabel = query ?? grep ?? rg ?? "search";
 
-      async function runTool(tool: string, args: string[]): Promise<string[]> {
+      function formatMatchedPath(filePath: string, memoryDir: string, label: string): string {
+        const relativePath = path.relative(memoryDir, filePath);
+        return label === "global" ? filePath : relativePath;
+      }
+
+      async function runTool(tool: string, args: string[], memoryDir: string, label: string): Promise<string[]> {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), MEMORY_SEARCH_TIMEOUT_MS);
         const { stdout } = await pi.exec(tool, args, { signal: controller.signal }).catch(() => ({ stdout: "" }));
@@ -455,69 +485,78 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
           }
 
           const matchedFilePath = line.slice(0, separatorIndex);
-          matchedFiles.add(matchedFilePath);
-          results.push(`${path.relative(memoryDir, matchedFilePath)}: ${line.slice(separatorIndex + 1).trim()}`);
+          const displayPath = formatMatchedPath(matchedFilePath, memoryDir, label);
+          matchedFiles.set(displayPath, displayPath);
+          results.push(`${displayPath}: ${line.slice(separatorIndex + 1).trim()}`);
         }
 
         return results;
       }
 
-      if (escapedQuery) {
-        const tagResults = await runTool("grep", [
-          "-rn",
-          "--include=*.md",
-          "-m",
-          String(MAX_SEARCH_RESULTS),
-          "-E",
-          `^\\s*-\\s*${escapedQuery}`,
-          coreDir,
-        ]);
-        if (tagResults.length > 0) {
-          sections.push(`## Tags matching: ${query}`, ...tagResults.slice(0, 20));
+      for (const { label, memoryDir, coreDir } of existingRoots) {
+        const sectionPrefix = scope === "all" ? `${label} ` : "";
+
+        if (escapedQuery) {
+          const tagResults = await runTool(
+            "grep",
+            ["-rn", "--include=*.md", "-m", String(MAX_SEARCH_RESULTS), "-E", `^\\s*-\\s*${escapedQuery}`, coreDir],
+            memoryDir,
+            label,
+          );
+          if (tagResults.length > 0) {
+            sections.push(`## ${sectionPrefix}Tags matching: ${query}`, ...tagResults.slice(0, 20));
+          }
+
+          const descResults = await runTool(
+            "grep",
+            [
+              "-rn",
+              "--include=*.md",
+              "-m",
+              String(MAX_SEARCH_RESULTS),
+              "-E",
+              `^description:\\s*.*${escapedQuery}`,
+              coreDir,
+            ],
+            memoryDir,
+            label,
+          );
+          if (descResults.length > 0) {
+            sections.push("", `## ${sectionPrefix}Description matching: ${query}`, ...descResults.slice(0, 20));
+          }
         }
 
-        const descResults = await runTool("grep", [
-          "-rn",
-          "--include=*.md",
-          "-m",
-          String(MAX_SEARCH_RESULTS),
-          "-E",
-          `^description:\\s*.*${escapedQuery}`,
-          coreDir,
-        ]);
-        if (descResults.length > 0) {
-          sections.push("", `## Description matching: ${query}`, ...descResults.slice(0, 20));
+        if (grep) {
+          const grepResults = await runTool(
+            "grep",
+            ["-rn", "--include=*.md", "-m", String(MAX_SEARCH_RESULTS), "-E", grep, coreDir],
+            memoryDir,
+            label,
+          );
+          if (grepResults.length > 0) {
+            sections.push("", `## ${sectionPrefix}Custom grep: ${grep}`, ...grepResults.slice(0, 50));
+          }
+        }
+
+        if (rg) {
+          const rgResults = await runTool(
+            "rg",
+            ["-t", "md", "-m", String(MAX_SEARCH_RESULTS), rg, coreDir],
+            memoryDir,
+            label,
+          );
+          if (rgResults.length > 0) {
+            sections.push("", `## ${sectionPrefix}Custom ripgrep: ${rg}`, ...rgResults.slice(0, 50));
+          }
         }
       }
 
-      if (grep) {
-        const grepResults = await runTool("grep", [
-          "-rn",
-          "--include=*.md",
-          "-m",
-          String(MAX_SEARCH_RESULTS),
-          "-E",
-          grep,
-          coreDir,
-        ]);
-        if (grepResults.length > 0) {
-          sections.push("", `## Custom grep: ${grep}`, ...grepResults.slice(0, 50));
-        }
-      }
-
-      if (rg) {
-        const rgResults = await runTool("rg", ["-t", "md", "-m", String(MAX_SEARCH_RESULTS), rg, coreDir]);
-        if (rgResults.length > 0) {
-          sections.push("", `## Custom ripgrep: ${rg}`, ...rgResults.slice(0, 50));
-        }
-      }
-
-      const fileList = Array.from(matchedFiles).map((filePath) => path.relative(memoryDir, filePath));
+      const fileList = Array.from(matchedFiles.keys());
 
       if (sections.length === 0) {
         return {
           content: [{ type: "text", text: `No results found for "${searchLabel}".` }],
-          details: { files: [], count: 0 },
+          details: { files: [], count: 0, scope },
         };
       }
 
@@ -528,7 +567,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
             text: `Found ${fileList.length} file(s) matching "${searchLabel}":\n\n${sections.join("\n")}\n\nUse read to view full content.`,
           },
         ],
-        details: { files: fileList, count: fileList.length },
+        details: { files: fileList, count: fileList.length, scope },
       };
     },
 
@@ -616,46 +655,29 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
     parameters: Type.Object({}),
 
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const projectMemoryDir = getMemoryDir(settings, ctx.cwd);
-      const globalMemoryDir = getGlobalMemoryDir(settings);
-      const requiredDirs = [
-        ...(globalMemoryDir && fs.existsSync(globalMemoryDir)
-          ? [{ label: "Shared global", path: globalMemoryDir }]
-          : []),
-        { label: "Project", path: projectMemoryDir },
-      ];
-
-      if (!fs.existsSync(projectMemoryDir)) {
+      const info = await getMemoryMeta(settings, ctx.cwd);
+      if (!fs.existsSync(info.memoryPath)) {
         const missingGlobalMessage =
-          globalMemoryDir && !fs.existsSync(globalMemoryDir)
-            ? `\n\nShared global memory directory not found: ${globalMemoryDir}`
+          info.global.dir && !info.global.exists
+            ? `\n\nShared global memory directory not found: ${info.global.dir}`
             : "";
         return {
           content: [
             {
               type: "text",
-              text: `Project memory directory not found: ${projectMemoryDir}${missingGlobalMessage}\n\nMemory may not be initialized yet.`,
+              text: `Project memory directory not found: ${info.project.dir}${missingGlobalMessage}\n\nMemory may not be initialized yet.`,
             },
           ],
-          details: { exists: false, path: projectMemoryDir },
+          details: { exists: false },
         };
       }
 
-      const { execSync } = await import("node:child_process");
-
-      function renderTree(memoryDir: string): string {
-        try {
-          return execSync(`tree -L 3 -I "node_modules" "${memoryDir}"`, { encoding: "utf-8" });
-        } catch {
-          try {
-            return execSync(`find "${memoryDir}" -type d -not -path "*/node_modules/*" 2>/dev/null | head -20`, {
-              encoding: "utf-8",
-            });
-          } catch {
-            return "Unable to generate directory tree. Please check permissions.";
-          }
-        }
-      }
+      const requiredDirs = [
+        ...(info.global.dir && info.global.exists && info.global.dir !== info.project.dir
+          ? [{ label: "Shared global", path: info.global.dir }]
+          : []),
+        { label: "Project", path: info.memoryPath },
+      ];
 
       const sections = await Promise.all(
         requiredDirs.map(async ({ label, path: memoryDir }) => {
@@ -664,35 +686,26 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
           return [
             `## ${label} memory`,
             `Path: ${memoryDir}`,
-            "",
-            renderTree(memoryDir),
             `Memory files (${relPaths.length}):`,
             relPaths.map((p) => `  ${p}`).join("\n"),
           ].join("\n");
         }),
       );
-      const fileCount = sections.reduce((count, section) => {
-        const match = /Memory files \((\d+)\):/.exec(section);
-        return count + (match ? Number(match[1]) : 0);
-      }, 0);
-
       const globalMemoryWarning =
-        globalMemoryDir && !fs.existsSync(globalMemoryDir)
-          ? `Warning: shared global memory directory not found: ${globalMemoryDir}\n\n`
+        info.global.dir && !info.global.exists
+          ? `Warning: shared global memory directory not found: ${info.global.dir}\n\n`
           : "";
 
       return {
         content: [
           {
             type: "text",
-            text: `Memory directory structure for project: ${getProjectMeta(ctx.cwd).name}\n\n${globalMemoryWarning}${sections.join("\n\n")}`,
+            text: `Memory directory structure for project: ${info.name}\n\n${globalMemoryWarning}${sections.join("\n\n")}`,
           },
         ],
         details: {
-          path: projectMemoryDir,
-          globalMemoryDir,
-          fileCount,
-          globalMemoryMissing: !!globalMemoryDir && !fs.existsSync(globalMemoryDir),
+          fileCount: (info.project.fileCount ?? 0) + (info.global.fileCount ?? 0),
+          globalMemoryMissing: !!info.global.dir && !info.global.exists,
         },
       };
     },
@@ -700,7 +713,13 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
     renderCall: (_args, theme) => new Text(buildToolCallText("memory_check", {}, theme), 0, 0),
     renderResult: (result, options, theme) => {
       if (options.isPartial) return renderText(theme.fg("warning", "Checking..."));
-      const details = result.details as { exists?: boolean; fileCount?: number; globalMemoryMissing?: boolean };
+      const details = result.details as
+        | {
+            exists?: boolean;
+            fileCount?: number;
+            globalMemoryMissing?: boolean;
+          }
+        | undefined;
 
       if (details?.exists === false) {
         return renderCollapsed("Not initialized", getResultText(result), options, theme);

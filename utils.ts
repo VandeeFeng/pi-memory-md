@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ProjectMeta } from "./types.js";
 
 export const DEFAULT_LOCAL_PATH = path.join(os.homedir(), ".pi", "memory-md");
 export const DEFAULT_TAPE_DIRNAME = "TAPE";
@@ -126,15 +127,6 @@ function execGitSync(cwd: string, args: string[]): string | null {
   } catch {
     return null;
   }
-}
-
-export interface ProjectMeta {
-  cwd: string;
-  gitRoot: string | null;
-  root: string;
-  name: string;
-  isWorktree: boolean;
-  mainRoot?: string;
 }
 
 const projectMetaCache = new Map<string, ProjectMeta>();

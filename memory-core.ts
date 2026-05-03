@@ -1,10 +1,11 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import matter from "gray-matter";
 import { DEFAULT_HOOKS, normalizeHooks } from "./hooks.js";
 import { normalizeTapeKeywords } from "./tape/tape-gate.js";
-import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, ParsedFrontmatter } from "./types.js";
+import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, MemoryMeta, ParsedFrontmatter } from "./types.js";
 import { DEFAULT_LOCAL_PATH, DEFAULT_TAPE_EXCLUDE_DIRS, expandHomePath, getProjectMeta } from "./utils.js";
 
 export * from "./types.js";
@@ -242,6 +243,74 @@ export function getMemoryUserDir(memoryDir: string): string {
 
 export function isMemoryInitialized(memoryDir: string): boolean {
   return fs.existsSync(getMemoryUserDir(memoryDir));
+}
+
+export async function getMemoryMeta(settings: MemoryMdSettings, cwd: string): Promise<MemoryMeta> {
+  const projectMemoryDir = getMemoryDir(settings, cwd);
+  const globalMemoryDir = getGlobalMemoryDir(settings);
+  const globalMemoryExists = !!globalMemoryDir && fs.existsSync(globalMemoryDir);
+
+  const [projectFiles, globalFiles] = await Promise.all([
+    listMemoryFilesAsync(projectMemoryDir),
+    globalMemoryExists && globalMemoryDir !== projectMemoryDir ? listMemoryFilesAsync(globalMemoryDir) : null,
+  ]);
+
+  const projectMeta = getProjectMeta(cwd);
+
+  return {
+    ...projectMeta,
+    initialized: isMemoryInitialized(projectMemoryDir),
+    memoryPath: projectMemoryDir,
+    project: {
+      scope: "project",
+      dir: projectMemoryDir,
+      exists: fs.existsSync(projectMemoryDir),
+      fileCount: projectFiles.length,
+    },
+    global: {
+      scope: "global",
+      dir: globalMemoryDir,
+      exists: globalMemoryExists,
+      fileCount: globalFiles?.length ?? null,
+    },
+  };
+}
+
+export function renderMemoryTree(memoryDir: string, maxLines = 25): string {
+  const safeMaxLines = Number.isFinite(maxLines) && maxLines > 0 ? Math.floor(maxLines) : 25;
+
+  try {
+    execFileSync("tree", ["--version"], { encoding: "utf-8" });
+    const treeOutput = execFileSync("tree", ["-L", "3", "-I", "node_modules", "--noreport", memoryDir], {
+      encoding: "utf-8",
+    }).trim();
+    const treeLines = treeOutput.split("\n");
+    const summary = execFileSync(
+      "find",
+      [memoryDir, "-maxdepth", "3", "-not", "-path", "*/node_modules/*", "-printf", "%y\n"],
+      { encoding: "utf-8" },
+    )
+      .split("\n")
+      .reduce(
+        (counts, type) => ({
+          directories: counts.directories + (type === "d" ? 1 : 0),
+          files: counts.files + (type === "f" ? 1 : 0),
+        }),
+        { directories: -1, files: 0 },
+      );
+
+    return treeLines.length > safeMaxLines
+      ? `${summary.directories} directories, ${summary.files} files\n\n${treeLines.slice(0, safeMaxLines).join("\n")}\n...`
+      : treeOutput;
+  } catch {
+    try {
+      return execFileSync("find", [memoryDir, "-type", "d", "-not", "-path", "*/node_modules/*"], {
+        encoding: "utf-8",
+      }).trim();
+    } catch {
+      return "Unable to generate directory tree.";
+    }
+  }
 }
 
 function validateFrontmatter(data: ParsedFrontmatter): { valid: boolean; error?: string } {
