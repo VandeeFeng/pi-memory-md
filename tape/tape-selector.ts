@@ -4,7 +4,12 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import matter from "gray-matter";
-import { DEFAULT_MEMORY_SCAN, memoryFileEntryTpl, normalizeMemoryScanRange } from "../memory-core.js";
+import {
+  DEFAULT_MEMORY_SCAN,
+  memoryContextHeaderTpl,
+  memoryContextItemTpl,
+  normalizeMemoryScanRange,
+} from "../memory-core.js";
 import { getProjectMeta, hoursAgoIso, isPathInside, resolveFrom, toRelativeIfInside, toTimestamp } from "../utils.js";
 import {
   analyzePathAccess,
@@ -296,14 +301,14 @@ export class MemoryFileSelector {
 
   async buildContextFromFilesAsync(
     filePaths: string[],
-    options?: { highlightedFiles?: string[]; lineRangeHours?: number },
+    options?: { highlightedFiles?: string[]; lineRangeHours?: number; handoffMode?: "auto" | "manual" },
   ): Promise<string> {
     const { fileEntries, highlightedPaths, rangeMap } = this.prepareContextEntries(filePaths, options);
     if (fileEntries.length === 0) {
       return "";
     }
 
-    return this.renderContextFromEntriesAsync(fileEntries, highlightedPaths, rangeMap);
+    return this.renderContextFromEntriesAsync(fileEntries, highlightedPaths, rangeMap, options?.handoffMode);
   }
 
   private prepareContextEntries(
@@ -356,8 +361,9 @@ export class MemoryFileSelector {
     fileEntries: ContextFileEntry[],
     highlightedPaths: Set<string>,
     rangeMap: Map<string, LineRange[]>,
+    handoffMode?: "auto" | "manual",
   ): Promise<string> {
-    const lines = ['<memory_context mode="tape">'];
+    const lines = memoryContextHeaderTpl("tape", { handoffMode });
     const groupedEntries = this.groupContextEntries(fileEntries);
 
     await this.appendMemoryEntriesAsync(lines, groupedEntries.memoryEntries, highlightedPaths, rangeMap);
@@ -434,7 +440,7 @@ export class MemoryFileSelector {
     frontmatter: { description: string; tags: string },
   ): string[] {
     const priority = highlightedPaths.has(entry.absolutePath) ? "high" : "normal";
-    return memoryFileEntryTpl({
+    return memoryContextItemTpl({
       path: entry.displayPath,
       priority,
       description: frontmatter.description,

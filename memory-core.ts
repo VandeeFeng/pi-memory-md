@@ -473,7 +473,8 @@ async function readMemoryFiles(
   };
 }
 
-export function memoryFileEntryTpl(entry: {
+// memory delivery context template
+export function memoryContextItemTpl(entry: {
   path: string;
   description?: string;
   tags?: string[] | string;
@@ -488,6 +489,38 @@ export function memoryFileEntryTpl(entry: {
   ];
 }
 
+export function memoryContextHeaderTpl(
+  mode: "normal" | "tape" = "normal",
+  options: { handoffMode?: "auto" | "manual" } = {},
+): string[] {
+  const lines = [`<memory_context mode="${mode}">`];
+
+  if (mode === "normal") {
+    lines.push(
+      "<instructions>",
+      "These memory files can help you better understand the project and the user.",
+      "</instructions>",
+    );
+  }
+
+  if (mode === "tape") {
+    lines.push(
+      "<instructions>",
+      "Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.",
+    );
+
+    if (options.handoffMode === "manual") {
+      lines.push(
+        "Handoff mode: manual. `tape_handoff` is blocked unless the keyword is triggered or user create manually.",
+      );
+    }
+
+    lines.push("</instructions>");
+  }
+
+  return lines;
+}
+
 export function memoryContextTpl(
   entries: Array<{ path: string; memory: MemoryFile }> = [],
   options: { includeHeader?: boolean; mode?: "normal" | "tape" } = {},
@@ -495,7 +528,7 @@ export function memoryContextTpl(
   const lines: string[] = [];
 
   if (options.includeHeader !== false) {
-    lines.push(`<memory_context mode="${options.mode ?? "normal"}">`);
+    lines.push(...memoryContextHeaderTpl(options.mode ?? "normal"));
   }
 
   for (const entry of entries) {
@@ -504,7 +537,7 @@ export function memoryContextTpl(
     }
 
     const { description, tags } = entry.memory.frontmatter;
-    lines.push(...memoryFileEntryTpl({ path: entry.path, description, tags }));
+    lines.push(...memoryContextItemTpl({ path: entry.path, description, tags }));
   }
 
   return lines;

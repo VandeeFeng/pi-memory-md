@@ -175,10 +175,11 @@ async function cacheInitialContext(
 
   const content = await tapeRuntime.selector.buildContextFromFilesAsync(selectedFiles, {
     highlightedFiles: [...new Set(memoryFiles.filter((filePath) => selectedFiles.includes(filePath)))].slice(0, 3),
+    handoffMode: settings.tape?.anchor?.mode ?? "auto",
   });
 
   state.initialTapeContext = {
-    content: content + buildTapeHint(settings),
+    content,
     fileCount: selectedFiles.length,
   };
 }
@@ -246,22 +247,6 @@ function queueKeywordHandoffMessage(pi: ExtensionAPI, keywordHandoff: KeywordHan
     },
     { triggerTurn: false },
   );
-}
-
-function buildTapeHint(settings: MemoryMdSettings): string {
-  const handoffMode = settings.tape?.anchor?.mode ?? "auto";
-  const lines = [
-    "---",
-    "💡 Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.",
-  ];
-
-  if (handoffMode === "manual") {
-    lines.push(
-      "Handoff mode: manual. `tape_handoff` is blocked unless the keyword is triggered or user create manually.",
-    );
-  }
-
-  return `\n\n${lines.join("\n")}\n`;
 }
 
 async function prepareBeforeAgentStart(
