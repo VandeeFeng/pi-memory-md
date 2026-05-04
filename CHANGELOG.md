@@ -16,8 +16,15 @@ With these skills, users can customize their own slash commands based on their n
 
 I also removed `memory-sync` and `memory-search` skills, their behavior is fully covered by the native `memory_sync` and `memory_search` tool.As LLM capabilities improve, tool descriptions and the other metadata around tools are already clear enough to guide the model's decisions, so these skills shouldn't occupy valuable context window space.
 
+Beyond `/tree` as an anchor selector, now we have `/memory-review` to quickly search your own intent and jump back to the relevant conversation.
+
+We are basically Doctor Strange now: hopping across timelines and opening parallel universes, but with fewer capes and more anchors.
+
+It is an overlay UI for quickly viewing all anchors in the current project and provides a simple visualization. Selecting an anchor can quickly return to that conversation. All functionality is implemented with pi's native APIs.
+
 ## New Features
 
+- **`/memory-review` slash command**: Opens an interactive Memory Review overlay for browsing tape anchors by timeline, keyword relations, and stats, with keyboard navigation and dynamic terminal-aware layout. Pressing `enter` on a selected anchor now jumps through pi's session tree to the first assistant entry after that anchor. This slash command is only registered when tape mode is enabled.
 - **`memory-import` skill**: New skill for importing durable knowledge from URLs, folders, or files into pi-memory-md. Uses `npx defuddle` for web content extraction, analyzes sources before writing, asks for focus confirmation, and generates memories directly via `memory-write` skill with proper description, tags, and source references.
 
 ## Changed

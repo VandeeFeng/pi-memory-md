@@ -333,6 +333,8 @@ Anchors are named checkpoints that correspond to pi session entries, marking imp
 
 <img src="docs/pi-tree.png" width="400" />
 
+<img src="docs/memory-review.png" width="400" />
+
 Each line in the tape anchor store is a JSON record:
 ```json
 {"id":"1234567890-abc123","timestamp":"2026-04-04T12:00:00.000Z","name":"task/begin","type":"handoff","meta":{"summary":"Working on feature X","purpose":"feature","trigger":"manual"},"sessionId":"019dbd12-90b7-72b1-a88d-843706db32de","sessionEntryId":"446b6c33"}
@@ -445,11 +447,12 @@ Prompts should evolve into intent.
 }
 ```
 
-### Tape Tools (Anchor-based Context)
+### Tape Tools & Slash Command
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `/memory-anchor` | `<prompt>` | Slash command that asks the LLM to derive and create a manually authorized handoff anchor |
+| `/memory-review` | `[limit]` default: `50`, max: `100` | Slash command that opens an interactive Memory Review overlay for browsing anchors by timeline, keyword relations, and stats |
 | `tape_handoff` | `{name, summary?, purpose?}` | Create a handoff anchor checkpoint in the tape |
 | `tape_list` | `{limit?: number}` | List all anchor checkpoints |
 | `tape_delete` | `{id}` | Delete an anchor checkpoint by id |

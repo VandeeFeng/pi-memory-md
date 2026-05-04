@@ -28,6 +28,7 @@ import {
   shouldBlockTapeHandoffCall,
   type TapeGateResult,
 } from "./tape/tape-gate.js";
+import { DEFAULT_MEMORY_REVIEW_LIMIT, normalizeMemoryReviewLimit, openMemoryReview } from "./tape/tape-review.js";
 import { TapeService } from "./tape/tape-service.js";
 import type { PendingHandoffMatch } from "./tape/tape-tools.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
@@ -504,6 +505,24 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
   });
 
   if (settings.tape?.enabled) {
+    pi.registerCommand("memory-review", {
+      description: "Open Memory Review overlay for anchor timeline, relations, and stats",
+      handler: async (args, ctx) => {
+        ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
+        const tapeService = state.activeTapeRuntime?.service;
+        if (!tapeService) {
+          ctx.ui.notify("Tape runtime is unavailable.", "error");
+          return;
+        }
+
+        const requestedLimit = Number.parseInt(args.trim(), 10);
+        const limit = normalizeMemoryReviewLimit(
+          Number.isFinite(requestedLimit) ? requestedLimit : DEFAULT_MEMORY_REVIEW_LIMIT,
+        );
+        await openMemoryReview(tapeService, ctx, { limit });
+      },
+    });
+
     pi.registerCommand("memory-anchor", {
       description: "Ask the LLM to create a manual tape anchor from your prompt",
       handler: async (args, ctx) => {
