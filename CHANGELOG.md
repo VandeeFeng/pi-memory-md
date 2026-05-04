@@ -20,11 +20,24 @@ Beyond `/tree` as an anchor selector, now we have `/memory-review` to quickly se
 
 We are basically Doctor Strange now: hopping across timelines and opening parallel universes, but with fewer capes and more anchors.
 
+I originally wanted to build this on top of Pi's native `/tree` UI instead of creating another surface. But the workflows I wanted here don't fit cleanly into `/tree` without changing its core, so `/memory-review` became a dedicated visual panel for anchors.
+
+The panel only helps you land on the right anchor, after jumping there, any deeper branching or tree operations still belong in Pi's native `/tree` panel. I kept this intentionally non-invasive.
+
 It is an overlay UI for quickly viewing all anchors in the current project and provides a simple visualization. Selecting an anchor can quickly return to that conversation. All functionality is implemented with pi's native APIs.
+
+And also, search is available starting with `/`, just like searching in `/tree`.
+
+I design this visual anchor panel because I want to do such job on my own. Input a prompt, agent will handle all these with `tape_search` tool, but I prefer doing this by hand. At least, not everytime by prompt.
+
+Easier is not the same as simple. AI can lower the friction, but it can't turn inherently complex thing into simple.
+
+I solemnly swear: I am never poking Pi's TUI design again.
 
 ## New Features
 
 - **`/memory-review` slash command**: Opens an interactive Memory Review overlay for browsing tape anchors by timeline, keyword relations, and stats, with keyboard navigation and dynamic terminal-aware layout. Pressing `enter` on a selected anchor now jumps through pi's session tree to the first assistant entry after that anchor. This slash command is only registered when tape mode is enabled.
+  Search is available with `/`: type to fuzzy-filter anchors across names, summaries, purposes, triggers, keywords, and timestamps. Press `Esc` or `Ctrl+C` to leave search input.
 - **`memory-import` skill**: New skill for importing durable knowledge from URLs, folders, or files into pi-memory-md. Uses `npx defuddle` for web content extraction, analyzes sources before writing, asks for focus confirmation, and generates memories directly via `memory-write` skill with proper description, tags, and source references.
 
 ## Changed

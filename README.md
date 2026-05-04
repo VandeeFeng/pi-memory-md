@@ -452,7 +452,7 @@ Prompts should evolve into intent.
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `/memory-anchor` | `<prompt>` | Slash command that asks the LLM to derive and create a manually authorized handoff anchor |
-| `/memory-review` | `[limit]` default: `50`, max: `100` | Slash command that opens an interactive Memory Review overlay for browsing anchors by timeline, keyword relations, and stats |
+| `/memory-review` | `[limit]` default: `50`, max: `100` | Slash command that opens an interactive Memory Review overlay for browsing anchors by timeline, keyword relations, stats, and `/` fuzzy search |
 | `tape_handoff` | `{name, summary?, purpose?}` | Create a handoff anchor checkpoint in the tape |
 | `tape_list` | `{limit?: number}` | List all anchor checkpoints |
 | `tape_delete` | `{id}` | Delete an anchor checkpoint by id |

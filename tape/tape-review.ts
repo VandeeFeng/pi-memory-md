@@ -1,5 +1,15 @@
+import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ExtensionCommandContext, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import { type Component, Key, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import {
+  type Component,
+  type Focusable,
+  fuzzyFilter,
+  Input,
+  Key,
+  matchesKey,
+  truncateToWidth,
+  visibleWidth,
+} from "@mariozechner/pi-tui";
 import { formatCommitTimestamp } from "../utils.js";
 import type { TapeAnchor } from "./tape-anchor.js";
 import { getSessionFilePath, parseSessionFile } from "./tape-reader.js";
@@ -9,7 +19,9 @@ export const DEFAULT_MEMORY_REVIEW_LIMIT = 50;
 export const MAX_TAPE_REVIEW_LIMIT = 100;
 
 const BAR_WIDTH = 10;
+const FRAME_PADDING = 1;
 const OVERLAY_HEIGHT_RATIO = 0.8;
+const OVERLAY_MIN_HEIGHT = 12;
 const OVERLAY_CHROME_LINES = 8;
 const VIEW_MODES: ViewMode[] = ["timeline", "relations", "stats"];
 
@@ -25,6 +37,8 @@ type ReviewData = {
 };
 
 type ViewMode = "timeline" | "relations" | "stats";
+type FrameLine = { text: string; width: number; paddingX: number };
+type SessionEntry = ReturnType<ExtensionContext["sessionManager"]["getEntries"]>[number];
 
 function countValue(map: Map<string, number>, value: string | undefined): void {
   const key = value?.trim() || "unset";
@@ -37,9 +51,9 @@ export function normalizeMemoryReviewLimit(limit: number): number {
 }
 
 function buildReviewData(tapeService: TapeService, scope: "session" | "project", limit: number): ReviewData {
-  const allAnchors = tapeService.getAnchorStore().getAllAnchors();
-  const scopedAnchors =
-    scope === "session" ? allAnchors.filter((anchor) => anchor.sessionId === tapeService.getSessionId()) : allAnchors;
+  const scopedAnchors = tapeService
+    .getAnchorStore()
+    .scan(scope === "session" ? { sessionId: tapeService.getSessionId() } : {});
   const anchors = scopedAnchors.filter((anchor) => anchor.type !== "session").slice(-limit);
   const stats: ReviewStats = { purposes: new Map(), keywords: new Map(), triggers: new Map() };
 
@@ -61,10 +75,27 @@ function bar(value: number, max: number): string {
   return `${"█".repeat(size)}${" ".repeat(BAR_WIDTH - size)}`;
 }
 
-class TapeReviewOverlay implements Component {
+function getAnchorSearchText(anchor: TapeAnchor): string {
+  return [
+    anchor.name,
+    anchor.timestamp,
+    anchor.type,
+    anchor.meta?.summary,
+    anchor.meta?.purpose,
+    anchor.meta?.trigger,
+    ...(anchor.meta?.keywords ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+class TapeReviewOverlay implements Component, Focusable {
   private view: ViewMode = "timeline";
   private selectedByView: Record<ViewMode, number>;
   private selectedRelationIndex = 0;
+  private searchInputActive = false;
+  private searchQuery = "";
+  private readonly searchInput = new Input();
   private scrollOffsetByView: Record<ViewMode, number> = { timeline: 0, relations: 0, stats: 0 };
   private cachedWidth?: number;
   private cachedBodyLines?: number;
@@ -78,21 +109,44 @@ class TapeReviewOverlay implements Component {
     private readonly getBodyLines: () => number,
   ) {
     const newestAnchorIndex = Math.max(0, this.data.anchors.length - 1);
-    this.selectedByView = { timeline: newestAnchorIndex, relations: newestAnchorIndex, stats: 0 };
-    this.selectedRelationIndex = Math.max(0, this.getVisibleAnchors().length - 1);
+    this.selectedByView = { timeline: newestAnchorIndex, relations: 0, stats: 0 };
+    this.selectedRelationIndex = 0;
+    this.searchInput.onEscape = () => this.clearSearch();
+    this.searchInput.onSubmit = () => this.openSelectedAnchor();
+  }
+
+  get focused(): boolean {
+    return this.searchInput.focused;
+  }
+
+  set focused(value: boolean) {
+    this.searchInput.focused = value && this.searchInputActive;
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")) || data === "q") {
+    if (this.searchInputActive) {
+      this.handleSearchInput(data);
+      return;
+    }
+    if (data === "/") {
+      this.openSearchInput();
+      return;
+    }
+    if (matchesKey(data, Key.escape)) {
+      if (this.searchQuery) {
+        this.clearSearch();
+        return;
+      }
+      this.onClose();
+      return;
+    }
+    if (matchesKey(data, Key.ctrl("c")) || data === "q") {
       this.onClose();
       return;
     }
     if (matchesKey(data, Key.enter)) {
-      const anchor = this.getSelectedAnchor();
-      if (anchor) {
-        this.onOpenAnchor(anchor);
-        return;
-      }
+      this.openSelectedAnchor();
+      return;
     }
     if (matchesKey(data, Key.left)) this.view = this.previousView();
     if (matchesKey(data, Key.right) || matchesKey(data, Key.tab)) this.view = this.nextView();
@@ -110,26 +164,26 @@ class TapeReviewOverlay implements Component {
     if (this.cachedLines && this.cachedWidth === width && this.cachedBodyLines === bodyLineCount)
       return this.cachedLines;
 
-    const innerWidth = Math.max(1, width - 2);
-    const bodyContent = this.renderBody(innerWidth);
-    const visibleBodyContent = this.sliceScrollableBody(bodyContent, bodyLineCount, innerWidth);
-
-    const bodyLines = [
-      this.header(innerWidth),
-      ...this.statusBar(innerWidth),
-      "─".repeat(innerWidth),
-      ...visibleBodyContent,
-      "─".repeat(innerWidth),
-      this.detail(innerWidth),
+    const frameWidth = Math.max(1, width - 2);
+    const contentWidth = Math.max(1, frameWidth - FRAME_PADDING * 2);
+    const bodyContent = this.renderBody(contentWidth);
+    const visibleBodyContent = this.sliceScrollableBody(bodyContent, bodyLineCount, contentWidth);
+    const bodyLines: FrameLine[] = [
+      ...this.headerArea(frameWidth, contentWidth),
+      { text: "─".repeat(frameWidth), width: frameWidth, paddingX: 0 },
+      ...visibleBodyContent.map((text) => ({ text, width: contentWidth, paddingX: FRAME_PADDING })),
+      { text: "─".repeat(frameWidth), width: frameWidth, paddingX: 0 },
+      { text: this.detail(contentWidth), width: contentWidth, paddingX: FRAME_PADDING },
     ];
     const lines = [
-      this.topBorder(innerWidth),
-      ...bodyLines.map((line) => this.borderLine(line, innerWidth)),
-      this.bottomBorder(innerWidth),
+      this.topBorder(frameWidth),
+      ...bodyLines.map((line) => this.borderLine(line.text, line.width, line.paddingX)),
+      this.bottomBorder(frameWidth),
     ];
+
     this.cachedWidth = width;
     this.cachedBodyLines = bodyLineCount;
-    this.cachedLines = lines.map((line) => truncateToWidth(line, width));
+    this.cachedLines = lines.map((line) => truncateToWidth(line, width, "…", true));
     return this.cachedLines;
   }
 
@@ -139,24 +193,53 @@ class TapeReviewOverlay implements Component {
     this.cachedLines = undefined;
   }
 
-  private header(width: number): string {
+  private headerArea(frameWidth: number, contentWidth: number): FrameLine[] {
     const title = this.theme.fg("toolTitle", this.theme.bold("Memory Review"));
-    return this.centerText(title, width);
+    const tabs = this.viewTabs(frameWidth);
+    const hint = this.navigationHint(contentWidth);
+
+    if (!this.searchInputActive) {
+      return [
+        { text: this.placeCenter(title, frameWidth), width: frameWidth, paddingX: 0 },
+        { text: tabs, width: frameWidth, paddingX: 0 },
+        { text: hint, width: contentWidth, paddingX: FRAME_PADDING },
+      ];
+    }
+
+    const searchLine = this.searchInput.render(contentWidth)[0] ?? "";
+    return [
+      { text: this.placeCenter(title, frameWidth), width: frameWidth, paddingX: 0 },
+      { text: tabs, width: frameWidth, paddingX: 0 },
+      {
+        text: this.theme.fg("accent", truncateToWidth(searchLine, contentWidth, "…", true)),
+        width: contentWidth,
+        paddingX: FRAME_PADDING,
+      },
+    ];
   }
 
-  private statusBar(width: number): string[] {
-    const columnWidth = Math.max(1, Math.floor(width / VIEW_MODES.length));
-    const tabs = VIEW_MODES.map((view) => {
+  private viewTabs(width: number): string {
+    let line = "";
+    for (let index = 0; index < VIEW_MODES.length; index++) {
+      const view = VIEW_MODES[index]!;
       const label = view === this.view ? this.theme.fg("accent", `[${view}]`) : this.theme.fg("muted", view);
-      return this.centerText(label, columnWidth);
-    });
-    const tabLine = truncateToWidth(tabs.join(""), width);
+      const center = Math.floor(((index * 2 + 1) * width) / (VIEW_MODES.length * 2));
+      const start = Math.max(0, center - Math.floor(visibleWidth(label) / 2));
+      line += " ".repeat(Math.max(1, start - visibleWidth(line))) + label;
+    }
+    return truncateToWidth(line.trimEnd(), width, "…", true);
+  }
+
+  private navigationHint(width: number): string {
     const keywordHint = this.view === "relations" ? " · h/l keyword" : "";
-    const hint = this.centerText(
-      this.theme.fg("muted", `←/→/tab switch · ↑/↓/j/k select${keywordHint} · enter open · q/ctrl+c close`),
+    const searchHint = this.searchQuery ? ` · /${this.searchQuery}` : " · / search";
+    return this.placeCenter(
+      this.theme.fg(
+        "muted",
+        `←/→/tab switch · ↑/↓/j/k select${keywordHint} · enter open${searchHint} · q/ctrl+c close`,
+      ),
       width,
     );
-    return [tabLine, hint];
   }
 
   private topBorder(width: number): string {
@@ -167,19 +250,26 @@ class TapeReviewOverlay implements Component {
     return `└${"─".repeat(width)}┘`;
   }
 
-  private borderLine(line: string, width: number): string {
-    const padding = Math.max(0, width - visibleWidth(line));
-    return `│${line}${" ".repeat(padding)}│`;
+  private borderLine(line: string, width: number, paddingX: number): string {
+    const content = truncateToWidth(line, width, "…", true);
+    const padding = Math.max(0, width - visibleWidth(content));
+    const inset = " ".repeat(paddingX);
+    return `│${inset}${content}${" ".repeat(padding)}${inset}│`;
   }
 
-  private centerText(text: string, width: number): string {
-    const padding = Math.max(0, width - visibleWidth(text));
-    const left = Math.floor(padding / 2);
-    return `${" ".repeat(left)}${text}${" ".repeat(padding - left)}`;
+  private placeCenter(text: string, width: number): string {
+    const content = truncateToWidth(text, width, "…", false);
+    const left = Math.max(0, Math.floor((width - visibleWidth(content)) / 2));
+    return `${" ".repeat(left)}${content}`;
   }
 
   private renderBody(width: number): string[] {
     if (this.data.anchors.length === 0) return [this.theme.fg("muted", "No tape anchors found.")];
+
+    const searchAnchors = this.getSearchAnchors();
+    if (searchAnchors.length === 0) return [this.theme.fg("muted", `No anchors match /${this.searchQuery}`)];
+
+    this.clampSelection();
     if (this.view === "relations") return this.renderRelations(width);
     if (this.view === "stats") return this.renderStats(width);
     return this.renderTimeline(width);
@@ -197,7 +287,12 @@ class TapeReviewOverlay implements Component {
     if (maxOffset > 0 && indicatorText) {
       const indicator = this.theme.fg("dim", indicatorText);
       const lastIndex = visibleLines.length - 1;
-      const baseLine = truncateToWidth(visibleLines[lastIndex], Math.max(1, width - visibleWidth(indicator) - 1));
+      const baseLine = truncateToWidth(
+        visibleLines[lastIndex],
+        Math.max(1, width - visibleWidth(indicator) - 1),
+        "",
+        true,
+      );
       const gap = " ".repeat(Math.max(1, width - visibleWidth(baseLine) - visibleWidth(indicator)));
       visibleLines[lastIndex] = `${baseLine}${gap}${indicator}`;
     }
@@ -230,7 +325,7 @@ class TapeReviewOverlay implements Component {
       const purposeText = `[${this.theme.fg("warning", purpose)}]`;
       const keywordText = `[${this.theme.fg("warning", keywords)}]`;
       const timestamp = this.theme.fg("dim", formatCommitTimestamp(new Date(anchor.timestamp)));
-      return truncateToWidth(`${pointer} ${anchor.name} ${purposeText}/${keywordText} ${timestamp}`, width);
+      return truncateToWidth(`${pointer} ${anchor.name} ${purposeText}/${keywordText} ${timestamp}`, width, "…", true);
     });
     return [example, "", ...rows];
   }
@@ -250,13 +345,13 @@ class TapeReviewOverlay implements Component {
       }
     }
 
-    return lines.map((line) => truncateToWidth(line, width));
+    return lines.map((line) => truncateToWidth(line, width, "…", true));
   }
 
   private getRelationGroups(): Array<[string, TapeAnchor[]]> {
     const groups = new Map<string, TapeAnchor[]>();
 
-    for (const anchor of this.data.anchors) {
+    for (const anchor of this.getSearchAnchors()) {
       for (const keyword of anchor.meta?.keywords ?? ["unset"]) {
         const anchors = groups.get(keyword) ?? [];
         anchors.push(anchor);
@@ -273,7 +368,11 @@ class TapeReviewOverlay implements Component {
   }
 
   private getTimelineAnchors(): TapeAnchor[] {
-    return [...this.data.anchors].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
+    return [...this.getSearchAnchors()].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
+  }
+
+  private getSearchAnchors(): TapeAnchor[] {
+    return fuzzyFilter(this.data.anchors, this.searchQuery, getAnchorSearchText);
   }
 
   private getVisibleAnchors(): TapeAnchor[] {
@@ -283,14 +382,18 @@ class TapeReviewOverlay implements Component {
       case "relations":
         return this.getRelationGroups().flatMap(([, anchors]) => anchors);
       case "stats":
-        return this.data.anchors;
+        return this.getSearchAnchors();
     }
   }
 
   private getSelectedAnchor(): TapeAnchor | undefined {
     if (this.view === "stats") return undefined;
-    if (this.view === "relations") return this.getVisibleAnchors()[this.selectedRelationIndex];
-    return this.data.anchors[this.selectedByView[this.view]];
+
+    const visibleAnchors = this.getVisibleAnchors();
+    if (this.view === "relations") return visibleAnchors[this.selectedRelationIndex];
+
+    const anchor = this.data.anchors[this.selectedByView[this.view]];
+    return visibleAnchors.includes(anchor) ? anchor : visibleAnchors[0];
   }
 
   private moveSelection(delta: -1 | 1): void {
@@ -329,7 +432,9 @@ class TapeReviewOverlay implements Component {
       if ((groupStarts[index] ?? 0) <= this.selectedRelationIndex) groupIndex = index;
     }
     this.selectedRelationIndex = groupStarts[(groupIndex + delta + groups.length) % groups.length] ?? 0;
-    const nextAnchor = this.getVisibleAnchors()[this.selectedRelationIndex];
+
+    const visibleAnchors = this.getVisibleAnchors();
+    const nextAnchor = visibleAnchors[this.selectedRelationIndex];
     if (nextAnchor) this.selectedByView.relations = this.data.anchors.indexOf(nextAnchor);
     this.ensureSelectedVisible();
   }
@@ -380,6 +485,78 @@ class TapeReviewOverlay implements Component {
     return null;
   }
 
+  private openSearchInput(): void {
+    this.searchInputActive = true;
+    this.searchInput.focused = true;
+    this.searchInput.setValue(this.searchQuery);
+    this.invalidate();
+  }
+
+  private handleSearchInput(data: string): void {
+    if (matchesKey(data, Key.ctrl("c"))) {
+      this.onClose();
+      return;
+    }
+    if (matchesKey(data, Key.up)) {
+      this.moveSelection(-1);
+      this.invalidate();
+      return;
+    }
+    if (matchesKey(data, Key.down)) {
+      this.moveSelection(1);
+      this.invalidate();
+      return;
+    }
+    if (matchesKey(data, Key.enter)) {
+      this.openSelectedAnchor();
+      return;
+    }
+    if (matchesKey(data, Key.escape)) {
+      this.clearSearch();
+      return;
+    }
+
+    const previousQuery = this.searchQuery;
+    this.searchInput.handleInput(data);
+
+    this.searchQuery = this.searchInput.getValue();
+    if (this.searchQuery !== previousQuery) {
+      this.clampSelection();
+      this.scrollOffsetByView[this.view] = 0;
+    }
+    this.invalidate();
+  }
+
+  private openSelectedAnchor(): void {
+    const anchor = this.getSelectedAnchor();
+    if (anchor) this.onOpenAnchor(anchor);
+  }
+
+  private clearSearch(): void {
+    this.searchInputActive = false;
+    this.searchInput.focused = false;
+    this.searchQuery = "";
+    this.searchInput.setValue("");
+    this.clampSelection();
+    this.scrollOffsetByView[this.view] = 0;
+    this.invalidate();
+  }
+
+  private clampSelection(visibleAnchors = this.getVisibleAnchors()): void {
+    if (visibleAnchors.length === 0) return;
+
+    if (this.view === "relations") {
+      this.selectedRelationIndex = Math.min(this.selectedRelationIndex, visibleAnchors.length - 1);
+      const selectedAnchor = visibleAnchors[this.selectedRelationIndex];
+      if (selectedAnchor) this.selectedByView.relations = this.data.anchors.indexOf(selectedAnchor);
+      return;
+    }
+
+    const selectedAnchor = this.getSelectedAnchor();
+    const nextAnchor = selectedAnchor && visibleAnchors.includes(selectedAnchor) ? selectedAnchor : visibleAnchors[0];
+    this.selectedByView[this.view] = this.data.anchors.indexOf(nextAnchor);
+  }
+
   private renderStats(width: number): string[] {
     const separator = " │ ";
     const columnWidth = Math.max(18, Math.floor((width - visibleWidth(separator) * 2) / 3));
@@ -400,7 +577,7 @@ class TapeReviewOverlay implements Component {
       );
     }
 
-    return lines.map((line) => truncateToWidth(line, width));
+    return lines.map((line) => truncateToWidth(line, width, "…", true));
   }
 
   private renderStatGroup(values: Map<string, number>, columnWidth: number): string[] {
@@ -410,14 +587,14 @@ class TapeReviewOverlay implements Component {
     const barStart = Math.max(6, columnWidth - BAR_WIDTH - valueWidth - 1);
 
     return rows.map(([label, value]) => {
-      const labelText = truncateToWidth(label, Math.max(1, barStart - 1));
+      const labelText = truncateToWidth(label, Math.max(1, barStart - 1), "…", true);
       const gap = " ".repeat(Math.max(1, barStart - visibleWidth(labelText)));
       return `${labelText}${gap}${this.theme.fg("accent", bar(value, max))} ${value}`;
     });
   }
 
   private fitCell(text: string, width: number): string {
-    const fitted = truncateToWidth(text, width);
+    const fitted = truncateToWidth(text, width, "…", true);
     return `${fitted}${" ".repeat(Math.max(0, width - visibleWidth(fitted)))}`;
   }
 
@@ -426,7 +603,7 @@ class TapeReviewOverlay implements Component {
     const anchor = this.getSelectedAnchor();
     if (!anchor) return "";
     const summary = anchor.meta?.summary || "no summary";
-    return truncateToWidth(`${anchor.name} · ${summary}`, width);
+    return truncateToWidth(`${anchor.name} · ${summary}`, width, "…", true);
   }
 
   private nextView(): ViewMode {
@@ -443,28 +620,44 @@ class TapeReviewOverlay implements Component {
   }
 }
 
-function findNextAssistantEntry(
-  entries: ReturnType<ExtensionContext["sessionManager"]["getEntries"]>,
-  anchor: TapeAnchor,
-): string | undefined {
-  const anchorIndex = entries.findIndex((entry) => entry.id === anchor.sessionEntryId);
-  if (anchorIndex < 0) return undefined;
+function getAvailableEntry(entries: SessionEntry[], anchor: TapeAnchor): string | undefined {
+  const childMap = new Map<string, SessionEntry[]>();
+  for (const entry of entries) {
+    if (!entry.parentId) continue;
+    const children = childMap.get(entry.parentId) ?? [];
+    children.push(entry);
+    childMap.set(entry.parentId, children);
+  }
 
-  return entries.slice(anchorIndex + 1).find((entry) => entry.type === "message" && entry.message.role === "assistant")
-    ?.id;
+  const queue = [...(childMap.get(anchor.sessionEntryId) ?? [])];
+  for (let index = 0; index < queue.length; index++) {
+    const entry = queue[index];
+    if (!entry) continue;
+    if (entry.type !== "message" || entry.message.role !== "assistant") {
+      queue.push(...(childMap.get(entry.id) ?? []));
+      continue;
+    }
+
+    const message = entry.message as AssistantMessage;
+    const hasText = message.content.some((block) => block.type === "text" && block.text.trim().length > 0);
+    if (hasText || message.stopReason === "aborted" || message.errorMessage) return entry.id;
+    queue.push(...(childMap.get(entry.id) ?? []));
+  }
+
+  return undefined;
 }
 
-function resolveAnchorNavigationTarget(
+function resolveNavTarget(
   ctx: Pick<ExtensionCommandContext, "cwd" | "sessionManager">,
   anchor: TapeAnchor,
 ): { sessionPath?: string; targetId?: string } {
   if (anchor.sessionId === ctx.sessionManager.getSessionId()) {
-    return { targetId: findNextAssistantEntry(ctx.sessionManager.getEntries(), anchor) };
+    return { targetId: getAvailableEntry(ctx.sessionManager.getEntries(), anchor) };
   }
 
   const sessionPath = getSessionFilePath(ctx.cwd, anchor.sessionId) ?? undefined;
   const entries = sessionPath ? parseSessionFile(sessionPath)?.entries : undefined;
-  return { sessionPath, targetId: entries ? findNextAssistantEntry(entries, anchor) : undefined };
+  return { sessionPath, targetId: entries ? getAvailableEntry(entries, anchor) : undefined };
 }
 
 export async function openMemoryReview(
@@ -480,7 +673,7 @@ export async function openMemoryReview(
       (tui, theme, _keybindings, done) => {
         const getBodyLines = (): number => {
           const termHeight = (tui as { terminal?: { rows?: number } }).terminal?.rows ?? 30;
-          const overlayHeight = Math.max(12, Math.floor(termHeight * OVERLAY_HEIGHT_RATIO));
+          const overlayHeight = Math.max(OVERLAY_MIN_HEIGHT, Math.floor(termHeight * OVERLAY_HEIGHT_RATIO));
           return Math.max(1, overlayHeight - OVERLAY_CHROME_LINES);
         };
         return new TapeReviewOverlay(
@@ -493,12 +686,12 @@ export async function openMemoryReview(
       },
       {
         overlay: true,
-        overlayOptions: { width: "80%", maxHeight: "80%", minWidth: 70, anchor: "center", margin: 2 },
+        overlayOptions: { width: "80%", maxHeight: "80%", minWidth: 70, anchor: "center", margin: 0 },
       },
     );
 
     if (selectedAnchor) {
-      const { sessionPath, targetId } = resolveAnchorNavigationTarget(ctx, selectedAnchor);
+      const { sessionPath, targetId } = resolveNavTarget(ctx, selectedAnchor);
       if (!targetId) {
         ctx.ui.notify("No assistant entry found after selected anchor.", "warning");
       } else if (sessionPath) {
