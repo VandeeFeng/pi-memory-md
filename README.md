@@ -308,6 +308,10 @@ A delivered tape hidden message looks like:
 
 ```xml
 <memory_context mode="tape">
+<instructions>
+Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.
+Handoff mode: manual. `tape_handoff` is blocked unless the keyword is triggered or user create manually.
+</instructions>
 <memory_files>
 - path: core/USER.md
   priority: high
@@ -316,13 +320,11 @@ A delivered tape hidden message looks like:
   recent focus: read 12-28
 </memory_files>
 <active_project_files>
-- path: /path/to/project/tape/tape-selector.ts
+- path: /path/to/project/file
   priority: high
   recent focus: read 340-420, read 590-677, edit 340-399
 </active_project_files>
 </memory_context>
-
-💡 Tape is enabled for this conversation. Use tape tools when you need anchors or tape history.
 ```
 
 ### Tape Anchors

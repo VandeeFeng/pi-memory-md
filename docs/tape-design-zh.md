@@ -117,7 +117,7 @@ class TapeService {
 }
 ```
 
-### 4. Tape 选择器（`tape/tape-selector.ts`）
+### 4. Tape 上下文（`tape/tape-context.ts`）
 
 **ConversationSelector**：用于格式化/精简会话条目的辅助工具
 - Token 预算过滤（默认：1000 tokens，40 条目）

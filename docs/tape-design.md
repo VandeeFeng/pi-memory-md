@@ -117,7 +117,7 @@ class TapeService {
 }
 ```
 
-### 4. Tape Selectors (`tape/tape-selector.ts`)
+### 4. Tape Context (`tape/tape-context.ts`)
 
 **ConversationSelector**: Helper for formatting/reducing session entries
 - Token budget filtering (default: 1000 tokens, 40 entries)

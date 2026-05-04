@@ -5,8 +5,8 @@ import { Type } from "typebox";
 import type { MemoryMdSettings } from "../types.js";
 import { toLocaleDateTime, toLocaleTime, toTimestamp } from "../utils.js";
 import type { TapeAnchorMeta, TapeAnchorType } from "./tape-anchor.js";
+import { extractMessageContent } from "./tape-context.js";
 import type { KeywordHandoffInstruction } from "./tape-gate.js";
-import { extractMessageContent } from "./tape-selector.js";
 import type { TapeService } from "./tape-service.js";
 import type { RenderState } from "./tape-types.js";
 

@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import { writeMemoryFile } from "../memory-core.js";
-import { ConversationSelector, MemoryFileSelector, matchesDefaultIgnoredPath } from "../tape/tape-selector.js";
+import { ConversationSelector, MemoryFileSelector, matchesDefaultIgnoredPath } from "../tape/tape-context.js";
 import { hoursAgoIso, toTimestamp } from "../utils.js";
 import { createTempDir } from "./test-helpers.js";
 
