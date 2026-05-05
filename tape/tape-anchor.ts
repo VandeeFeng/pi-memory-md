@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { toTimestamp } from "../utils.js";
 
+const MAX_MEMORY_ANCHORS = 100;
+
 export type TapeAnchorType = "session" | "handoff";
 
 export type TapeAnchorMeta = {
@@ -21,18 +23,26 @@ export interface TapeAnchor {
   meta?: TapeAnchorMeta;
 }
 
-const MAX_MEMORY_ANCHORS = 100;
+export type TapeAnchorScanMode = "latest" | "all";
 
-type FileReadResult = { entries: TapeAnchor[]; error?: Error };
-
-export type QueryOptions = {
+export interface TapeAnchorScanOptions {
   id?: string;
-  name?: string;
-  nameCaseInsensitive?: boolean;
   sessionId?: string;
   sessionEntryId?: string;
-  returnMode?: "first" | "last" | "all";
-};
+  name?: string;
+  nameCaseInsensitive?: boolean;
+  scan?: string;
+  since?: string;
+  until?: string;
+  type?: "session" | "handoff";
+  summary?: string;
+  purpose?: string;
+  keywords?: string[];
+  limit?: number;
+  mode?: "latest" | "all";
+}
+
+type FileReadResult = { entries: TapeAnchor[]; error?: Error };
 
 function sortAnchorsByTimestamp(anchors: TapeAnchor[]): TapeAnchor[] {
   return anchors.sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp));
@@ -57,6 +67,70 @@ function parseAnchorLine(line: string): TapeAnchor | null {
   } catch {
     return null;
   }
+}
+
+function filterByScanOptions(anchors: TapeAnchor[], options: TapeAnchorScanOptions): TapeAnchor[] {
+  const {
+    id,
+    name,
+    nameCaseInsensitive,
+    sessionId,
+    sessionEntryId,
+    scan,
+    since,
+    until,
+    type,
+    summary,
+    purpose,
+    keywords,
+  } = options;
+
+  const sinceTime = since ? toTimestamp(since) : null;
+  const untilTime = until ? toTimestamp(until) : null;
+  const lowerName = nameCaseInsensitive ? name?.toLowerCase() : undefined;
+
+  return anchors.filter((anchor) => {
+    if (id !== undefined && anchor.id !== id) return false;
+    if (sessionId !== undefined && anchor.sessionId !== sessionId) return false;
+    if (sessionEntryId !== undefined && anchor.sessionEntryId !== sessionEntryId) return false;
+    if (type !== undefined && anchor.type !== type) return false;
+
+    if (lowerName !== undefined) {
+      if (!anchor.name.toLowerCase().includes(lowerName)) return false;
+    } else if (name !== undefined) {
+      if (!anchor.name.includes(name)) return false;
+    }
+
+    const anchorTime = toTimestamp(anchor.timestamp);
+    if (sinceTime !== null && anchorTime < sinceTime) return false;
+    if (untilTime !== null && anchorTime > untilTime) return false;
+
+    if (summary && !anchor.meta?.summary?.toLowerCase().includes(summary.toLowerCase())) return false;
+    if (purpose && !anchor.meta?.purpose?.toLowerCase().includes(purpose.toLowerCase())) return false;
+    if (keywords?.length) {
+      const anchorKeywords = anchor.meta?.keywords?.map((k) => k.toLowerCase()) ?? [];
+      if (!keywords.every((k) => anchorKeywords.includes(k.toLowerCase()))) return false;
+    }
+
+    if (scan) {
+      const needle = scan.toLowerCase();
+      const metaStr = anchor.meta ? JSON.stringify(anchor.meta).toLowerCase() : "";
+      if (
+        !anchor.name.toLowerCase().includes(needle) &&
+        !anchor.type.toLowerCase().includes(needle) &&
+        !metaStr.includes(needle)
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+function pickByMode(anchors: TapeAnchor[], mode: TapeAnchorScanMode): TapeAnchor[] {
+  if (mode === "all") return anchors;
+  return anchors.length > 0 ? [anchors[anchors.length - 1]] : [];
 }
 
 export class AnchorStore {
@@ -85,16 +159,12 @@ export class AnchorStore {
     try {
       const content = fs.readFileSync(this.indexPath, "utf-8");
       const lines = content.split("\n").filter((line) => line.trim());
-
-      // Only load the most recent MAX_MEMORY_ANCHORS entries
       const startIndex = Math.max(0, lines.length - MAX_MEMORY_ANCHORS);
       const recentLines = lines.slice(startIndex);
 
       for (const line of recentLines) {
         const entry = parseAnchorLine(line);
-        if (entry) {
-          this.addToMemoryIndex(entry);
-        }
+        if (entry) this.addToMemoryIndex(entry);
       }
     } catch {
       // File read error, start fresh
@@ -121,30 +191,16 @@ export class AnchorStore {
     this.anchorsBySessionEntry.set(sessionEntryKey, bySessionEntry);
   }
 
-  private queryFile(options: QueryOptions): TapeAnchor[] {
-    const { entries, error } = this.readAndParseFileLines();
+  private scanFile(options: TapeAnchorScanOptions): TapeAnchor[] {
+    const { entries, error } = this.parseFileLines();
     if (error) {
       console.error(`[AnchorStore] Failed to read index file: ${error.message}`);
       return [];
     }
 
-    const { id, name, nameCaseInsensitive, sessionId, sessionEntryId, returnMode } = options;
-    const normalizedName = nameCaseInsensitive && name ? name.toLowerCase() : undefined;
-    const results: TapeAnchor[] = [];
-
-    for (const entry of entries) {
-      if (id !== undefined && entry.id !== id) continue;
-      if (normalizedName !== undefined && entry.name.toLowerCase() !== normalizedName) continue;
-      if (name !== undefined && !nameCaseInsensitive && entry.name !== name) continue;
-      if (sessionId !== undefined && entry.sessionId !== sessionId) continue;
-      if (sessionEntryId !== undefined && entry.sessionEntryId !== sessionEntryId) continue;
-      results.push(entry);
-    }
-
-    if (returnMode === "first" || returnMode === "last") {
-      return results.length > 0 ? [results[results.length - 1]] : [];
-    }
-    return sortAnchorsByTimestamp(results);
+    const mode = options.mode ?? "all";
+    const filtered = filterByScanOptions(entries, options);
+    return pickByMode(filtered, mode);
   }
 
   private getSessionEntryKey(sessionEntryId: string, sessionId?: string): string {
@@ -157,14 +213,14 @@ export class AnchorStore {
   }
 
   removeById(id: string): TapeAnchor | null {
-    const anchor = this.query({ id, returnMode: "first" })[0] ?? null;
+    const anchor = this.scan({ id, mode: "latest" })[0] ?? null;
     if (!anchor) return null;
 
     this.rebuildIndex(this.allAnchors.filter((entry) => entry.id !== id));
     return anchor;
   }
 
-  private readAndParseFileLines(): FileReadResult {
+  private parseFileLines(): FileReadResult {
     if (!fs.existsSync(this.indexPath)) return { entries: [] };
 
     try {
@@ -187,20 +243,17 @@ export class AnchorStore {
     return [...this.allAnchors];
   }
 
-  query(options: QueryOptions): TapeAnchor[] {
-    const { id, name, nameCaseInsensitive, sessionId, sessionEntryId, returnMode = "all" } = options;
+  // scan logic
+  scan(options: TapeAnchorScanOptions): TapeAnchor[] {
+    const mode = options.mode ?? "all";
+    const memoryResults = this.scanMemory({ ...options, mode: "all" });
 
-    const results = this.queryMemory(options);
-
-    // For "first"/"last", if memory has results, newest is in memory (we load most recent)
-    // For "all", need to check file since memory is limited to MAX_MEMORY_ANCHORS
-    if (returnMode !== "all" && results.length > 0) {
-      return [results[results.length - 1]];
+    if (mode !== "all" && memoryResults.length > 0) {
+      return pickByMode(memoryResults, mode);
     }
 
-    // Check file and add new anchors to memory
-    const fileResults = this.queryFile({ id, name, nameCaseInsensitive, sessionId, sessionEntryId });
-    const existingIds = new Set(this.allAnchors.map((a) => a.id));
+    const fileResults = this.scanFile({ ...options, mode: "all" });
+    const existingIds = new Set(this.allAnchors.map((anchor) => anchor.id));
     for (const anchor of fileResults) {
       if (!existingIds.has(anchor.id)) {
         this.addToMemoryIndex(anchor);
@@ -208,100 +261,19 @@ export class AnchorStore {
       }
     }
 
-    // Merge and deduplicate
-    const merged = this.mergeAnchors(results, fileResults);
-    return returnMode === "all" ? merged : merged.length > 0 ? [merged[merged.length - 1]] : [];
+    const merged = this.mergeAnchors(memoryResults, fileResults);
+    return pickByMode(merged, mode);
   }
 
-  private queryMemory(options: QueryOptions): TapeAnchor[] {
-    const { id, name, nameCaseInsensitive, sessionId, sessionEntryId } = options;
-    const normalizedName = nameCaseInsensitive && name ? name.toLowerCase() : undefined;
-    const results: TapeAnchor[] = [];
-
-    for (const anchor of this.allAnchors) {
-      if (id !== undefined && anchor.id !== id) continue;
-      if (normalizedName !== undefined && anchor.name.toLowerCase() !== normalizedName) continue;
-      if (name !== undefined && !nameCaseInsensitive && anchor.name !== name) continue;
-      if (sessionId !== undefined && anchor.sessionId !== sessionId) continue;
-      if (sessionEntryId !== undefined && anchor.sessionEntryId !== sessionEntryId) continue;
-      results.push(anchor);
-    }
-
-    return results;
+  private scanMemory(options: TapeAnchorScanOptions): TapeAnchor[] {
+    const filtered = filterByScanOptions(this.allAnchors, options);
+    return sortAnchorsByTimestamp(filtered);
   }
 
-  search(options: {
-    query?: string;
-    sessionId?: string;
-    limit?: number;
-    since?: string;
-    until?: string;
-    name?: string;
-    type?: TapeAnchorType;
-    summary?: string;
-    purpose?: string;
-    keywords?: string[];
-  }): TapeAnchor[] {
-    const { query, sessionId, limit = 20, since, until, name, type, summary, purpose, keywords } = options;
-    const sinceTime = since ? toTimestamp(since) : null;
-    const untilTime = until ? toTimestamp(until) : null;
-    const needle = query?.toLowerCase();
-
-    let anchors = sessionId ? [...(this.anchorsBySession.get(sessionId) ?? [])] : [...this.allAnchors];
-
-    // Always check file for completeness since memory is limited to MAX_MEMORY_ANCHORS
-    const fileAnchors = this.queryFile(sessionId ? { sessionId } : {});
-    if (anchors.length === 0) {
-      anchors = fileAnchors;
-    } else if (fileAnchors.length > 0) {
-      anchors = this.mergeAnchors(anchors, fileAnchors);
-    }
-
-    if (sinceTime !== null) {
-      anchors = anchors.filter((anchor) => toTimestamp(anchor.timestamp) >= sinceTime);
-    }
-
-    if (untilTime !== null) {
-      anchors = anchors.filter((anchor) => toTimestamp(anchor.timestamp) <= untilTime);
-    }
-
-    if (needle) {
-      anchors = anchors.filter(
-        (anchor) =>
-          anchor.name.toLowerCase().includes(needle) ||
-          anchor.type.toLowerCase().includes(needle) ||
-          (anchor.meta && JSON.stringify(anchor.meta).toLowerCase().includes(needle)),
-      );
-    }
-
-    if (name) {
-      const normalizedName = name.toLowerCase();
-      anchors = anchors.filter((anchor) => anchor.name.toLowerCase().includes(normalizedName));
-    }
-
-    if (type) {
-      anchors = anchors.filter((anchor) => anchor.type === type);
-    }
-
-    if (summary) {
-      const normalizedSummary = summary.toLowerCase();
-      anchors = anchors.filter((anchor) => anchor.meta?.summary?.toLowerCase().includes(normalizedSummary));
-    }
-
-    if (purpose) {
-      const normalizedPurpose = purpose.toLowerCase();
-      anchors = anchors.filter((anchor) => anchor.meta?.purpose?.toLowerCase().includes(normalizedPurpose));
-    }
-
-    if (keywords?.length) {
-      const normalizedKeywords = keywords.map((keyword) => keyword.toLowerCase());
-      anchors = anchors.filter((anchor) => {
-        const anchorKeywords = anchor.meta?.keywords?.map((keyword) => keyword.toLowerCase()) ?? [];
-        return normalizedKeywords.every((keyword) => anchorKeywords.includes(keyword));
-      });
-    }
-
-    return anchors.slice(-limit);
+  // search logic
+  search(options: TapeAnchorScanOptions): TapeAnchor[] {
+    const { limit = 20 } = options;
+    return this.scan({ ...options, mode: "all" }).slice(-limit);
   }
 
   private mergeAnchors(cached: TapeAnchor[], file: TapeAnchor[]): TapeAnchor[] {

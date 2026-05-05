@@ -18,16 +18,16 @@ export type PendingHandoffMatch =
 type TapeSettingsGetter = () => MemoryMdSettings;
 type ConsumeHandoffMatch = () => PendingHandoffMatch | null;
 
-type EntryQueryParams = {
+type EntryScanParams = {
   types?: SessionEntry["type"][];
   limit?: number;
   sinceAnchor?: string;
   lastAnchor?: boolean;
   betweenAnchors?: { start: string; end: string };
   betweenDates?: { start: string; end: string };
-  scope?: "session" | "project";
-  anchorScope?: "current-session" | "project";
-  query?: string;
+  entryScope?: "session" | "project";
+  anchorScope?: "session" | "project";
+  scan?: string;
 };
 
 function renderText(text: string): Text {
@@ -92,17 +92,17 @@ function getAnchorSearchBounds(
     lastAnchor?: boolean;
     betweenAnchors?: { start: string; end: string };
     betweenDates?: { start: string; end: string };
-    anchorScope?: "current-session" | "project";
-    scope?: "session" | "project";
+    anchorScope?: "session" | "project";
+    entryScope?: "session" | "project";
   },
 ): { since?: string; until?: string; sessionId?: string } {
-  const { sinceAnchor, lastAnchor, betweenAnchors, betweenDates, anchorScope = "current-session", scope } = options;
+  const { sinceAnchor, lastAnchor, betweenAnchors, betweenDates, anchorScope = "session", entryScope } = options;
 
   if (betweenDates) {
     return {
       since: betweenDates.start,
       until: betweenDates.end,
-      sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+      sessionId: entryScope === "session" ? tapeService.getSessionId() : undefined,
     };
   }
 
@@ -110,20 +110,20 @@ function getAnchorSearchBounds(
     return {
       since: tapeService.findAnchorByName(betweenAnchors.start, anchorScope)?.timestamp,
       until: tapeService.findAnchorByName(betweenAnchors.end, anchorScope)?.timestamp,
-      sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+      sessionId: entryScope === "session" ? tapeService.getSessionId() : undefined,
     };
   }
 
   if (lastAnchor) {
     return {
       since: tapeService.getLastAnchor(anchorScope)?.timestamp,
-      sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+      sessionId: entryScope === "session" ? tapeService.getSessionId() : undefined,
     };
   }
 
   return {
     since: sinceAnchor ? tapeService.findAnchorByName(sinceAnchor, anchorScope)?.timestamp : undefined,
-    sessionId: scope === "session" ? tapeService.getSessionId() : undefined,
+    sessionId: entryScope === "session" ? tapeService.getSessionId() : undefined,
   };
 }
 
@@ -149,16 +149,16 @@ const EntryTypeUnion = Type.Union([
   Type.Literal("compaction"),
 ]);
 
-function buildEntryQueryOptions(options: EntryQueryParams): Parameters<TapeService["query"]>[0] {
-  const { types, limit, scope = "project", anchorScope = "current-session", query } = options;
-  const queryOptions: Parameters<TapeService["query"]>[0] = { types, limit, scope, anchorScope, query };
+function buildEntryScanOptions(options: EntryScanParams): Parameters<TapeService["scan"]>[0] {
+  const { entryScope = "project", anchorScope = "session", types, limit, scan } = options;
+  const scanOptions: Parameters<TapeService["scan"]>[0] = { types, limit, entryScope, anchorScope, scan };
 
-  if (options.betweenAnchors) queryOptions.betweenAnchors = options.betweenAnchors;
-  else if (options.betweenDates) queryOptions.betweenDates = options.betweenDates;
-  else if (options.sinceAnchor) queryOptions.sinceAnchor = options.sinceAnchor;
-  else if (options.lastAnchor) queryOptions.lastAnchor = true;
+  if (options.betweenAnchors) scanOptions.betweenAnchors = options.betweenAnchors;
+  else if (options.betweenDates) scanOptions.betweenDates = options.betweenDates;
+  else if (options.sinceAnchor) scanOptions.sinceAnchor = options.sinceAnchor;
+  else if (options.lastAnchor) scanOptions.lastAnchor = true;
 
-  return queryOptions;
+  return scanOptions;
 }
 
 function getTapeUnavailableResult(): {
@@ -303,7 +303,7 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
 
       const anchorStore = tapeService.getAnchorStore();
       const anchors = anchorStore.getAllAnchors().slice(-limit);
-      const projectEntries = tapeService.query({ scope: "project", anchorScope: "project" });
+      const projectEntries = tapeService.scan({ entryScope: "project", anchorScope: "project" });
 
       const anchorsWithContext = anchors.map((anchor) => {
         const [beforeContext, afterContext] = getAnchorContext(projectEntries, anchor.timestamp, contextLines);
@@ -493,7 +493,7 @@ export function registerTapeInfo(pi: ExtensionAPI, getTapeService: TapeServiceGe
 
 const SearchKindsUnion = Type.Union([Type.Literal("entry"), Type.Literal("anchor"), Type.Literal("all")]);
 const QueryScopeUnion = Type.Union([Type.Literal("session"), Type.Literal("project")]);
-const AnchorScopeUnion = Type.Union([Type.Literal("current-session"), Type.Literal("project")]);
+const AnchorScopeUnion = Type.Union([Type.Literal("session"), Type.Literal("project")]);
 
 export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
@@ -520,16 +520,19 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
       betweenDates: Type.Optional(
         Type.Object({ start: Type.String(), end: Type.String() }, { description: "Between dates (ISO)" }),
       ),
-      scope: Type.Optional(
-        Type.Unsafe({ ...QueryScopeUnion, description: "Entry scope: 'session' or 'project' (default: project)" }),
+      entryScope: Type.Optional(
+        Type.Unsafe({
+          ...QueryScopeUnion,
+          description: "Entry scope: 'session' or 'project'",
+        }),
       ),
       anchorScope: Type.Optional(
         Type.Unsafe({
           ...AnchorScopeUnion,
-          description: "Anchor resolution: 'current-session' (default) or 'project'",
+          description: "Anchor resolution: 'session' or 'project' (default: session)",
         }),
       ),
-      query: Type.Optional(Type.String({ description: "Text search in entry/anchor content" })),
+      scan: Type.Optional(Type.String({ description: "Text search in entry/anchor content" })),
       anchorName: Type.Optional(Type.String({ description: "Filter anchors by name substring" })),
       anchorType: Type.Optional(Type.String({ description: "Filter anchors by exact type, e.g. 'handoff'" })),
       anchorSummary: Type.Optional(Type.String({ description: "Filter anchors by summary substring" })),
@@ -551,9 +554,9 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         lastAnchor,
         betweenAnchors,
         betweenDates,
-        scope = "project",
-        anchorScope = "current-session",
-        query,
+        entryScope,
+        anchorScope = "session",
+        scan,
         anchorName,
         anchorType,
         anchorSummary,
@@ -567,15 +570,18 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         lastAnchor?: boolean;
         betweenAnchors?: { start: string; end: string };
         betweenDates?: { start: string; end: string };
-        scope?: "session" | "project";
-        anchorScope?: "current-session" | "project";
-        query?: string;
+        entryScope?: "session" | "project";
+        anchorScope?: "session" | "project";
+        scan?: string;
         anchorName?: string;
         anchorType?: TapeAnchorType;
         anchorSummary?: string;
         anchorPurpose?: string;
         anchorKeywords?: string[];
       };
+
+      // entryScope defaults to match anchorScope when not specified
+      const entryScopeFallback = entryScope ?? (anchorScope === "session" ? "session" : "project");
 
       const parts: string[] = [];
       const lines: string[] = [];
@@ -590,11 +596,11 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           betweenAnchors,
           betweenDates,
           anchorScope,
-          scope,
+          entryScope: entryScopeFallback,
         });
 
         const anchors = anchorStore.search({
-          query,
+          scan,
           limit,
           since,
           until,
@@ -610,35 +616,32 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         if (anchorCount > 0) {
           parts.push(`${anchorCount} anchors`);
           lines.push("Anchors:");
-          for (const anchor of anchors.slice(-5)) {
+          for (const anchor of anchors) {
             const metaStr = anchor.meta ? ` ${JSON.stringify(anchor.meta)}` : "";
             lines.push(`  ${anchor.name} [${anchor.type}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}`);
           }
-          if (anchorCount > 5) lines.push(`  ... and ${anchorCount - 5} more`);
         }
       }
 
       if (kinds.includes("entry") || kinds.includes("all")) {
-        const entries = tapeService.query({
+        const entries = tapeService.scan({
           types,
           limit,
           sinceAnchor,
           lastAnchor,
           betweenAnchors,
           betweenDates,
-          scope,
+          entryScope: entryScopeFallback,
           anchorScope,
-          query,
+          scan,
         });
 
         entryCount = entries.length;
         if (entryCount > 0) {
           parts.push(`${entryCount} entries`);
-          for (const entry of entries.slice(-5)) {
+          lines.push("Entries:");
+          for (const entry of entries) {
             lines.push(formatEntrySummary(entry));
-          }
-          if (entryCount > 5) {
-            lines.push(`  ... and ${entryCount - 5} more`);
           }
         }
       }
@@ -649,7 +652,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         content: [{ type: "text", text: `${header}\n\n${lines.join("\n") || "(no results)"}` }],
         details: {
           kinds,
-          query,
+          scan,
           count: anchorCount + entryCount,
           anchorCount,
           entryCount,
@@ -665,17 +668,43 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
     renderCall(args, theme) {
       const parts = [theme.fg("toolTitle", theme.bold("tape_search"))];
       if (args.kinds?.length) parts.push(theme.fg("muted", args.kinds.join(",")));
-      if (args.sinceAnchor) parts.push(theme.fg("accent", `@${args.sinceAnchor}`));
-      if (args.query) parts.push(theme.fg("accent", `"${args.query}"`));
+      if (args.anchorName) parts.push(theme.fg("accent", `name:${args.anchorName}`));
+      if (args.anchorType) parts.push(theme.fg("accent", `type:${args.anchorType}`));
+      if (args.anchorKeywords?.length) parts.push(theme.fg("accent", `keywords:${args.anchorKeywords.join(",")}`));
       if (args.anchorSummary) parts.push(theme.fg("accent", `summary:${args.anchorSummary}`));
       if (args.anchorPurpose) parts.push(theme.fg("accent", `purpose:${args.anchorPurpose}`));
-      if (args.anchorKeywords?.length) parts.push(theme.fg("accent", `keywords:${args.anchorKeywords.join(",")}`));
+      if (args.scan) parts.push(theme.fg("accent", `"${args.scan}"`));
+      if (args.sinceAnchor) parts.push(theme.fg("muted", `@${args.sinceAnchor}`));
       return renderText(parts.join(" "));
     },
 
     renderResult(result, state: RenderState, theme) {
-      const details = result.details as { count?: number } | undefined;
-      return renderDefaultResult(result, state, theme, `${details?.count ?? 0} found`);
+      const details = result.details as
+        | {
+            count?: number;
+            anchorCount?: number;
+            entryCount?: number;
+          }
+        | undefined;
+
+      if (state.isPartial) return renderText(theme.fg("warning", "Loading..."));
+
+      const anchorCount = details?.anchorCount ?? 0;
+      const entryCount = details?.entryCount ?? 0;
+      const total = details?.count ?? 0;
+
+      const parts: string[] = [];
+      if (anchorCount > 0) parts.push(`${anchorCount} anchors`);
+      if (entryCount > 0) parts.push(`${entryCount} entries`);
+      const collapsedSummary = parts.length > 0 ? `Found ${parts.join(", ")}` : `${total} found`;
+
+      const contentText = (result.content[0] as { text?: string })?.text ?? "";
+      const totalLines = contentText.split("\n").length;
+
+      if (!state.expanded) {
+        return renderWithExpandHint(theme.fg("success", collapsedSummary), theme, totalLines);
+      }
+      return renderText(theme.fg("toolOutput", contentText));
     },
   });
 }
@@ -684,7 +713,7 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
   pi.registerTool({
     name: "tape_read",
     label: "Tape Read",
-    description: "Read tape entries from pi session with anchor, date, or query filters.",
+    description: "Read tape entries from pi session with anchor, date, or scan filters.",
     parameters: Type.Object({
       afterAnchor: Type.Optional(Type.String({ description: "Read entries after this anchor" })),
       lastAnchor: Type.Optional(Type.Boolean({ description: "Read entries after last anchor" })),
@@ -694,11 +723,13 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
       betweenDates: Type.Optional(
         Type.Object({ start: Type.String(), end: Type.String() }, { description: "Between dates (ISO)" }),
       ),
-      query: Type.Optional(Type.String({ description: "Text search" })),
+      scan: Type.Optional(Type.String({ description: "Text scan" })),
       types: Type.Optional(Type.Array(EntryTypeUnion, { description: "Filter entries by type" })),
-      scope: Type.Optional(Type.Unsafe({ ...QueryScopeUnion, description: "Entry scope: 'session' or 'project'" })),
+      entryScope: Type.Optional(
+        Type.Unsafe({ ...QueryScopeUnion, description: "Entry scope: 'session' or 'project'" }),
+      ),
       anchorScope: Type.Optional(
-        Type.Unsafe({ ...AnchorScopeUnion, description: "Anchor resolution: 'current-session' or 'project'" }),
+        Type.Unsafe({ ...AnchorScopeUnion, description: "Anchor resolution: 'session' or 'project'" }),
       ),
       limit: Type.Optional(Type.Integer({ description: "Max entries (default: 20)", minimum: 1, maximum: 100 })),
     }),
@@ -713,29 +744,29 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
         betweenDates,
         types,
         lastAnchor = false,
-        scope = "project",
-        anchorScope = "current-session",
+        entryScope = "project",
+        anchorScope = "session",
         limit = 20,
-        query,
+        scan,
       } = params as {
         afterAnchor?: string;
         betweenAnchors?: { start: string; end: string };
         betweenDates?: { start: string; end: string };
         types?: SessionEntry["type"][];
         lastAnchor?: boolean;
-        scope?: "session" | "project";
-        anchorScope?: "current-session" | "project";
+        entryScope?: "session" | "project";
+        anchorScope?: "session" | "project";
         limit?: number;
-        query?: string;
+        scan?: string;
       };
 
-      const entries = tapeService.query(
-        buildEntryQueryOptions({
+      const entries = tapeService.scan(
+        buildEntryScanOptions({
           types,
           limit,
-          scope,
+          entryScope,
           anchorScope,
-          query,
+          scan,
           sinceAnchor: afterAnchor,
           lastAnchor,
           betweenAnchors,
@@ -754,7 +785,7 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
       const parts = [theme.fg("toolTitle", theme.bold("tape_read"))];
       if (args.afterAnchor) parts.push(theme.fg("muted", `after=${args.afterAnchor}`));
       if (args.lastAnchor) parts.push(theme.fg("accent", "@last"));
-      if (args.query) parts.push(theme.fg("muted", `"${args.query}"`));
+      if (args.scan) parts.push(theme.fg("muted", `"${args.scan}"`));
       if (args.limit) parts.push(theme.fg("muted", `limit=${args.limit}`));
       return renderText(parts.join(" "));
     },

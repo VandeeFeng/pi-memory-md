@@ -3,7 +3,7 @@ import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import { nowIso, toTimestamp } from "../utils.js";
 import { AnchorStore, type TapeAnchor, type TapeAnchorMeta, type TapeAnchorType } from "./tape-anchor.js";
 import { getEntriesAfterTimestamp, getSessionFilePath, getSessionFilePaths, parseSessionFile } from "./tape-reader.js";
-import type { TapeQueryOptions } from "./tape-types.js";
+import type { TapeSessionScanOptions } from "./tape-types.js";
 
 const DEFAULT_ANCHOR_LABEL_PREFIX = "⚓ ";
 const ANCHOR_LABEL_SEPARATOR_BASE = " · ";
@@ -20,7 +20,7 @@ type TapeSessionManager = {
 
 type TapeLabelSetter = (entryId: string, label: string | undefined) => void;
 
-type TapeQueryBounds = {
+type TapeScanBounds = {
   startTime: string | null;
   endTime: string | null;
 };
@@ -141,15 +141,15 @@ export class TapeService {
     return anchor;
   }
 
-  private resolveAnchor(name: string, anchorScope: "current-session" | "project"): TapeAnchor | null {
-    if (anchorScope === "current-session") {
+  private resolveAnchor(name: string, anchorScope: "session" | "project"): TapeAnchor | null {
+    if (anchorScope === "session") {
       return (
-        this.anchorStore.query({ name, nameCaseInsensitive: true, sessionId: this.sessionId, returnMode: "last" })[0] ??
-        this.anchorStore.query({ name, nameCaseInsensitive: true, returnMode: "last" })[0]
+        this.anchorStore.scan({ name, nameCaseInsensitive: true, sessionId: this.sessionId, mode: "latest" })[0] ??
+        this.anchorStore.scan({ name, nameCaseInsensitive: true, mode: "latest" })[0]
       );
     }
 
-    return this.anchorStore.query({ name, nameCaseInsensitive: true, returnMode: "last" })[0] ?? null;
+    return this.anchorStore.scan({ name, nameCaseInsensitive: true, mode: "latest" })[0] ?? null;
   }
 
   private buildEntryCacheSignature(filePaths: string[]): string {
@@ -179,9 +179,9 @@ export class TapeService {
     return this.maxCachedEntries;
   }
 
-  private loadEntries(scope: "session" | "project"): SessionEntry[] {
+  private loadEntries(entryScope: "session" | "project"): SessionEntry[] {
     const filePaths =
-      scope === "session"
+      entryScope === "session"
         ? (() => {
             const sessionFile = getSessionFilePath(this.cwd, this.sessionId);
             return sessionFile ? [sessionFile] : [];
@@ -189,16 +189,16 @@ export class TapeService {
         : getSessionFilePaths(this.cwd);
 
     const signature = this.buildEntryCacheSignature(filePaths);
-    const cached = this.entryCache.get(scope);
+    const cached = this.entryCache.get(entryScope);
     if (cached && cached.signature === signature) {
       return cached.entries;
     }
 
-    if (scope === "session") {
+    if (entryScope === "session") {
       const parsed = filePaths[0] ? parseSessionFile(filePaths[0]) : null;
       const entries = parsed?.entries ?? [];
       const trimmedEntries = entries.length > this.maxCachedEntries ? entries.slice(-this.maxCachedEntries) : entries;
-      this.entryCache.set(scope, { signature, entries: trimmedEntries });
+      this.entryCache.set(entryScope, { signature, entries: trimmedEntries });
       return trimmedEntries;
     }
 
@@ -213,15 +213,15 @@ export class TapeService {
     // Trim to max limit to prevent memory bloat
     const trimmedEntries =
       sortedEntries.length > this.maxCachedEntries ? sortedEntries.slice(-this.maxCachedEntries) : sortedEntries;
-    this.entryCache.set(scope, { signature, entries: trimmedEntries });
+    this.entryCache.set(entryScope, { signature, entries: trimmedEntries });
     return trimmedEntries;
   }
 
-  query(options: TapeQueryOptions & { since?: string }): SessionEntry[] {
-    const { types, limit, query, since, scope = "project" } = options;
-    const { startTime, endTime } = this.resolveQueryBounds(options);
+  scan(options: TapeSessionScanOptions & { since?: string }): SessionEntry[] {
+    const { entryScope = "project", since, types, scan, limit } = options;
+    const { startTime, endTime } = this.resolveScanBounds(options);
 
-    let entries = this.loadEntries(scope);
+    let entries = this.loadEntries(entryScope);
 
     if (startTime) {
       entries = getEntriesAfterTimestamp(entries, startTime);
@@ -240,8 +240,8 @@ export class TapeService {
       entries = entries.filter((entry) => types.includes(entry.type));
     }
 
-    if (query) {
-      const needle = query.toLowerCase();
+    if (scan) {
+      const needle = scan.toLowerCase();
       entries = entries.filter((entry) => JSON.stringify(entry).toLowerCase().includes(needle));
     }
 
@@ -252,8 +252,8 @@ export class TapeService {
     return entries;
   }
 
-  private resolveQueryBounds(options: TapeQueryOptions): TapeQueryBounds {
-    const { betweenAnchors, betweenDates, lastAnchor, sinceAnchor, anchorScope = "current-session" } = options;
+  private resolveScanBounds(options: TapeSessionScanOptions): TapeScanBounds {
+    const { betweenAnchors, betweenDates, lastAnchor, sinceAnchor, anchorScope = "session" } = options;
 
     if (betweenDates) {
       return { startTime: betweenDates.start, endTime: betweenDates.end };
@@ -273,8 +273,8 @@ export class TapeService {
     if (lastAnchor) {
       const anchor =
         anchorScope === "project"
-          ? this.anchorStore.query({ returnMode: "last" })[0]
-          : this.anchorStore.query({ sessionId: this.sessionId, returnMode: "last" })[0];
+          ? this.anchorStore.scan({ mode: "latest" })[0]
+          : this.anchorStore.scan({ sessionId: this.sessionId, mode: "latest" })[0];
       return { startTime: anchor?.timestamp ?? null, endTime: null };
     }
 
@@ -371,7 +371,7 @@ export class TapeService {
     const targetEntryId = this.resolveTreeLabelTarget(sessionEntryId);
     if (!targetEntryId) return;
 
-    const anchors = this.anchorStore.query({ sessionEntryId, sessionId: this.sessionId });
+    const anchors = this.anchorStore.scan({ sessionEntryId, sessionId: this.sessionId });
     const anchorLabel = this.buildAnchorLabel(anchors);
     const existingLabel = this.sessionManager.getLabel(targetEntryId);
     this.setTreeLabel(
@@ -387,7 +387,7 @@ export class TapeService {
     if (!this.sessionManager) return;
 
     this.clearAnchorTreeLabels();
-    for (const anchor of this.anchorStore.query({ sessionId: this.sessionId })) {
+    for (const anchor of this.anchorStore.scan({ sessionId: this.sessionId })) {
       this.syncTreeLabel(anchor.sessionEntryId);
     }
   }
@@ -401,21 +401,21 @@ export class TapeService {
   }
 
   syncAnchorTreeLabel(anchorId: string): void {
-    const anchor = this.anchorStore.query({ id: anchorId, returnMode: "first" })[0] ?? null;
+    const anchor = this.anchorStore.scan({ id: anchorId, mode: "latest" })[0] ?? null;
     if (!anchor || anchor.sessionId !== this.sessionId) return;
     this.syncTreeLabel(anchor.sessionEntryId);
   }
 
-  findAnchorByName(name: string, anchorScope: "current-session" | "project" = "current-session"): TapeAnchor | null {
+  findAnchorByName(name: string, anchorScope: "session" | "project" = "session"): TapeAnchor | null {
     return this.resolveAnchor(name, anchorScope);
   }
 
-  getLastAnchor(anchorScope: "current-session" | "project" = "current-session"): TapeAnchor | null {
+  getLastAnchor(anchorScope: "session" | "project" = "session"): TapeAnchor | null {
     if (anchorScope === "project") {
-      return this.anchorStore.query({ returnMode: "last" })[0] ?? null;
+      return this.anchorStore.scan({ mode: "latest" })[0] ?? null;
     }
 
-    return this.anchorStore.query({ sessionId: this.sessionId, returnMode: "last" })[0] ?? null;
+    return this.anchorStore.scan({ sessionId: this.sessionId, mode: "latest" })[0] ?? null;
   }
 
   getAnchorStore(): AnchorStore {
@@ -432,7 +432,7 @@ export class TapeService {
     lastAnchor: TapeAnchor | null;
     entriesSinceLastAnchor: number;
   } {
-    const sessionAnchors = this.anchorStore.query({ sessionId: this.sessionId });
+    const sessionAnchors = this.anchorStore.scan({ sessionId: this.sessionId });
     const lastAnchor = sessionAnchors[sessionAnchors.length - 1] ?? null;
     const sessionEntries = this.loadEntries("session");
 

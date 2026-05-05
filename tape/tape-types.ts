@@ -14,21 +14,21 @@ import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 export type TapeContextStrategy = "recent-only" | "smart";
 
 /**
- * Tape query options - filter pi session entries
+ * Tape scan options - filter pi session entries
  *
  * @description
- * - `query`: Text search in entry content
+ * - `scan`: Text scan in entry content
  * - `types`: Filter by session entry type (message, custom, etc.)
  * - `limit`: Maximum results to return
  * - `sinceAnchor` / `lastAnchor`: Filter entries after a specific anchor
  * - `betweenAnchors`: Get entries between two anchors
  * - `betweenDates`: Get entries within date range (ISO format)
- * - `scope`: Entry source scope (`session` or `project`)
- * - `anchorScope`: Anchor resolution scope (`current-session` or `project`)
+ * - `entryScope`: Entry source scope (`session` or `project`)
+ * - `anchorScope`: Anchor resolution scope (`session` or `project`)
  */
-export interface TapeQueryOptions {
-  /** Text search in entry content (case-insensitive) */
-  query?: string;
+export interface TapeSessionScanOptions {
+  /** Text scan in entry content (case-insensitive) */
+  scan?: string;
   /** Filter by session entry type */
   types?: SessionEntry["type"][];
   /** Maximum number of results to return (default: 20) */
@@ -42,9 +42,9 @@ export interface TapeQueryOptions {
   /** Get entries within date range (ISO format) */
   betweenDates?: { start: string; end: string };
   /** Entry source scope (default: project) */
-  scope?: "session" | "project";
-  /** Anchor resolution scope (default: current-session) */
-  anchorScope?: "current-session" | "project";
+  entryScope?: "session" | "project";
+  /** Anchor resolution scope (default: session) */
+  anchorScope?: "session" | "project";
 }
 
 export type ContextStrategy = TapeContextStrategy;

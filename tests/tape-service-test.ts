@@ -106,13 +106,13 @@ test("createAnchor binds current session id and active session entry id", () => 
   assert.equal(anchor.sessionEntryId, "leaf-1");
   assert.equal(anchor.name, "task/begin");
   assert.equal(anchor.type, "handoff");
-  assert.equal(service.getAnchorStore().query({ id: anchor.id, returnMode: "first" })[0]?.meta?.summary, "start work");
+  assert.equal(service.getAnchorStore().scan({ id: anchor.id, mode: "latest" })[0]?.meta?.summary, "start work");
 });
 
-test("query supports scope, types, limit, query, anchors, and date ranges", () => {
-  const tapeBasePath = createTempDir("pi-memory-md-tape-service-query");
-  const cwd = createTempDir("pi-memory-md-cwd-query");
-  const agentDir = createTempDir("pi-memory-md-agent-query");
+test("scan supports scope, types, limit, scan, anchors, and date ranges", () => {
+  const tapeBasePath = createTempDir("pi-memory-md-tape-service-scan");
+  const cwd = createTempDir("pi-memory-md-cwd-scan");
+  const agentDir = createTempDir("pi-memory-md-agent-scan");
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = agentDir;
 
@@ -137,10 +137,8 @@ test("query supports scope, types, limit, query, anchors, and date ranges", () =
     service.createAnchor("mark/start", "handoff", undefined, false);
     service.createAnchor("mark/end", "handoff", undefined, false);
 
-    const anchors = service.getAnchorStore().query({ name: "mark/start", nameCaseInsensitive: true });
-    const endAnchor = service
-      .getAnchorStore()
-      .query({ name: "mark/end", nameCaseInsensitive: true, returnMode: "last" })[0];
+    const anchors = service.getAnchorStore().scan({ name: "mark/start", nameCaseInsensitive: true });
+    const endAnchor = service.getAnchorStore().scan({ name: "mark/end", nameCaseInsensitive: true, mode: "latest" })[0];
     anchors[0]!.timestamp = "2026-04-23T10:05:00.000Z";
     endAnchor!.timestamp = "2026-04-23T10:25:00.000Z";
 
@@ -154,34 +152,34 @@ test("query supports scope, types, limit, query, anchors, and date ranges", () =
         .join("\n")}\n`,
     );
 
-    assert.equal(service.query({ scope: "session" }).length, 4);
-    assert.equal(service.query({ scope: "project" }).length, 5);
+    assert.equal(service.scan({ entryScope: "session" }).length, 4);
+    assert.equal(service.scan({ entryScope: "project" }).length, 5);
     assert.deepEqual(
-      service.query({ scope: "session", types: ["compaction"] }).map((entry) => entry.id),
+      service.scan({ entryScope: "session", types: ["compaction"] }).map((entry) => entry.id),
       ["a3"],
     );
     assert.deepEqual(
-      service.query({ scope: "session", query: "bug" }).map((entry) => entry.id),
+      service.scan({ entryScope: "session", scan: "bug" }).map((entry) => entry.id),
       ["a1", "a4"],
     );
     assert.deepEqual(
-      service.query({ scope: "session", limit: 2 }).map((entry) => entry.id),
+      service.scan({ entryScope: "session", limit: 2 }).map((entry) => entry.id),
       ["a3", "a4"],
     );
     assert.deepEqual(
-      service.query({ scope: "session", sinceAnchor: "mark/start" }).map((entry) => entry.id),
+      service.scan({ entryScope: "session", sinceAnchor: "mark/start" }).map((entry) => entry.id),
       ["a2", "a3", "a4"],
     );
     assert.deepEqual(
       service
-        .query({ scope: "session", betweenAnchors: { start: "mark/start", end: "mark/end" } })
+        .scan({ entryScope: "session", betweenAnchors: { start: "mark/start", end: "mark/end" } })
         .map((entry) => entry.id),
       ["a2", "a3"],
     );
     assert.deepEqual(
       service
-        .query({
-          scope: "session",
+        .scan({
+          entryScope: "session",
           betweenDates: { start: "2026-04-23T10:15:00.000Z", end: "2026-04-23T10:35:00.000Z" },
         })
         .map((entry) => entry.id),
@@ -217,4 +215,101 @@ test("configureSessionTree syncs labels and clears old prefix labels when prefix
   assert.equal(manager.labelsById.get("child"), "Base label · ANCHOR: task/one");
   service.deleteAnchor(anchor.id);
   assert.equal(manager.labelsById.get("child"), "Base label");
+});
+
+test("scope and anchorScope combinations control anchor lookup behavior", () => {
+  const tapeBasePath = createTempDir("pi-memory-md-tape-service-scope-combo");
+  const cwd = createTempDir("pi-memory-md-cwd-scope-combo");
+  const agentDir = createTempDir("pi-memory-md-agent-scope-combo");
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+
+  // Session 1 entries
+  const session1Entries = [
+    createMessageEntry("s1-e1", "2026-04-23T10:00:00.000Z", "user", "session1 early"),
+    createMessageEntry("s1-e2", "2026-04-23T10:10:00.000Z", "assistant", "session1 late"),
+  ];
+  // Session 2 entries
+  const session2Entries = [createMessageEntry("s2-e1", "2026-04-23T11:00:00.000Z", "user", "session2 only")];
+
+  writeSessionFile(agentDir, cwd, "session-1.jsonl", "session-1", session1Entries);
+  writeSessionFile(agentDir, cwd, "session-2.jsonl", "session-2", session2Entries);
+
+  try {
+    // Create session-1 service and anchors
+    const service = TapeService.create(tapeBasePath, "demo", "session-1", cwd);
+    service.createAnchor("anchor/s1-start", "handoff", undefined, false);
+    service.createAnchor("anchor/shared", "handoff", { summary: "session-1 version" }, false);
+
+    // Create session-2 service and anchors
+    const service2 = TapeService.create(tapeBasePath, "demo", "session-2", cwd);
+    service2.createAnchor("anchor/s2-only", "handoff", undefined, false);
+    service2.createAnchor("anchor/shared", "handoff", { summary: "session-2 version" }, false);
+
+    // Test 1: anchorScope="session" finds anchors in current session only
+    // Use a fresh service instance to ensure file sync
+    const service1Refreshed = TapeService.create(tapeBasePath, "demo", "session-1", cwd);
+    const currentOnly = service1Refreshed.getLastAnchor("session");
+    assert.equal(currentOnly?.sessionId, "session-1");
+    assert.equal(currentOnly?.name, "anchor/shared");
+
+    // Test 2: anchorScope="project" from session-2 finds session-2's latest anchor
+    const projectScope = service2.getLastAnchor("project");
+    assert.equal(projectScope?.sessionId, "session-2");
+
+    // Test 3: anchorScope="project" from session-1 also finds session-2's latest anchor (after file sync)
+    const service1ProjectScope = service1Refreshed.getLastAnchor("project");
+    assert.equal(service1ProjectScope?.sessionId, "session-2");
+
+    // Test 4: findAnchorByName with session scope from session-1
+    const foundInCurrent = service1Refreshed.findAnchorByName("anchor/shared", "session");
+    assert.equal(foundInCurrent?.sessionId, "session-1");
+    assert.equal(foundInCurrent?.meta?.summary, "session-1 version");
+
+    // Test 5: findAnchorByName with project scope returns latest across sessions
+    const foundInProject = service1Refreshed.findAnchorByName("anchor/shared", "project");
+    assert.equal(foundInProject?.sessionId, "session-2");
+    assert.equal(foundInProject?.meta?.summary, "session-2 version");
+
+    // Test 6: anchor that exists only in session-1
+    const s1OnlyAnchor = service1Refreshed.findAnchorByName("anchor/s1-start", "session");
+    assert.ok(s1OnlyAnchor !== null);
+    assert.equal(s1OnlyAnchor?.sessionId, "session-1");
+
+    // Test 7: anchor that exists only in session-2, found via project scope from session-1
+    const s2OnlyViaProject = service1Refreshed.findAnchorByName("anchor/s2-only", "project");
+    assert.ok(s2OnlyViaProject !== null);
+    assert.equal(s2OnlyViaProject?.sessionId, "session-2");
+
+    // Test 7: resolveAnchor's session scope has fallback to project scope
+    // Note: resolveAnchor falls back to project scope if not found in current session
+    const s2OnlyViaCurrent = service1Refreshed.findAnchorByName("anchor/s2-only", "session");
+    assert.ok(s2OnlyViaCurrent !== null); // Found via fallback
+    assert.equal(s2OnlyViaCurrent?.sessionId, "session-2");
+
+    // Test 7b: To truly restrict to current session, use scan with explicit sessionId filter
+    const s2OnlyStrict = service1Refreshed.getAnchorStore().scan({
+      name: "anchor/s2-only",
+      nameCaseInsensitive: true,
+      sessionId: "session-1",
+      mode: "latest",
+    })[0];
+    assert.equal(s2OnlyStrict, undefined); // Not found in session-1
+
+    // Test 8: Verify entries can be read independently from anchors (scope is separate concern)
+    const entriesCurrent = service1Refreshed.scan({ entryScope: "session" });
+    const entriesProject = service1Refreshed.scan({ entryScope: "project" });
+    assert.ok(entriesCurrent.length >= 2); // session-1 entries
+    assert.ok(entriesProject.length >= 3); // session-1 + session-2 entries
+
+    // Test 10: Inconsistent combination - reading project entries but finding anchor in current session
+    // This is the documented behavior: scope controls entries, anchorScope controls anchor lookup
+    const inconsistentAnchor = service1Refreshed.findAnchorByName("anchor/shared", "session");
+    const projectEntries = service1Refreshed.scan({ entryScope: "project" });
+    // anchor is from session-1, but entries include session-2 too
+    assert.equal(inconsistentAnchor?.sessionId, "session-1");
+    assert.ok(projectEntries.some((e) => e.id === "s2-e1"));
+  } finally {
+    process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  }
 });

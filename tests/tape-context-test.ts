@@ -17,7 +17,7 @@ type MockAnchor = {
 };
 
 type MockTapeService = {
-  query: (options: Record<string, unknown>) => SessionEntry[];
+  scan: (options: Record<string, unknown>) => SessionEntry[];
   getAnchorStore: () => { search: (options: Record<string, unknown>) => MockAnchor[] };
 };
 
@@ -48,7 +48,7 @@ function createToolResultEntry(
 
 function createMockTapeService(entries: SessionEntry[], anchors: MockAnchor[] = []): MockTapeService {
   return {
-    query(options) {
+    scan(options) {
       if (options.scope === "session") {
         return entries;
       }

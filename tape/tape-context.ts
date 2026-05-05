@@ -99,7 +99,7 @@ export class ConversationSelector {
 
   selectFromAnchor(anchorId?: string): SessionEntry[] {
     const entries = this.tapeService
-      .query({ sinceAnchor: anchorId, scope: "session", anchorScope: "current-session" })
+      .scan({ sinceAnchor: anchorId, entryScope: "session", anchorScope: "session" })
       .slice(-this.maxEntries);
     return this.filterByTokenBudget(entries);
   }
@@ -519,7 +519,7 @@ export class MemoryFileSelector {
 
   private getEntriesWithinHours(hours: number): SessionEntry[] {
     const since = hoursAgoIso(hours);
-    return this.tapeService.query({ since, scope: "project", anchorScope: "project" });
+    return this.tapeService.scan({ since, entryScope: "project", anchorScope: "project" });
   }
 
   private getLatestAnchor(

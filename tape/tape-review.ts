@@ -50,10 +50,10 @@ export function normalizeMemoryReviewLimit(limit: number): number {
   return Math.min(Math.floor(limit), MAX_TAPE_REVIEW_LIMIT);
 }
 
-function buildReviewData(tapeService: TapeService, scope: "session" | "project", limit: number): ReviewData {
+function buildReviewData(tapeService: TapeService, entryScope: "session" | "project", limit: number): ReviewData {
   const scopedAnchors = tapeService
     .getAnchorStore()
-    .scan(scope === "session" ? { sessionId: tapeService.getSessionId() } : {});
+    .scan(entryScope === "session" ? { sessionId: tapeService.getSessionId() } : {});
   const anchors = scopedAnchors.filter((anchor) => anchor.type !== "session").slice(-limit);
   const stats: ReviewStats = { purposes: new Map(), keywords: new Map(), triggers: new Map() };
 
@@ -663,10 +663,10 @@ function resolveNavTarget(
 export async function openMemoryReview(
   tapeService: TapeService,
   ctx: Pick<ExtensionCommandContext, "cwd" | "ui" | "sessionManager" | "navigateTree" | "switchSession">,
-  options: { scope?: "session" | "project"; limit?: number } = {},
+  options: { entryScope?: "session" | "project"; limit?: number } = {},
 ): Promise<ReviewData> {
-  const { scope = "project", limit = DEFAULT_MEMORY_REVIEW_LIMIT } = options;
-  const data = buildReviewData(tapeService, scope, normalizeMemoryReviewLimit(limit));
+  const { entryScope = "project", limit = DEFAULT_MEMORY_REVIEW_LIMIT } = options;
+  const data = buildReviewData(tapeService, entryScope, normalizeMemoryReviewLimit(limit));
 
   if (ctx.ui.custom) {
     const selectedAnchor = await ctx.ui.custom<TapeAnchor | null>(
