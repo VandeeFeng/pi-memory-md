@@ -2,7 +2,7 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
-## [Unreleased]
+## [0.1.36] - 2026-05-06
 
 Pi is moving so fast now. I missed the releases for just one week, and there were already so many new features.
 
@@ -33,6 +33,22 @@ I design this visual anchor panel because I want to do such job on my own. Input
 Easier is not the same as simple. AI can lower the friction, but it can't turn inherently complex thing into simple.
 
 I solemnly swear: I am never poking Pi's TUI design again.
+
+[[https://www.youtube.com/watch?v=SlGRN8jh2RI][Anthropic's Boris Cherny: Why Coding Is Solved, and What Comes Next - YouTube]], I watched this Boris Cherny interview, and I really buy his printing press analogy. Code generation is getting easier and cheaper—that's definitely a thing for society. It's now possible for non-coders to ship code with LLM (myself included). But with token costs stacking up, LLM-assisted coding isn't exactly "code equality." The wealth gap still cuts in.
+
+Digital storage with keyboard input is about efficiency, handwriting addresses hobby and joy. They're not conflicting — it's just that people have different preferences and values, that's all.
+
+I still don't like letting agents handle everything. For this project, about 80% is LLM-generated. The remaining 20% is where I lay out the architecture and logic, and the agent fills in the blanks.(That's honestly the most I can do right now).
+
+I can't stand the function names LLM come up with!
+
+Like Paul Graham says in "Hackers & Painters", coding is just like writing. What I love is the pleasure of thinking through problems and expressing myself—not delegating to an agent to spit out some factory-standard result.
+
+What I dislike most is that the agent takes my thought process and logical flow and reduces them to cold, auto-generated code.
+
+The trend toward industrialization and standardization is unavoidable, but as always, the art will persist.
+
+我无法保证这些代码的质量和品味，但至少 changelog 我可以完全手写 （英文部分机翻）。
 
 ## New Features
 
