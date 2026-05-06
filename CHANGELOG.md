@@ -38,6 +38,8 @@ I solemnly swear: I am never poking Pi's TUI design again.
 
 - **`/memory-review` slash command**: Opens an interactive Memory Review overlay for browsing tape anchors by timeline, keyword relations, and stats, with keyboard navigation and dynamic terminal-aware layout. Pressing `enter` on a selected anchor now jumps through pi's session tree to the first assistant entry after that anchor. This slash command is only registered when tape mode is enabled.
   Search is available with `/`: type to fuzzy-filter anchors across names, summaries, purposes, triggers, keywords, and timestamps. Press `Esc` or `Ctrl+C` to leave search input.
+  Select an anchor and press `Ctrl+d` to delete it.
+
 - **`memory-import` skill**: New skill for importing durable knowledge from URLs, folders, or files into pi-memory-md. Uses `npx defuddle` for web content extraction, analyzes sources before writing, asks for focus confirmation, and generates memories directly via `memory-write` skill with proper description, tags, and source references.
 
 ## Changed

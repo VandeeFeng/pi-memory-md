@@ -22,7 +22,11 @@ const BAR_WIDTH = 10;
 const FRAME_PADDING = 1;
 const OVERLAY_HEIGHT_RATIO = 0.8;
 const OVERLAY_MIN_HEIGHT = 12;
-const OVERLAY_CHROME_LINES = 8;
+// frame lines excluding header and body: topBorder(1) + separators(2) + detail(1) + bottomBorder(1) = 5
+// plus header: 3 (non-search) or 4 (search)
+const BASE_FRAME_LINES = 5;
+const HEADER_BASE_LINES = 3;
+const SEARCH_EXTRA_LINE = 1;
 const VIEW_MODES: ViewMode[] = ["timeline", "relations", "stats"];
 
 type ReviewStats = {
@@ -89,6 +93,23 @@ function getAnchorSearchText(anchor: TapeAnchor): string {
     .join(" ");
 }
 
+function getSearchAnchors(anchors: TapeAnchor[], query: string): TapeAnchor[] {
+  if (!query.trim()) return anchors;
+
+  const token = query.trim().toLowerCase();
+  if (!query.includes(" ") && token.length >= 2) {
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const boundaryRegex = new RegExp(`(^|\\s)${esc(token)}($|\\s)`, "i");
+    const strictMatches = anchors.filter((a) => boundaryRegex.test(getAnchorSearchText(a)));
+    if (strictMatches.length > 0) {
+      const fuzzyMatches = fuzzyFilter(anchors, query, getAnchorSearchText);
+      return strictMatches.filter((a) => fuzzyMatches.includes(a));
+    }
+  }
+
+  return fuzzyFilter(anchors, query, getAnchorSearchText);
+}
+
 class TapeReviewOverlay implements Component, Focusable {
   private view: ViewMode = "timeline";
   private selectedByView: Record<ViewMode, number>;
@@ -100,19 +121,26 @@ class TapeReviewOverlay implements Component, Focusable {
   private cachedWidth?: number;
   private cachedBodyLines?: number;
   private cachedLines?: string[];
+  private confirmingDeleteId: string | null = null;
 
   constructor(
     private readonly data: ReviewData,
     private readonly theme: Theme,
     private readonly onClose: () => void,
     private readonly onOpenAnchor: (anchor: TapeAnchor) => void,
-    private readonly getBodyLines: () => number,
+    private readonly onDeleteAnchor: (id: string) => void,
+    private readonly refreshData: () => ReviewData,
+    private readonly calcBodyLines: () => number,
   ) {
     const newestAnchorIndex = Math.max(0, this.data.anchors.length - 1);
     this.selectedByView = { timeline: newestAnchorIndex, relations: 0, stats: 0 };
     this.selectedRelationIndex = 0;
     this.searchInput.onEscape = () => this.clearSearch();
     this.searchInput.onSubmit = () => this.openSelectedAnchor();
+  }
+
+  get isSearchActive(): boolean {
+    return this.searchInputActive;
   }
 
   get focused(): boolean {
@@ -124,10 +152,30 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   handleInput(data: string): void {
+    if (this.confirmingDeleteId !== null) {
+      if (matchesKey(data, Key.enter)) {
+        const idToDelete = this.confirmingDeleteId;
+        this.confirmingDeleteId = null;
+        this.onDeleteAnchor(idToDelete);
+        // Refresh data after deletion
+        Object.assign(this.data, this.refreshData());
+        this.clampSelection();
+        this.invalidate();
+        return;
+      }
+      if (matchesKey(data, Key.escape)) {
+        this.confirmingDeleteId = null;
+        this.invalidate();
+        return;
+      }
+      return;
+    }
+
     if (this.searchInputActive) {
       this.handleSearchInput(data);
       return;
     }
+
     if (data === "/") {
       this.openSearchInput();
       return;
@@ -142,6 +190,14 @@ class TapeReviewOverlay implements Component, Focusable {
     }
     if (matchesKey(data, Key.ctrl("c")) || data === "q") {
       this.onClose();
+      return;
+    }
+    if (matchesKey(data, Key.ctrl("d"))) {
+      const selectedAnchor = this.getSelectedAnchor();
+      if (selectedAnchor && this.view !== "stats") {
+        this.confirmingDeleteId = selectedAnchor.id;
+        this.invalidate();
+      }
       return;
     }
     if (matchesKey(data, Key.enter)) {
@@ -160,7 +216,7 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    const bodyLineCount = this.getBodyLines();
+    const bodyLineCount = this.calcBodyLines();
     if (this.cachedLines && this.cachedWidth === width && this.cachedBodyLines === bodyLineCount)
       return this.cachedLines;
 
@@ -197,19 +253,19 @@ class TapeReviewOverlay implements Component, Focusable {
     const title = this.theme.fg("toolTitle", this.theme.bold("Memory Review"));
     const tabs = this.viewTabs(frameWidth);
     const hint = this.navigationHint(contentWidth);
+    const baseHeader = [
+      { text: this.placeCenter(title, frameWidth), width: frameWidth, paddingX: 0 },
+      { text: tabs, width: frameWidth, paddingX: 0 },
+      { text: hint, width: contentWidth, paddingX: FRAME_PADDING },
+    ];
 
     if (!this.searchInputActive) {
-      return [
-        { text: this.placeCenter(title, frameWidth), width: frameWidth, paddingX: 0 },
-        { text: tabs, width: frameWidth, paddingX: 0 },
-        { text: hint, width: contentWidth, paddingX: FRAME_PADDING },
-      ];
+      return baseHeader;
     }
 
     const searchLine = this.searchInput.render(contentWidth)[0] ?? "";
     return [
-      { text: this.placeCenter(title, frameWidth), width: frameWidth, paddingX: 0 },
-      { text: tabs, width: frameWidth, paddingX: 0 },
+      ...baseHeader,
       {
         text: this.theme.fg("accent", truncateToWidth(searchLine, contentWidth, "…", true)),
         width: contentWidth,
@@ -231,12 +287,16 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   private navigationHint(width: number): string {
+    if (this.confirmingDeleteId !== null) {
+      return this.placeCenter(this.theme.fg("error", `Delete anchor? press enter to confirm · esc to cancel`), width);
+    }
     const keywordHint = this.view === "relations" ? " · h/l keyword" : "";
-    const searchHint = this.searchQuery ? ` · /${this.searchQuery}` : " · / search";
+    const searchHint = " · / search";
+    const deleteHint = this.view !== "stats" ? " · ctrl+d delete" : "";
     return this.placeCenter(
       this.theme.fg(
         "muted",
-        `←/→/tab switch · ↑/↓/j/k select${keywordHint} · enter open${searchHint} · q/ctrl+c close`,
+        `←/→/tab switch · ↑/↓/j/k select${keywordHint} · enter open${searchHint}${deleteHint} · q/ctrl+c close`,
       ),
       width,
     );
@@ -318,14 +378,17 @@ class TapeReviewOverlay implements Component, Focusable {
     const example = this.theme.fg("muted", "Format: anchor-name [purpose]/[keyword] yyyy-MM-dd-HHmm");
     const rows = this.getTimelineAnchors().map((anchor) => {
       const index = this.data.anchors.indexOf(anchor);
-      const pointer =
-        index === this.selectedByView.timeline ? this.theme.fg("accent", "●") : this.theme.fg("muted", "○");
+      const isSelected = index === this.selectedByView.timeline;
+      const pointer = isSelected ? this.theme.fg("accent", "●") : this.theme.fg("muted", "○");
       const purpose = anchor.meta?.purpose || "unset";
       const keywords = anchor.meta?.keywords?.join(",") || "unset";
       const purposeText = `[${this.theme.fg("warning", purpose)}]`;
       const keywordText = `[${this.theme.fg("warning", keywords)}]`;
+      const nameText = this.isDeleteConfirming(anchor) ? this.theme.fg("error", anchor.name) : anchor.name;
       const timestamp = this.theme.fg("dim", formatCommitTimestamp(new Date(anchor.timestamp)));
-      return truncateToWidth(`${pointer} ${anchor.name} ${purposeText}/${keywordText} ${timestamp}`, width, "…", true);
+      let line = `${pointer} ${nameText} ${purposeText}/${keywordText} ${timestamp}`;
+      if (isSelected) line = this.theme.bold(line);
+      return truncateToWidth(line, width, "…", true);
     });
     return [example, "", ...rows];
   }
@@ -334,13 +397,16 @@ class TapeReviewOverlay implements Component, Focusable {
     const lines = ["Keywords", ""];
     let relationIndex = 0;
     for (const [keyword, anchors] of this.getRelationGroups()) {
-      lines.push(this.theme.fg("warning", keyword));
+      lines.push(`[${this.theme.fg("warning", keyword)}]`);
       for (const anchor of anchors) {
-        const selected =
-          relationIndex === this.selectedRelationIndex ? this.theme.fg("accent", "●") : this.theme.fg("muted", "○");
+        const isSelected = relationIndex === this.selectedRelationIndex;
+        const selected = isSelected ? this.theme.fg("accent", "●") : this.theme.fg("muted", "○");
+        const nameText = this.isDeleteConfirming(anchor) ? this.theme.fg("error", anchor.name) : anchor.name;
         const purpose = this.theme.fg("warning", anchor.meta?.purpose || "unset");
         const timestamp = this.theme.fg("dim", formatCommitTimestamp(new Date(anchor.timestamp)));
-        lines.push(`  ${selected} ${anchor.name} [${purpose}] ${timestamp}`);
+        let line = `  ${selected} ${nameText} [${purpose}] ${timestamp}`;
+        if (isSelected) line = this.theme.bold(line);
+        lines.push(line);
         relationIndex += 1;
       }
     }
@@ -372,7 +438,7 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   private getSearchAnchors(): TapeAnchor[] {
-    return fuzzyFilter(this.data.anchors, this.searchQuery, getAnchorSearchText);
+    return getSearchAnchors(this.data.anchors, this.searchQuery);
   }
 
   private getVisibleAnchors(): TapeAnchor[] {
@@ -443,7 +509,7 @@ class TapeReviewOverlay implements Component, Focusable {
     const selectedLine = this.getSelectedLineIndex();
     if (selectedLine === null) return;
 
-    const height = this.getBodyLines();
+    const height = this.calcBodyLines();
     const offset = this.scrollOffsetByView[this.view];
 
     if (selectedLine < offset) {
@@ -497,6 +563,14 @@ class TapeReviewOverlay implements Component, Focusable {
       this.onClose();
       return;
     }
+    if (matchesKey(data, Key.ctrl("d"))) {
+      const selectedAnchor = this.getSelectedAnchor();
+      if (selectedAnchor && this.view !== "stats") {
+        this.confirmingDeleteId = selectedAnchor.id;
+        this.invalidate();
+      }
+      return;
+    }
     if (matchesKey(data, Key.up)) {
       this.moveSelection(-1);
       this.invalidate();
@@ -543,7 +617,11 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   private clampSelection(visibleAnchors = this.getVisibleAnchors()): void {
-    if (visibleAnchors.length === 0) return;
+    if (visibleAnchors.length === 0) {
+      this.selectedByView[this.view] = 0;
+      this.selectedRelationIndex = 0;
+      return;
+    }
 
     if (this.view === "relations") {
       this.selectedRelationIndex = Math.min(this.selectedRelationIndex, visibleAnchors.length - 1);
@@ -551,10 +629,13 @@ class TapeReviewOverlay implements Component, Focusable {
       if (selectedAnchor) this.selectedByView.relations = this.data.anchors.indexOf(selectedAnchor);
       return;
     }
-
     const selectedAnchor = this.getSelectedAnchor();
     const nextAnchor = selectedAnchor && visibleAnchors.includes(selectedAnchor) ? selectedAnchor : visibleAnchors[0];
     this.selectedByView[this.view] = this.data.anchors.indexOf(nextAnchor);
+  }
+
+  private isDeleteConfirming(anchor: TapeAnchor): boolean {
+    return this.confirmingDeleteId === anchor.id;
   }
 
   private renderStats(width: number): string[] {
@@ -671,18 +752,23 @@ export async function openMemoryReview(
   if (ctx.ui.custom) {
     const selectedAnchor = await ctx.ui.custom<TapeAnchor | null>(
       (tui, theme, _keybindings, done) => {
-        const getBodyLines = (): number => {
+        let overlay: TapeReviewOverlay;
+        const calcBodyLines = (): number => {
           const termHeight = (tui as { terminal?: { rows?: number } }).terminal?.rows ?? 30;
           const overlayHeight = Math.max(OVERLAY_MIN_HEIGHT, Math.floor(termHeight * OVERLAY_HEIGHT_RATIO));
-          return Math.max(1, overlayHeight - OVERLAY_CHROME_LINES);
+          const frameLines = BASE_FRAME_LINES + HEADER_BASE_LINES + (overlay.isSearchActive ? SEARCH_EXTRA_LINE : 0);
+          return Math.max(1, overlayHeight - frameLines);
         };
-        return new TapeReviewOverlay(
+        overlay = new TapeReviewOverlay(
           data,
           theme,
           () => done(null),
           (anchor) => done(anchor),
-          getBodyLines,
+          (id) => tapeService.deleteAnchor(id),
+          () => buildReviewData(tapeService, entryScope, normalizeMemoryReviewLimit(limit)),
+          calcBodyLines,
         );
+        return overlay;
       },
       {
         overlay: true,

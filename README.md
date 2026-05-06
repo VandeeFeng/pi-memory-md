@@ -333,8 +333,6 @@ Anchors are named checkpoints that correspond to pi session entries, marking imp
 
 <img src="docs/pi-tree.png" width="400" />
 
-<img src="docs/memory-review.png" width="400" />
-
 Each line in the tape anchor store is a JSON record:
 ```json
 {"id":"1234567890-abc123","timestamp":"2026-04-04T12:00:00.000Z","name":"task/begin","type":"handoff","meta":{"summary":"Working on feature X","purpose":"feature","trigger":"manual"},"sessionId":"019dbd12-90b7-72b1-a88d-843706db32de","sessionEntryId":"446b6c33"}
@@ -368,6 +366,22 @@ Lifecycle anchors (`session/*`) are created automatically, while handoff anchors
 The combination of anchors and keywords closes the loop: intent -> memory data -> intent, while keeping automation under user control.
 
 Prompts should evolve into intent.
+
+### Tape Review
+
+<img src="docs/memory-review.png" width="400" />
+
+`/memory-review` opens an interactive overlay for browsing tape anchors — a dedicated visual panel for jumping across anchors. Select an anchor to jump directly to the first assistant entry after it in the session tree.
+
+The panel provides:
+
+- **Timeline view**: Browse all anchors in the current project chronologically
+- **Keyword relations**: Visual connections between anchors and their keywords
+- **Stats overview**: Quick summary of anchor counts, types, and distributions
+- **Fuzzy search**: Type `/` to filter anchors across names, summaries, purposes, triggers, keywords, and timestamps — press `Esc` or `Ctrl+c` to leave search input
+- **Anchor deletion**: Select an anchor and press `Ctrl+d` to delete it
+
+The panel only helps you land on the right anchor. After jumping there, any deeper branching or tree operations still belong in Pi's native `/tree` panel. This design is intentionally non-invasive — it uses pi's native APIs without custom TUI rendering, so it won't break across pi versions.
 
 ### Full Configuration
 
