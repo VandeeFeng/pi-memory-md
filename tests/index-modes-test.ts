@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { mock, test } from "node:test";
-import type { SessionEntry } from "@mariozechner/pi-coding-agent";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import memoryMdExtension from "../index.js";
 import { writeMemoryFile } from "../memory-core.js";
 import { createTempDir, initGitRepo, writeJson } from "./test-helpers.js";

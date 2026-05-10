@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { SessionEntry } from "@mariozechner/pi-coding-agent";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { nowIso, toTimestamp } from "../utils.js";
 import { AnchorStore, type TapeAnchor, type TapeAnchorMeta, type TapeAnchorType } from "./tape-anchor.js";
 import { getEntriesAfterTimestamp, getSessionFilePath, getSessionFilePaths, parseSessionFile } from "./tape-reader.js";

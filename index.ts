@@ -5,7 +5,7 @@ import type {
   BeforeAgentStartEventResult,
   ExtensionAPI,
   ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { getHookActions, runHookTrigger } from "./hooks.js";
 import {
   buildMemoryContextAsync,

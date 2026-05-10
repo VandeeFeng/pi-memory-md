@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { SessionEntry, SessionHeader } from "@mariozechner/pi-coding-agent";
-import { getAgentDir } from "@mariozechner/pi-coding-agent";
+import type { SessionEntry, SessionHeader } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { expandHomePath, resolveFrom, toTimestamp } from "../utils.js";
 
 const DEFAULT_CACHE_SIZE = 100;

@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
-import { keyHint } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   getMemoryCoreDir,
@@ -15,7 +15,7 @@ import type { MemoryMdSettings } from "./types.js";
 import { getProjectMeta, hasSymlinkInPath, resolvePathWithin } from "./utils.js";
 
 // Re-export types for convenience
-export type { ToolRenderResultOptions } from "@mariozechner/pi-coding-agent";
+export type { ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 export type { MemoryFrontmatter, MemoryMdSettings } from "./types.js";
 
 const MEMORY_SEARCH_TIMEOUT_MS = 5000;

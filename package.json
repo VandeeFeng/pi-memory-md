@@ -27,7 +27,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
-    "@mariozechner/pi-coding-agent": "^0.69.0",
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "@earendil-works/pi-tui": ">=0.74.0",
     "@types/node": "^20.0.0",
     "husky": "^9.1.7",
     "tsx": "^4.21.0",

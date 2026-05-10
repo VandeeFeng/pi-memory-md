@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import type { SessionEntry } from "@mariozechner/pi-coding-agent";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { writeMemoryFile } from "../memory-core.js";
 import { ConversationSelector, MemoryFileSelector, matchesDefaultIgnoredPath } from "../tape/tape-context.js";
 import { hoursAgoIso, toTimestamp } from "../utils.js";

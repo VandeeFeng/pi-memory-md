@@ -7,8 +7,6 @@ https://xavier.xfaang.com/blog/do-agents-dream.html It is written from an agent'
 
 With my still-limited understanding of context engineering, even though model providers keep claiming larger and larger maximum context windows, my actual experience is that the truly effective context window has not grown that much. Compute capacity and the model's attention mechanism are probably still the main constraints on output quality.
 
-I do not know if this is just my illusion, but I also feel that the current model caching mechanisms are not mature enough yet. The cache makes the context less effective and accurate. The funny part is: caching is supposed to lower costs, but as users, we somehow end up paying more.
-
 I have not studied the theory of model context deeply. At this stage, I would rather spend more effort on my own memory records by hands. The quality of the input is always the core thing, and I think that work pays off long-term.
 
 Every conversation is new to an agent. Giving the agent an accurate index and a specific guide letting it look things up when needed already feels good enough to me right now.
@@ -16,6 +14,10 @@ Every conversation is new to an agent. Giving the agent an accurate index and a 
 As always, I don't want to rely too much on the agent. When I am not using it, I can still manually grep these well-organized memory files for keywords、tags、anchors and find the relevant parts myself. Instead of giving an agent a vague prompt and asking it to search through a huge pile of data, I still prefer to first locate things from my own memory, then pass them to the agent. I need to maintain my own mental-model。
 
 In this project, I keep reminding myself to strengthen both sides of the memory design at the same time: for the agent, and also first for human.
+
+## Breaking Changes
+
+- Migrated pi package imports and runtime dependencies to the new `@earendil-works/*` npm scope introduced in [pi v0.74.0](https://github.com/earendil-works/pi/releases/tag/v0.74.0). This GitHub version now requires pi packages from `@earendil-works` (`>=0.74.0`). Users on older pi versions should keep using the last npm release.
 
 ## Changed
 

@@ -640,7 +640,7 @@ tape_read({})
 
 ## Reference
 
-- Session entry types: `@mariozechner/pi-coding-agent` (SessionEntry)
+- Session entry types: `@earendil-works/pi-coding-agent` (SessionEntry)
 - Tape systems: https://tape.systems
 - https://bub.build/
 - https://github.com/bubbuild/bub/tree/main/src/bub

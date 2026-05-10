@@ -637,7 +637,7 @@ tape_read({})
 
 ## 参考
 
-- 会话条目类型：`@mariozechner/pi-coding-agent`（SessionEntry）
+- 会话条目类型：`@earendil-works/pi-coding-agent`（SessionEntry）
 - Tape 系统：https://tape.systems
 - https://bub.build/
 - https://github.com/bubbuild/bub/tree/main/src/bub
