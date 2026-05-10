@@ -122,21 +122,21 @@ function renderSyncResult(
   return renderText(theme.fg("toolOutput", text));
 }
 
-function renderCountResult(
-  result: { content: Array<{ type: string; text?: string }>; details?: unknown },
-  options: { expanded: boolean; isPartial: boolean },
-  theme: Theme,
-  label: string,
-): Text {
-  if (options.isPartial) return renderText(theme.fg("warning", "Loading..."));
-  const details = result.details as { count?: number } | undefined;
-  const text = getResultText(result);
-  if (!options.expanded)
-    return renderText(
-      theme.fg("success", `${details?.count ?? 0} ${label}`) + buildExpandHint(text.split("\n").length, theme),
-    );
-  return renderText(theme.fg("toolOutput", text));
-}
+// function renderCountResult(
+//   result: { content: Array<{ type: string; text?: string }>; details?: unknown },
+//   options: { expanded: boolean; isPartial: boolean },
+//   theme: Theme,
+//   label: string,
+// ): Text {
+//   if (options.isPartial) return renderText(theme.fg("warning", "Loading..."));
+//   const details = result.details as { count?: number } | undefined;
+//   const text = getResultText(result);
+//   if (!options.expanded)
+//     return renderText(
+//       theme.fg("success", `${details?.count ?? 0} ${label}`) + buildExpandHint(text.split("\n").length, theme),
+//     );
+//   return renderText(theme.fg("toolOutput", text));
+// }
 
 export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   pi.registerTool({
@@ -320,76 +320,76 @@ export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings)
 //   });
 // }
 
-export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings): void {
-  pi.registerTool({
-    name: "memory_list",
-    label: "Memory List",
-    description: "List memory files: project paths are relative, global paths are absolute",
-    parameters: Type.Object({
-      directory: Type.Optional(Type.String({ description: "Project subdirectory (e.g., 'core/project')" })),
-    }),
-
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { directory } = params as { directory?: string };
-      const memoryMeta = await getMemoryMeta(settings, ctx.cwd);
-
-      function toProjectRelativePaths(files: string[]): string[] {
-        return files.map((filePath) => path.relative(memoryMeta.memoryPath, filePath));
-      }
-
-      if (directory) {
-        const listDir = resolvePathWithin(memoryMeta.memoryPath, directory);
-
-        if (!listDir || hasSymlinkInPath(memoryMeta.memoryPath, listDir)) {
-          return {
-            content: [{ type: "text", text: `Invalid memory directory: ${directory}` }],
-            details: { files: [], count: 0, error: true },
-          };
-        }
-
-        const files = toProjectRelativePaths(await listMemoryFilesAsync(listDir));
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Memory files (${files.length}):\n\n${files.map((p) => `  - ${p}`).join("\n")}`,
-            },
-          ],
-          details: { files, count: files.length },
-        };
-      }
-
-      if (!memoryMeta.global.dir || memoryMeta.global.dir === memoryMeta.memoryPath) {
-        const files = toProjectRelativePaths(await listMemoryFilesAsync(memoryMeta.memoryPath));
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Memory files (${files.length}):\n\n${files.map((p) => `  - ${p}`).join("\n")}`,
-            },
-          ],
-          details: { files, count: files.length },
-        };
-      }
-
-      const [globalFiles, projectFiles] = await Promise.all([
-        listMemoryFilesAsync(memoryMeta.global.dir),
-        listMemoryFilesAsync(memoryMeta.memoryPath),
-      ]);
-      const files = [...globalFiles, ...toProjectRelativePaths(projectFiles)];
-
-      return {
-        content: [
-          { type: "text", text: `Memory files (${files.length}):\n\n${files.map((p) => `  - ${p}`).join("\n")}` },
-        ],
-        details: { files, count: files.length },
-      };
-    },
-
-    renderCall: (args, theme) => new Text(buildToolCallText("memory_list", args, theme), 0, 0),
-    renderResult: (result, options, theme) => renderCountResult(result, options, theme, "memory files"),
-  });
-}
+// export function registerMemoryList(pi: ExtensionAPI, settings: MemoryMdSettings): void {
+//   pi.registerTool({
+//     name: "memory_list",
+//     label: "Memory List",
+//     description: "List memory files: project paths are relative, global paths are absolute",
+//     parameters: Type.Object({
+//       directory: Type.Optional(Type.String({ description: "Project subdirectory (e.g., 'core/project')" })),
+//     }),
+//
+//     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+//       const { directory } = params as { directory?: string };
+//       const memoryMeta = await getMemoryMeta(settings, ctx.cwd);
+//
+//       function toProjectRelativePaths(files: string[]): string[] {
+//         return files.map((filePath) => path.relative(memoryMeta.memoryPath, filePath));
+//       }
+//
+//       if (directory) {
+//         const listDir = resolvePathWithin(memoryMeta.memoryPath, directory);
+//
+//         if (!listDir || hasSymlinkInPath(memoryMeta.memoryPath, listDir)) {
+//           return {
+//             content: [{ type: "text", text: `Invalid memory directory: ${directory}` }],
+//             details: { files: [], count: 0, error: true },
+//           };
+//         }
+//
+//         const files = toProjectRelativePaths(await listMemoryFilesAsync(listDir));
+//         return {
+//           content: [
+//             {
+//               type: "text",
+//               text: `Memory files (${files.length}):\n\n${files.map((p) => `  - ${p}`).join("\n")}`,
+//             },
+//           ],
+//           details: { files, count: files.length },
+//         };
+//       }
+//
+//       if (!memoryMeta.global.dir || memoryMeta.global.dir === memoryMeta.memoryPath) {
+//         const files = toProjectRelativePaths(await listMemoryFilesAsync(memoryMeta.memoryPath));
+//         return {
+//           content: [
+//             {
+//               type: "text",
+//               text: `Memory files (${files.length}):\n\n${files.map((p) => `  - ${p}`).join("\n")}`,
+//             },
+//           ],
+//           details: { files, count: files.length },
+//         };
+//       }
+//
+//       const [globalFiles, projectFiles] = await Promise.all([
+//         listMemoryFilesAsync(memoryMeta.global.dir),
+//         listMemoryFilesAsync(memoryMeta.memoryPath),
+//       ]);
+//       const files = [...globalFiles, ...toProjectRelativePaths(projectFiles)];
+//
+//       return {
+//         content: [
+//           { type: "text", text: `Memory files (${files.length}):\n\n${files.map((p) => `  - ${p}`).join("\n")}` },
+//         ],
+//         details: { files, count: files.length },
+//       };
+//     },
+//
+//     renderCall: (args, theme) => new Text(buildToolCallText("memory_list", args, theme), 0, 0),
+//     renderResult: (result, options, theme) => renderCountResult(result, options, theme, "memory files"),
+//   });
+// }
 
 export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSettings): void {
   pi.registerTool({
@@ -652,9 +652,12 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
     name: "memory_check",
     label: "Memory Check",
     description: "Check current project memory folder structure",
-    parameters: Type.Object({}),
+    parameters: Type.Object({
+      directory: Type.Optional(Type.String({ description: "Project subdirectory to check (e.g., 'core/project')" })),
+    }),
 
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { directory } = params as { directory?: string };
       const info = await getMemoryMeta(settings, ctx.cwd);
       if (!fs.existsSync(info.memoryPath)) {
         const missingGlobalMessage =
@@ -669,6 +672,35 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
             },
           ],
           details: { exists: false },
+        };
+      }
+
+      if (directory) {
+        const listDir = resolvePathWithin(info.memoryPath, directory);
+        if (!listDir || hasSymlinkInPath(info.memoryPath, listDir)) {
+          return {
+            content: [{ type: "text", text: `Invalid memory directory: ${directory}` }],
+            details: { exists: false, fileCount: 0, error: true },
+          };
+        }
+
+        if (!fs.existsSync(listDir) || !fs.statSync(listDir).isDirectory()) {
+          return {
+            content: [{ type: "text", text: `Memory directory not found: ${directory}` }],
+            details: { exists: false, fileCount: 0, error: true },
+          };
+        }
+
+        const files = await listMemoryFilesAsync(listDir);
+        const relPaths = files.map((f) => path.relative(info.memoryPath, f));
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Memory directory check for project: ${info.name}\n\nDirectory: ${directory}\nPath: ${listDir}\nMemory files (${relPaths.length}):\n${relPaths.map((p) => `  ${p}`).join("\n")}`,
+            },
+          ],
+          details: { exists: true, fileCount: relPaths.length },
         };
       }
 
@@ -710,7 +742,7 @@ export function registerMemoryCheck(pi: ExtensionAPI, settings: MemoryMdSettings
       };
     },
 
-    renderCall: (_args, theme) => new Text(buildToolCallText("memory_check", {}, theme), 0, 0),
+    renderCall: (args, theme) => new Text(buildToolCallText("memory_check", args, theme), 0, 0),
     renderResult: (result, options, theme) => {
       if (options.isPartial) return renderText(theme.fg("warning", "Checking..."));
       const details = result.details as
@@ -737,7 +769,7 @@ export function registerAllMemoryTools(pi: ExtensionAPI, settings: MemoryMdSetti
   registerMemorySync(pi, settings);
   // registerMemoryRead(pi, settings);
   // registerMemoryWrite(pi, settings);
-  registerMemoryList(pi, settings);
+  // registerMemoryList(pi, settings); // deprecated: use memory_check (supports optional directory)
   registerMemorySearch(pi, settings);
   // registerMemoryInit(pi, settings);
   registerMemoryCheck(pi, settings);

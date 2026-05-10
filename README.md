@@ -102,9 +102,8 @@ The LLM can use these tools and [skills](skills/) to interact with memory:
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `memory_sync` | `{action: "pull" / "push" / "status"}` | Git operations |
-| `memory_list` | `{directory?: string}` | List project memory by relative path; global paths stay absolute |
 | `memory_search` | `{query?, grep?, rg?}` | Search by tags/description and custom grep/ripgrep patterns |
-| `memory_check` | `{}` | Check current project memory folder structure |
+| `memory_check` | `{directory?: string}` | Check current project memory folder structure or a specific project subdirectory |
 
 #### Memory SKILLs
 

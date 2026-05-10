@@ -22,7 +22,7 @@ Inspect recent intent first, read only relevant context, propose memory changes,
    - Use `tape_read({ afterAnchor })` when one anchor starts the relevant work.
    - Use `tape_read({ betweenAnchors })` when a clear start/end pair exists.
 4. Extract durable memory candidates only when they are useful across future sessions.
-5. Compare candidates with existing memory using `memory_list` or `memory_search` before proposing creates or updates.
+5. Compare candidates with existing memory using `memory_check({ directory })` or `memory_search` before proposing creates or updates.
 6. Present proposed changes and ask for confirmation.
 7. After confirmation, use the `memory-write` skill to create or update memory files.
 8. Ask before `memory_sync` unless the user explicitly requested sync.

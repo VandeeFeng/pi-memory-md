@@ -25,6 +25,7 @@ In this project, I keep reminding myself to strengthen both sides of the memory 
 
 ## Changed
 
+- Deprecated and disabled the `memory_list` tool; use `memory_check({ directory })` for directory-scoped memory inspection.
 - Refined tape smart analysis scoring with smooth time decay, BM25-inspired repeated-access saturation, anchor decay boosts, and a clearer multi-signal event score model for selecting active memory and project files.
 
 ## Fixed

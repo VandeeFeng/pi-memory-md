@@ -1,10 +1,10 @@
-// Covers memory tool read, write, list, and search behavior plus invalid-path handling.
+// Covers memory tool read, write, check, and search behavior plus invalid-path handling.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { writeMemoryFile } from "../memory-core.js";
-import { registerMemoryCheck, registerMemoryList, registerMemorySearch } from "../tools.js";
+import { registerMemoryCheck, registerMemorySearch } from "../tools.js";
 import { createTempDir } from "./test-helpers.js";
 
 type RegisteredTool = {
@@ -218,8 +218,8 @@ test("memory_write rejects symlink paths", async () => {
 });
 */
 
-test("memory_list returns absolute paths and supports directory filtering", async () => {
-  const tempDir = createTempDir("pi-memory-md-tools-list");
+test("memory_check supports directory filtering", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-check-directory");
   const projectDir = path.join(tempDir, "project");
   const settings = { localPath: path.join(tempDir, "memory-root") };
   const memoryDir = path.join(settings.localPath, path.basename(projectDir));
@@ -228,25 +228,27 @@ test("memory_list returns absolute paths and supports directory filtering", asyn
   writeMemoryFile(path.join(memoryDir, "core", "project", "roadmap.md"), "# Roadmap", { description: "Roadmap" });
 
   const pi = createMockPi();
-  registerMemoryList(pi as never, settings);
+  registerMemoryCheck(pi as never, settings);
 
-  const allFiles = (await executeTool(pi, "memory_list", {}, projectDir)) as {
+  const allFiles = (await executeTool(pi, "memory_check", {}, projectDir)) as {
     content: Array<{ text?: string }>;
-    details?: { files?: string[]; count?: number };
+    details?: { fileCount?: number };
   };
-  const userFiles = (await executeTool(pi, "memory_list", { directory: "core/user" }, projectDir)) as {
-    details?: { files?: string[]; count?: number };
+  const userFiles = (await executeTool(pi, "memory_check", { directory: "core/user" }, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { fileCount?: number };
   };
 
-  assert.equal(allFiles.details?.count, 2);
-  assert.deepEqual((allFiles.details?.files ?? []).sort(), ["core/project/roadmap.md", "core/user/identity.md"].sort());
-  assert.equal(userFiles.details?.count, 1);
-  assert.deepEqual(userFiles.details?.files, ["core/user/identity.md"]);
-  assert.match(allFiles.content[0]?.text ?? "", /Memory files \(2\):/);
+  assert.equal(allFiles.details?.fileCount, 2);
+  assert.equal(userFiles.details?.fileCount, 1);
+  assert.match(allFiles.content[0]?.text ?? "", /core\/project\/roadmap\.md/);
+  assert.match(allFiles.content[0]?.text ?? "", /core\/user\/identity\.md/);
+  assert.match(userFiles.content[0]?.text ?? "", /core\/user\/identity\.md/);
+  assert.doesNotMatch(userFiles.content[0]?.text ?? "", /core\/project\/roadmap\.md/);
 });
 
-test("memory_list includes shared global files when global memory is enabled", async () => {
-  const tempDir = createTempDir("pi-memory-md-tools-list-global");
+test("memory_check includes shared global files when global memory is enabled", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-check-global");
   const projectDir = path.join(tempDir, "project");
   const settings = {
     localPath: path.join(tempDir, "memory-root"),
@@ -265,19 +267,16 @@ test("memory_list includes shared global files when global memory is enabled", a
   });
 
   const pi = createMockPi();
-  registerMemoryList(pi as never, settings);
+  registerMemoryCheck(pi as never, settings);
 
-  const allFiles = (await executeTool(pi, "memory_list", {}, projectDir)) as {
+  const allFiles = (await executeTool(pi, "memory_check", {}, projectDir)) as {
     content: Array<{ text?: string }>;
-    details?: { files?: string[]; count?: number };
+    details?: { fileCount?: number };
   };
 
-  assert.equal(allFiles.details?.count, 2);
-  assert.deepEqual(allFiles.details?.files, [path.join(globalMemoryDir, "USER.md"), "core/project/overview.md"]);
-  assert.match(
-    allFiles.content[0]?.text ?? "",
-    new RegExp(path.join(globalMemoryDir, "USER.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-  );
+  assert.equal(allFiles.details?.fileCount, 2);
+  assert.match(allFiles.content[0]?.text ?? "", new RegExp(globalMemoryDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(allFiles.content[0]?.text ?? "", /USER\.md/);
   assert.match(allFiles.content[0]?.text ?? "", /core\/project\/overview\.md/);
 });
 
@@ -311,8 +310,8 @@ test("memory_check treats missing global memory as warning when project memory e
   assert.match(result.content[0]?.text ?? "", /## Project memory/);
 });
 
-test("memory_list rejects symlink directories", async () => {
-  const tempDir = createTempDir("pi-memory-md-tools-list-symlink");
+test("memory_check rejects symlink directories", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-check-symlink");
   const projectDir = path.join(tempDir, "project");
   const settings = { localPath: path.join(tempDir, "memory-root") };
   const memoryDir = path.join(settings.localPath, path.basename(projectDir));
@@ -324,9 +323,9 @@ test("memory_list rejects symlink directories", async () => {
   fs.symlinkSync(outsideDir, linkDir);
 
   const pi = createMockPi();
-  registerMemoryList(pi as never, settings);
+  registerMemoryCheck(pi as never, settings);
 
-  const result = (await executeTool(pi, "memory_list", { directory: "core/linked" }, projectDir)) as {
+  const result = (await executeTool(pi, "memory_check", { directory: "core/linked" }, projectDir)) as {
     content: Array<{ text?: string }>;
     details?: { error?: boolean };
   };
