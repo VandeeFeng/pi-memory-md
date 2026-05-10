@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import type { MemoryMdSettings } from "../types.js";
 import { toLocaleDateTime, toLocaleTime, toTimestamp } from "../utils.js";
 import type { TapeAnchorMeta, TapeAnchorType } from "./tape-anchor.js";
-import { extractMessageContent } from "./tape-context.js";
+import { DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS, formatEntryLine } from "./tape-context.js";
 import type { KeywordHandoffInstruction } from "./tape-gate.js";
 import type { TapeService } from "./tape-service.js";
 import type { RenderState } from "./tape-types.js";
@@ -61,30 +61,6 @@ function renderDefaultResult(
   return renderText(theme.fg("toolOutput", result.content[0]?.text ?? ""));
 }
 
-function formatEntrySummary(entry: SessionEntry): string {
-  const time = toLocaleTime(entry.timestamp);
-
-  switch (entry.type) {
-    case "message": {
-      const msg = entry as { message: { role: string; content?: unknown } };
-      const fullContent = extractMessageContent(msg.message.content);
-      const content = fullContent.substring(0, 50);
-      const suffix = fullContent.length > 50 ? "..." : "";
-      return `[${time}] ${msg.message.role === "user" ? "User" : "Assistant"}: ${content}${suffix}`;
-    }
-    case "custom":
-      return `[${time}] Custom: ${(entry as { customType?: string }).customType ?? "unknown"}`;
-    case "thinking_level_change":
-      return `[${time}] Thinking level: ${entry.thinkingLevel}`;
-    case "model_change":
-      return `[${time}] Model: ${entry.provider}/${entry.modelId}`;
-    case "compaction":
-      return `[${time}] Compaction: ${entry.summary}`;
-    default:
-      return `[${time}] ${entry.type}`;
-  }
-}
-
 function getAnchorSearchBounds(
   tapeService: TapeService,
   options: {
@@ -132,12 +108,21 @@ function getAnchorContext(entries: SessionEntry[], anchorTimestamp: string, cont
   const anchorIndex = entries.findIndex((entry) => toTimestamp(entry.timestamp) >= anchorTime);
 
   if (anchorIndex === -1) {
-    return [entries.slice(-contextLines).map(formatEntrySummary), []];
+    return [
+      entries
+        .slice(-contextLines)
+        .map((entry) => formatEntryLine(entry, DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS) ?? entry.type),
+      [],
+    ];
   }
 
   return [
-    entries.slice(Math.max(0, anchorIndex - contextLines), anchorIndex).map(formatEntrySummary),
-    entries.slice(anchorIndex, anchorIndex + contextLines).map(formatEntrySummary),
+    entries
+      .slice(Math.max(0, anchorIndex - contextLines), anchorIndex)
+      .map((entry) => formatEntryLine(entry, DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS) ?? entry.type),
+    entries
+      .slice(anchorIndex, anchorIndex + contextLines)
+      .map((entry) => formatEntryLine(entry, DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS) ?? entry.type),
   ];
 }
 
@@ -642,7 +627,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           parts.push(`${entryCount} entries`);
           lines.push("Entries:");
           for (const entry of entries) {
-            lines.push(formatEntrySummary(entry));
+            lines.push(formatEntryLine(entry, DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS) ?? entry.type);
           }
         }
       }
@@ -733,6 +718,15 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
         Type.Unsafe({ ...AnchorScopeUnion, description: "Anchor resolution: 'session' or 'project'" }),
       ),
       limit: Type.Optional(Type.Integer({ description: "Max entries (default: 20)", minimum: 1, maximum: 100 })),
+      maxContentChars: Type.Optional(
+        Type.Union([
+          Type.Integer({
+            minimum: 80,
+            description: "Max content chars per formatted entry. Omit for default 300; use null for full content.",
+          }),
+          Type.Null({ description: "Return full formatted entry content" }),
+        ]),
+      ),
     }),
 
     async execute(_toolCallId, params) {
@@ -749,6 +743,7 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
         anchorScope = "session",
         limit = 20,
         scan,
+        maxContentChars,
       } = params as {
         afterAnchor?: string;
         betweenAnchors?: { start: string; end: string };
@@ -759,6 +754,7 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
         anchorScope?: "session" | "project";
         limit?: number;
         scan?: string;
+        maxContentChars?: number | null;
       };
 
       const entries = tapeService.scan(
@@ -775,19 +771,24 @@ export function registerTapeRead(pi: ExtensionAPI, getTapeService: TapeServiceGe
         }),
       );
 
-      const formatted = entries.map(formatEntrySummary).join("\n");
+      const contentCharLimit = maxContentChars === undefined ? DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS : maxContentChars;
+      const formatted = entries
+        .map((entry) => formatEntryLine(entry, contentCharLimit ?? undefined) ?? entry.type)
+        .join("\n");
+
       return {
         content: [{ type: "text", text: `Retrieved ${entries.length} entries:\n\n${formatted || "(no entries)"}` }],
-        details: { entries, count: entries.length },
+        details: { entries, count: entries.length, maxContentChars: contentCharLimit },
       };
     },
 
     renderCall(args, theme) {
       const parts = [theme.fg("toolTitle", theme.bold("tape_read"))];
       if (args.afterAnchor) parts.push(theme.fg("muted", `after=${args.afterAnchor}`));
-      if (args.lastAnchor) parts.push(theme.fg("accent", "@last"));
+      if (args.lastAnchor) parts.push(theme.fg("muted", "@last"));
       if (args.scan) parts.push(theme.fg("muted", `"${args.scan}"`));
       if (args.limit) parts.push(theme.fg("muted", `limit=${args.limit}`));
+      if (args.maxContentChars !== undefined) parts.push(theme.fg("muted", `maxContentChars=${args.maxContentChars}`));
       return renderText(parts.join(" "));
     },
 

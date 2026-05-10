@@ -10,7 +10,15 @@ import {
   memoryContextItemTpl,
   normalizeMemoryScanRange,
 } from "../memory-core.js";
-import { getProjectMeta, hoursAgoIso, isPathInside, resolveFrom, toRelativeIfInside, toTimestamp } from "../utils.js";
+import {
+  getProjectMeta,
+  hoursAgoIso,
+  isPathInside,
+  resolveFrom,
+  toLocaleTime,
+  toRelativeIfInside,
+  toTimestamp,
+} from "../utils.js";
 import {
   analyzePathAccess,
   analyzeRecentLineRanges,
@@ -22,6 +30,7 @@ import {
 import type { TapeService } from "./tape-service.js";
 
 const CHARS_PER_TOKEN = 4;
+export const DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS = 300;
 const execFileAsync = promisify(execFile);
 
 export interface TapeMessage {
@@ -68,22 +77,33 @@ export function formatEntriesAsMessages(entries: SessionEntry[]): TapeMessage[] 
   return entries.map(entryToMessage).filter((message): message is TapeMessage => message !== null);
 }
 
-function formatEntryLine(entry: SessionEntry): string | null {
+export function formatEntryLine(entry: SessionEntry, maxContentChars?: number): string | null {
+  const time = toLocaleTime(entry.timestamp);
+
   switch (entry.type) {
     case "message": {
       const messageEntry = entry as { message: { role: string; content?: unknown } };
       const content = extractMessageContent(messageEntry.message.content);
-      const truncated = content.length > 80 ? `${content.substring(0, 80)}...` : content;
-      return `${messageEntry.message.role === "user" ? "User" : "Assistant"}: ${truncated}`;
+      const formattedContent =
+        maxContentChars === undefined || content.length <= maxContentChars
+          ? content
+          : `${content.substring(0, maxContentChars)}...`;
+      return `[${time}] ${messageEntry.message.role === "user" ? "User" : "Assistant"}: ${formattedContent}`;
     }
     case "custom":
-      return `-- ${(entry as { customType?: string }).customType ?? "custom"} --`;
+      return `[${time}] -- ${(entry as { customType?: string }).customType ?? "custom"} --`;
     case "thinking_level_change":
-      return `[Thinking: ${entry.thinkingLevel}]`;
+      return `[${time}] [Thinking: ${entry.thinkingLevel}]`;
     case "model_change":
-      return `[Model: ${entry.provider}/${entry.modelId}]`;
-    case "compaction":
-      return `[Compaction] ${entry.summary?.substring(0, 50)}`;
+      return `[${time}] [Model: ${entry.provider}/${entry.modelId}]`;
+    case "compaction": {
+      const summary = entry.summary ?? "";
+      const formattedSummary =
+        maxContentChars === undefined || summary.length <= maxContentChars
+          ? summary
+          : `${summary.substring(0, maxContentChars)}...`;
+      return `[${time}] [Compaction] ${formattedSummary}`;
+    }
     default:
       return null;
   }
@@ -105,7 +125,9 @@ export class ConversationSelector {
   }
 
   buildFormattedContext(entries: SessionEntry[]): string {
-    const lines = entries.map(formatEntryLine).filter((line): line is string => line !== null);
+    const lines = entries
+      .map((entry) => formatEntryLine(entry, DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS))
+      .filter((line): line is string => line !== null);
     return lines.length > 0 ? `${lines.join("\n")}\n\n---\n` : "";
   }
 

@@ -27,6 +27,7 @@ In this project, I keep reminding myself to strengthen both sides of the memory 
 
 ## Changed
 
+- Updated `tape_read` formatted output controls: defaults to 300 content characters per entry, accepts `maxContentChars` for custom truncation, and uses `maxContentChars: null` for full content.
 - Improved tape edit focus extraction by counting only changed diff lines instead of surrounding context lines. Pi's native edit result returns a numbered diff that includes both changed lines and nearby context lines; tape now ignores those context lines, parses only `+` lines as the primary edit focus, falls back to `-` lines for deletion-only edits, and uses `firstChangedLine` only when no changed line can be extracted.
 - Deprecated and disabled the `memory_list` tool; use `memory_check({ directory })` for directory-scoped memory inspection.
 - Refined tape smart analysis scoring with smooth time decay, BM25-inspired repeated-access saturation, anchor decay boosts, and a clearer multi-signal event score model for selecting active memory and project files.
