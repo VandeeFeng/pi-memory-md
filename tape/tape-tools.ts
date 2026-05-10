@@ -589,7 +589,6 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
       let entryCount = 0;
 
       if (kinds.includes("anchor") || kinds.includes("all")) {
-        const anchorStore = tapeService.getAnchorStore();
         const { since, until, sessionId } = getAnchorSearchBounds(tapeService, {
           sinceAnchor,
           lastAnchor,
@@ -599,7 +598,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           entryScope: entryScopeFallback,
         });
 
-        const anchors = anchorStore.search({
+        const searchOptions = {
           scan,
           limit,
           since,
@@ -610,7 +609,9 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           summary: anchorSummary,
           purpose: anchorPurpose,
           keywords: anchorKeywords,
-        });
+        };
+
+        const anchors = tapeService.searchAnchorsWithFallback(searchOptions);
 
         anchorCount = anchors.length;
         if (anchorCount > 0) {
@@ -624,7 +625,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
       }
 
       if (kinds.includes("entry") || kinds.includes("all")) {
-        const entries = tapeService.scan({
+        const entries = tapeService.scanEntriesWithFallback({
           types,
           limit,
           sinceAnchor,

@@ -461,12 +461,13 @@ The panel only helps you land on the right anchor. After jumping there, any deep
 }
 ```
 
-### Tape Tools & Slash Command
+### Tape Tools, Skills & Slash Commands
 
-| Tool | Parameters | Description |
+| Name | Parameters | Description |
 |------|------------|-------------|
 | `/memory-anchor` | `<prompt>` | Slash command that asks the LLM to derive and create a manually authorized handoff anchor |
 | `/memory-review` | `[limit]` default: `50`, max: `100` | Slash command that opens an interactive Memory Review overlay for browsing anchors by timeline, keyword relations, stats, and `/` fuzzy search |
+| `memory-digest` | skill | Digest recent tape anchors and session context into proposed durable memory updates |
 | `tape_handoff` | `{name, summary?, purpose?}` | Create a handoff anchor checkpoint in the tape |
 | `tape_list` | `{limit?: number}` | List all anchor checkpoints |
 | `tape_delete` | `{id}` | Delete an anchor checkpoint by id |

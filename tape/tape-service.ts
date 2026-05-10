@@ -1,7 +1,13 @@
 import fs from "node:fs";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { nowIso, toTimestamp } from "../utils.js";
-import { AnchorStore, type TapeAnchor, type TapeAnchorMeta, type TapeAnchorType } from "./tape-anchor.js";
+import {
+  AnchorStore,
+  type TapeAnchor,
+  type TapeAnchorMeta,
+  type TapeAnchorScanOptions,
+  type TapeAnchorType,
+} from "./tape-anchor.js";
 import { getEntriesAfterTimestamp, getSessionFilePath, getSessionFilePaths, parseSessionFile } from "./tape-reader.js";
 import type { TapeSessionScanOptions } from "./tape-types.js";
 
@@ -142,14 +148,8 @@ export class TapeService {
   }
 
   private resolveAnchor(name: string, anchorScope: "session" | "project"): TapeAnchor | null {
-    if (anchorScope === "session") {
-      return (
-        this.anchorStore.scan({ name, nameCaseInsensitive: true, sessionId: this.sessionId, mode: "latest" })[0] ??
-        this.anchorStore.scan({ name, nameCaseInsensitive: true, mode: "latest" })[0]
-      );
-    }
-
-    return this.anchorStore.scan({ name, nameCaseInsensitive: true, mode: "latest" })[0] ?? null;
+    const sessionId = anchorScope === "session" ? this.sessionId : undefined;
+    return this.anchorStore.scan({ name, nameCaseInsensitive: true, sessionId, mode: "latest" })[0] ?? null;
   }
 
   private buildEntryCacheSignature(filePaths: string[]): string {
@@ -215,6 +215,21 @@ export class TapeService {
       sortedEntries.length > this.maxCachedEntries ? sortedEntries.slice(-this.maxCachedEntries) : sortedEntries;
     this.entryCache.set(entryScope, { signature, entries: trimmedEntries });
     return trimmedEntries;
+  }
+
+  scanEntriesWithFallback(options: TapeSessionScanOptions & { since?: string }): SessionEntry[] {
+    const entries = this.scan(options);
+    const entryScope = options.entryScope ?? "project";
+    if (entries.length > 0 || entryScope !== "session") return entries;
+
+    return this.scan({ ...options, entryScope: "project", anchorScope: "project" });
+  }
+
+  searchAnchorsWithFallback(options: TapeAnchorScanOptions): TapeAnchor[] {
+    const anchors = this.anchorStore.search(options);
+    if (anchors.length > 0 || options.sessionId === undefined) return anchors;
+
+    return this.anchorStore.search({ ...options, sessionId: undefined });
   }
 
   scan(options: TapeSessionScanOptions & { since?: string }): SessionEntry[] {

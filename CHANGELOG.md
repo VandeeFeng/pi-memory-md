@@ -19,9 +19,17 @@ In this project, I keep reminding myself to strengthen both sides of the memory 
 
 - Migrated pi package imports and runtime dependencies to the new `@earendil-works/*` npm scope introduced in [pi v0.74.0](https://github.com/earendil-works/pi/releases/tag/v0.74.0). This GitHub version now requires pi packages from `@earendil-works` (`>=0.74.0`). Users on older pi versions should keep using the last npm release.
 
+## New Features
+
+- Added `memory-digest` skill for turning recent tape anchors and relevant session context into confirmed durable memory updates via `memory-write`.
+
 ## Changed
 
 - Refined tape smart analysis scoring with smooth time decay, BM25-inspired repeated-access saturation, anchor decay boosts, and a clearer multi-signal event score model for selecting active memory and project files.
+
+## Fixed
+
+- `tape_search` now falls back from session-scope entry and anchor search to project-scope search when the session has no matching results.
 
 ## [0.1.36] - 2026-05-06
 
