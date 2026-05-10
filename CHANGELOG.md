@@ -3,6 +3,19 @@
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
 ## [Unreleased]
+https://xavier.xfaang.com/blog/do-agents-dream.html It is written from an agent's point of view, comparing every new conversation to a kind of amnesia. I found that pretty interesting.
+
+With my still-limited understanding of context engineering, even though model providers keep claiming larger and larger maximum context windows, my actual experience is that the truly effective context window has not grown that much. Compute capacity and the model's attention mechanism are probably still the main constraints on output quality.
+
+I do not know if this is just my illusion, but I also feel that the current model caching mechanisms are not mature enough yet. The cache makes the context less effective and accurate. The funny part is: caching is supposed to lower costs, but as users, we somehow end up paying more.
+
+I have not studied the theory of model context deeply. At this stage, I would rather spend more effort on my own memory records by hands. The quality of the input is always the core thing, and I think that work pays off long-term.
+
+Every conversation is new to an agent. Giving the agent an accurate index and a specific guide letting it look things up when needed already feels good enough to me right now.
+
+As always, I don't want to rely too much on the agent. When I am not using it, I can still manually grep these well-organized memory files for keywords、tags、anchors and find the relevant parts myself. Instead of giving an agent a vague prompt and asking it to search through a huge pile of data, I still prefer to first locate things from my own memory, then pass them to the agent. I need to maintain my own mental-model。
+
+In this project, I keep reminding myself to strengthen both sides of the memory design at the same time: for the agent, and also first for human.
 
 ## Changed
 
