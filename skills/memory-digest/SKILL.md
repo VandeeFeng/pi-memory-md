@@ -11,6 +11,11 @@ Turn recent tape anchors and nearby session context into concise, durable memory
 
 Inspect recent intent first, read only relevant context, propose memory changes, then write only after user confirmation using the `memory-write` skill.
 
+- Keep each proposed memory focused on one durable topic.
+- Keep proposal details lightweight: explain only why each candidate should be created, updated, or skipped.
+- For possible updates, identify the existing memory file and briefly state why it should change.
+- Defer final description, tags, frontmatter shape, timestamp handling, and file creation/update mechanics to the `memory-write` skill.
+
 ## Workflow
 
 1. Inspect recent anchors with `tape_list`, usually `limit: 20` and `contextLines: 1`.
@@ -18,14 +23,17 @@ Inspect recent intent first, read only relevant context, propose memory changes,
 3. Select the smallest useful tape range by combining anchor count and recency:
    - Use `tape_search({ kinds: ["anchor"], anchorType: "handoff", anchorScope: "project", betweenDates: { start, end }, limit: 20 })` for handoff anchors from the last 2 days.
    - Use `tape_search({ kinds: ["anchor"], anchorType: "handoff", anchorScope: "project", limit: 10 })` when recent date-filtered handoff anchors are not enough to capture the active thread.
-   - Use `tape_read({ lastAnchor: true })` for the latest active thread.
-   - Use `tape_read({ afterAnchor })` when one anchor starts the relevant work.
    - Use `tape_read({ betweenAnchors })` when a clear start/end pair exists.
 4. Extract durable memory candidates only when they are useful across future sessions.
-5. Compare candidates with existing memory using `memory_check({ directory })` or `memory_search` before proposing creates or updates.
-6. Present proposed changes and ask for confirmation.
-7. After confirmation, use the `memory-write` skill to create or update memory files.
-8. Ask before `memory_sync` unless the user explicitly requested sync.
+5. Compare candidates with existing memory using `memory_check({ directory })` or `memory_search` before proposing creates or updates. Then read the specific memory file if needed.
+6. Apply the `memory-write` skill rules before showing proposed paths:
+   - Treat `memory-write` as the single source of truth for placement, filename conventions, and frontmatter shape.
+   - Validate every proposed relative path against `memory-write` rules.
+   - Do not invent root folders or naming schemes outside `memory-write`.
+   - If the correct path is uncertain, propose the candidate without a final path and ask the user to choose or confirm placement.
+7. Present proposed changes and ask for confirmation.
+8. After confirmation, use the `memory-write` skill to create or update memory files.
+9. Ask before `memory_sync` unless the user explicitly requested sync.
 
 ## Save candidates
 
@@ -53,38 +61,22 @@ Do not save:
 Before writing, respond with:
 
 ```md
-## Proposed memory updates
+# Proposed memory updates
 
-### Create
+## Create
 - `path/to/file.md`
-  - reason:
-  - summary:
+  reason:
 
-### Update
+## Update
 - `path/to/file.md`
-  - reason:
-  - summary:
+  reason:
 
-### Skip
+## Skip
 - item:
-  - reason:
+  reason:
 ```
 
-End by explicitly asking the user for confirmation with a direct question, for example:
-
-`Proceed with these memory updates?`
-
-Do not write memory files until the user confirms.
-
-## Proposal guidance
-
-During analysis, propose likely memory paths and metadata, but treat them as suggestions for user confirmation and final `memory-write` handling.
-
-- Propose paths based on the candidate's scope, such as project direction, reusable reference, research note, or archive material.
-- Keep each proposed memory focused on one durable topic.
-- Propose a concise description and 2-5 lowercase reusable tags for each candidate.
-- For possible updates, identify the existing memory file and explain what should be merged.
-- Defer final placement, frontmatter shape, timestamp handling, and file creation/update mechanics to the `memory-write` skill.
+End by explicitly asking the user for confirmation with: `Proceed with these memory updates?`
 
 ## Related skills
 

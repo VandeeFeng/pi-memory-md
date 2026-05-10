@@ -11,14 +11,19 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Run the full test suite
-# Clear hook-local git env so nested git fixture repos work correctly.
-unset $(git rev-parse --local-env-vars)
-echo "Running tests..."
-npm test
-if [ $? -ne 0 ]; then
-  echo "❌ Tests failed. Please fix the errors before committing."
-  exit 1
+# Run the full test suite unless staged changes are only Markdown files.
+NON_MD_FILES=$(printf '%s\n' "$STAGED_FILES" | grep -vE '\.md$' || true)
+if [ -n "$NON_MD_FILES" ]; then
+  # Clear hook-local git env so nested git fixture repos work correctly.
+  unset $(git rev-parse --local-env-vars)
+  echo "Running tests..."
+  npm test
+  if [ $? -ne 0 ]; then
+    echo "❌ Tests failed. Please fix the errors before committing."
+    exit 1
+  fi
+else
+  echo "Skipping tests; staged changes are Markdown-only."
 fi
 
 # Restage files that were previously staged and may have been modified by formatting
