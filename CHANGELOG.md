@@ -2,6 +2,12 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
+## [Unreleased]
+
+## Changed
+
+- Refined tape smart analysis scoring with smooth time decay, BM25-inspired repeated-access saturation, anchor decay boosts, and a clearer multi-signal event score model for selecting active memory and project files.
+
 ## [0.1.36] - 2026-05-06
 
 Pi is moving so fast now. I missed the releases for just one week, and there were already so many new features.

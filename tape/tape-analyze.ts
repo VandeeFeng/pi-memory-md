@@ -4,6 +4,8 @@ import { toTimestamp } from "../utils.js";
 
 const HANDOFF_BOOST = 30;
 const KEYWORD_HANDOFF_BOOST = 40;
+const ACCESS_DECAY_HOURS = 24;
+const ANCHOR_DECAY_HOURS = 12;
 
 export type MemoryPathStats = {
   count: number;
@@ -91,13 +93,11 @@ export function analyzePathAccess(
 
       totalAccesses += 1;
       const stats = pathStats.get(trackedPath) ?? createEmptyMemoryPathStats();
-      const multiplier = getDiminishingReturnsMultiplier(stats.count);
-      const accessScore = getAccessScore(toolName);
-      const boost = anchorWindows.reduce((total, anchorWindow) => total + getAnchorBoost(accessTime, anchorWindow), 0);
+      const eventScore = getAccessEventScore(toolName, stats.count, accessTime, anchorWindows);
 
       stats.count += 1;
       stats.lastAccess = Math.max(stats.lastAccess, accessTime);
-      stats.score += (accessScore + boost) * multiplier;
+      stats.score += eventScore;
       recordToolAccess(stats, toolName);
       pathStats.set(trackedPath, stats);
     }
@@ -283,11 +283,26 @@ function getAccessScore(toolName: SupportedPathToolName): number {
   }
 }
 
-function getDiminishingReturnsMultiplier(count: number): number {
-  if (count === 0) return 1;
-  if (count === 1) return 0.6;
-  if (count === 2) return 0.35;
-  return 0.15;
+function getAccessEventScore(
+  toolName: SupportedPathToolName,
+  previousAccessCount: number,
+  accessTime: number,
+  anchorWindows: AnchorWindow[],
+): number {
+  const accessScore = getAccessScore(toolName);
+  const recencyDecay = getRecencyDecay(accessTime, ACCESS_DECAY_HOURS);
+  const repeatDecayFactor = getRepeatDecayFactor(previousAccessCount);
+  const anchorBoost = anchorWindows.reduce(
+    (total, anchorWindow) => total + getAnchorBoost(accessTime, anchorWindow),
+    0,
+  );
+
+  return (accessScore * recencyDecay + anchorBoost) * repeatDecayFactor;
+}
+
+function getRepeatDecayFactor(previousAccessCount: number): number {
+  // BM25-inspired saturation: repeated access still adds signal, but each repeat contributes less.
+  return 1 / Math.sqrt(previousAccessCount + 1);
 }
 
 function recordToolAccess(stats: MemoryPathStats, toolName: SupportedPathToolName): void {
@@ -318,19 +333,14 @@ function getFinalScore(stats: MemoryPathStats): number {
     stats.editCount > 0,
     stats.writeCount > 0,
   ].filter(Boolean).length;
-  const recencyBonus = getRecencyBonus(stats.lastAccess);
-  const repeatPenalty = Math.max(0, stats.count - distinctToolKinds) * 2;
+  const diversityBonus = Math.max(0, distinctToolKinds - 1) * 2;
 
-  return stats.score + recencyBonus - repeatPenalty;
+  return stats.score + diversityBonus;
 }
 
-function getRecencyBonus(lastAccess: number): number {
-  const hoursSinceLastAccess = Math.max(0, (Date.now() - lastAccess) / (1000 * 60 * 60));
-
-  if (hoursSinceLastAccess <= 6) return 12;
-  if (hoursSinceLastAccess <= 24) return 8;
-  if (hoursSinceLastAccess <= 72) return 4;
-  return 0;
+function getRecencyDecay(accessTime: number, decayHours: number): number {
+  const hoursSinceAccess = Math.max(0, (Date.now() - accessTime) / (1000 * 60 * 60));
+  return Math.exp(-hoursSinceAccess / decayHours);
 }
 
 function getAnchorBoost(accessTime: number, anchorWindow: AnchorWindow): number {
@@ -340,9 +350,5 @@ function getAnchorBoost(accessTime: number, anchorWindow: AnchorWindow): number 
   if (accessTime < anchorTime || accessTime > anchorWindow.windowEnd) return 0;
 
   const hoursSinceAnchor = (accessTime - anchorTime) / (1000 * 60 * 60);
-
-  if (hoursSinceAnchor <= 6) return anchorWindow.boost;
-  if (hoursSinceAnchor <= 24) return anchorWindow.boost * 0.6;
-  if (hoursSinceAnchor <= 72) return anchorWindow.boost * 0.3;
-  return 0;
+  return anchorWindow.boost * Math.exp(-hoursSinceAnchor / ANCHOR_DECAY_HOURS);
 }
