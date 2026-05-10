@@ -281,20 +281,18 @@ test("scope and anchorScope combinations control anchor lookup behavior", () => 
     assert.ok(s2OnlyViaProject !== null);
     assert.equal(s2OnlyViaProject?.sessionId, "session-2");
 
-    // Test 7: resolveAnchor's session scope has fallback to project scope
-    // Note: resolveAnchor falls back to project scope if not found in current session
+    // Test 7: session anchor scope is restricted to the current session
     const s2OnlyViaCurrent = service1Refreshed.findAnchorByName("anchor/s2-only", "session");
-    assert.ok(s2OnlyViaCurrent !== null); // Found via fallback
-    assert.equal(s2OnlyViaCurrent?.sessionId, "session-2");
+    assert.equal(s2OnlyViaCurrent, null);
 
-    // Test 7b: To truly restrict to current session, use scan with explicit sessionId filter
+    // Test 7b: strict store scan matches session anchor scope behavior
     const s2OnlyStrict = service1Refreshed.getAnchorStore().scan({
       name: "anchor/s2-only",
       nameCaseInsensitive: true,
       sessionId: "session-1",
       mode: "latest",
     })[0];
-    assert.equal(s2OnlyStrict, undefined); // Not found in session-1
+    assert.equal(s2OnlyStrict, undefined);
 
     // Test 8: Verify entries can be read independently from anchors (scope is separate concern)
     const entriesCurrent = service1Refreshed.scan({ entryScope: "session" });

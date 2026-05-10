@@ -208,10 +208,7 @@ function extractEditRanges(details: { firstChangedLine?: number; diff?: string }
   const ranges: LineRange[] = [];
 
   for (const section of sections) {
-    const lineNumbers = [...section.matchAll(/^\s*[+\- ]?\s*(\d+)\s/gm)]
-      .map((match) => match[1])
-      .filter((lineNumber): lineNumber is string => lineNumber !== undefined)
-      .map((lineNumber) => Number.parseInt(lineNumber, 10));
+    const lineNumbers = extractChangedLineNumbers(section);
     if (lineNumbers.length === 0) continue;
     ranges.push({
       kind: "edit",
@@ -223,6 +220,17 @@ function extractEditRanges(details: { firstChangedLine?: number; diff?: string }
   if (ranges.length > 0) return ranges;
   if (typeof firstChangedLine !== "number") return [];
   return [{ kind: "edit", start: firstChangedLine, end: firstChangedLine }];
+}
+
+function extractChangedLineNumbers(section: string): number[] {
+  const toLineNumbers = (matches: IterableIterator<RegExpMatchArray>): number[] =>
+    [...matches]
+      .map((match) => match[1])
+      .filter((lineNumber): lineNumber is string => lineNumber !== undefined)
+      .map((lineNumber) => Number.parseInt(lineNumber, 10));
+
+  const addedLineNumbers = toLineNumbers(section.matchAll(/^\+\s*(\d+)\s/gm));
+  return addedLineNumbers.length > 0 ? addedLineNumbers : toLineNumbers(section.matchAll(/^-\s*(\d+)\s/gm));
 }
 
 function pushLineRange(rangeMap: Map<string, LineRange[]>, filePath: string, range: LineRange): void {

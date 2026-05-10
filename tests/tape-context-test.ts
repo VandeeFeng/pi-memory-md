@@ -283,7 +283,7 @@ test("MemoryFileSelector buildContextFromFilesAsync renders highlights and line 
   assert.match(context, /tags: user, profile/);
   assert.match(context, /<active_project_files>/);
   assert.match(context, new RegExp(projectFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(context, / {2}recent focus: read 20-22, edit 12-14/);
+  assert.match(context, / {2}recent focus: read 20-22, edit 13-13/);
   assert.match(context, /priority: high/);
 });
 

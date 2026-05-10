@@ -7,6 +7,8 @@ https://xavier.xfaang.com/blog/do-agents-dream.html It is written from an agent'
 
 With my still-limited understanding of context engineering, even though model providers keep claiming larger and larger maximum context windows, my actual experience is that the truly effective context window has not grown that much. Compute capacity and the model's attention mechanism are probably still the main constraints on output quality.
 
+I do not know if this is just my illusion, but I also feel that the current model cache mechanism makes the context less effective and accurate.
+
 I have not studied the theory of model context deeply. At this stage, I would rather spend more effort on my own memory records by hands. The quality of the input is always the core thing, and I think that work pays off long-term.
 
 Every conversation is new to an agent. Giving the agent an accurate index and a specific guide letting it look things up when needed already feels good enough to me right now.
@@ -25,6 +27,7 @@ In this project, I keep reminding myself to strengthen both sides of the memory 
 
 ## Changed
 
+- Improved tape edit focus extraction by counting only changed diff lines instead of surrounding context lines. Pi's native edit result returns a numbered diff that includes both changed lines and nearby context lines; tape now ignores those context lines, parses only `+` lines as the primary edit focus, falls back to `-` lines for deletion-only edits, and uses `firstChangedLine` only when no changed line can be extracted.
 - Deprecated and disabled the `memory_list` tool; use `memory_check({ directory })` for directory-scoped memory inspection.
 - Refined tape smart analysis scoring with smooth time decay, BM25-inspired repeated-access saturation, anchor decay boosts, and a clearer multi-signal event score model for selecting active memory and project files.
 
