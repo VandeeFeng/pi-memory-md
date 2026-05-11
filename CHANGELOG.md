@@ -17,9 +17,15 @@ As always, I don't want to rely too much on the agent. When I am not using it, I
 
 In this project, I keep reminding myself to strengthen both sides of the memory design at the same time: for the agent, and also first for human.
 
+As we already know, agent memory has two layers: short-term and long-term. The context window is like RAM: fast, temporary, and limited. Memory files are like disk storage: slower to query, but persistent and easier to organize. I prefer using an index as the entry point into these memory files, then locating the relevant details only when needed. For now, I roughly treat that index as the agent's short-term memory.
+
+I don't have a strong preference between storing memories as files or in a database. I lean toward files mostly because I already take a lot of notes in my daily life, and files feel simpler and more natural to me.
+
+This project should continue to focus on long-term memory. The added `memory-digest` skill is exactly for this. LLM is good at finding connections across large amounts of data, which fits naturally with maintaining long-term memory.
+
 ## Breaking Changes
 
-- Migrated pi package imports and runtime dependencies to the new `@earendil-works/*` npm scope introduced in [pi v0.74.0](https://github.com/earendil-works/pi/releases/tag/v0.74.0). This GitHub version now requires pi packages from `@earendil-works` (`>=0.74.0`). Users on older pi versions should keep using the last npm release.
+- Migrated pi package imports and runtime dependencies to the new `@earendil-works/*` npm scope introduced in [pi v0.74.0](https://github.com/earendil-works/pi/releases/tag/v0.74.0). This GitHub version now requires pi packages from `@earendil-works` (`>=0.74.0`).
 
 ## New Features
 
