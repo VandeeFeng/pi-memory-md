@@ -409,8 +409,8 @@ test("memory_search handles query, grep, rg, and empty results", async () => {
 
   assert.equal(queryResult.details?.count, 1);
   assert.deepEqual(queryResult.details?.files, ["core/project/roadmap.md"]);
-  assert.match(queryResult.content[0]?.text ?? "", /## Tags matching: release/);
-  assert.match(queryResult.content[0]?.text ?? "", /## Description matching: release/);
+  assert.match(queryResult.content[0]?.text ?? "", /## BM25 ranking: release/);
+  assert.match(queryResult.content[0]?.text ?? "", /core\/project\/roadmap\.md \(score: /);
 
   assert.equal(grepResult.details?.count, 1);
   assert.match(grepResult.content[0]?.text ?? "", /## Custom grep: road/);
@@ -421,6 +421,46 @@ test("memory_search handles query, grep, rg, and empty results", async () => {
 
   assert.equal(emptyResult.details?.count, 0);
   assert.match(emptyResult.content[0]?.text ?? "", /No results found for "missing"/);
+});
+
+test("memory_search BM25 ranks English and Chinese queries", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-search-bm25-multilingual");
+  const projectDir = path.join(tempDir, "project");
+  const settings = { localPath: path.join(tempDir, "memory-root") };
+  const memoryDir = path.join(settings.localPath, path.basename(projectDir));
+
+  writeMemoryFile(path.join(memoryDir, "core", "project", "release-plan.md"), "# Release plan\n\nShip roadmap", {
+    description: "Release roadmap and milestones",
+    tags: ["release", "roadmap"],
+  });
+  writeMemoryFile(path.join(memoryDir, "core", "project", "meeting-notes.md"), "# Notes\n\nGeneral updates", {
+    description: "Weekly sync notes",
+    tags: ["notes"],
+  });
+  writeMemoryFile(path.join(memoryDir, "core", "user", "偏好.md"), "# 偏好\n\n我喜欢暗色主题", {
+    description: "用户偏好与工作方式",
+    tags: ["偏好", "主题"],
+  });
+
+  const pi = createMockPi(() => ({ stdout: "" }));
+  registerMemorySearch(pi as never, settings);
+
+  const english = (await executeTool(pi, "memory_search", { query: "release roadmap" }, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { files?: string[]; count?: number };
+  };
+  const chinese = (await executeTool(pi, "memory_search", { query: "用户偏好" }, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { files?: string[]; count?: number };
+  };
+
+  assert.ok((english.details?.count ?? 0) >= 1);
+  assert.match(english.content[0]?.text ?? "", /## BM25 ranking: release roadmap/);
+  assert.match(english.content[0]?.text ?? "", /1\. core\/project\/release-plan\.md \(score: /);
+
+  assert.ok((chinese.details?.count ?? 0) >= 1);
+  assert.match(chinese.content[0]?.text ?? "", /## BM25 ranking: 用户偏好/);
+  assert.match(chinese.content[0]?.text ?? "", /1\. core\/user\/偏好\.md \(score: /);
 });
 
 test("memory_search passes timeout and max-result limits to grep and rg", async () => {

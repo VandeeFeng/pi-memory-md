@@ -4,6 +4,7 @@ import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { bm25SearchMemoryFiles } from "./bm25.js";
 import {
   getMemoryCoreDir,
   getMemoryMeta,
@@ -462,6 +463,27 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
 
       const escapedQuery = query ? query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : null;
       const searchLabel = query ?? grep ?? rg ?? "search";
+
+      if (query) {
+        const bm25Sources: Array<{ filePath: string; scope: "project" | "global" }> = [];
+        for (const root of existingRoots) {
+          const files = await listMemoryFilesAsync(root.coreDir);
+          for (const filePath of files) {
+            bm25Sources.push({ filePath, scope: root.label as "project" | "global" });
+          }
+        }
+
+        const bm25Results = await bm25SearchMemoryFiles(bm25Sources, query, 20);
+        if (bm25Results.length > 0) {
+          const lines = bm25Results.map((item, index) => {
+            const root = existingRoots.find((entry) => entry.label === item.scope);
+            const displayPath = root ? formatMatchedPath(item.path, root.memoryDir, item.scope) : item.path;
+            matchedFiles.set(displayPath, displayPath);
+            return `${index + 1}. ${displayPath} (score: ${item.score.toFixed(3)})`;
+          });
+          sections.push(`## BM25 ranking: ${query}`, ...lines);
+        }
+      }
 
       function formatMatchedPath(filePath: string, memoryDir: string, label: string): string {
         const relativePath = path.relative(memoryDir, filePath);

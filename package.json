@@ -22,7 +22,9 @@
     "coding-agent"
   ],
   "dependencies": {
+    "@orama/orama": "^3.1.12",
     "gray-matter": "^4.0.3",
+    "nodejieba": "^3.5.8",
     "typebox": "^1.1.36"
   },
   "devDependencies": {
@@ -57,7 +59,8 @@
     "skills",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "bm25.ts"
   ],
   "scripts": {
     "prepare": "node .husky/install.mjs",

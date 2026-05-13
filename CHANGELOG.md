@@ -29,6 +29,7 @@ This project should continue to focus on long-term memory. The added `memory-dig
 
 ## New Features
 
+- Added BM25-based ranking for memory retrieval via `@orama/orama`, with Chinese tokenization via `nodejieba`. `memory_search(query)` now uses BM25 ranking by default to prioritize relevant memory files by title/tags/description/content, and tape smart-mode delivery uses the first prompt plus recent anchor summary/purpose/keywords to rank candidate files. Chinese and mixed-language query/index text is segmented before ranking, improving fuzzy-topic recall and reducing noisy top results from pure keyword/recency ordering.
 - Added `memory-digest` skill for turning recent tape anchors and relevant session context into confirmed durable memory updates via `memory-write`.
 
 ## Changed

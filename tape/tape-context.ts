@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import matter from "gray-matter";
+import { bm25SearchMemoryFiles } from "../bm25.js";
 import {
   DEFAULT_MEMORY_SCAN,
   memoryContextHeaderTpl,
@@ -309,7 +310,8 @@ export class MemoryFileSelector {
       return this.scanMemoryDirectoryAsync(limit);
     }
 
-    const selectedPaths = (await this.filterDeliverablePathsAsync(sortPathsByStats(pathStats))).slice(0, limit);
+    const behaviorRanked = (await this.filterDeliverablePathsAsync(sortPathsByStats(pathStats))).slice(0, limit * 3);
+    const selectedPaths = await this.rankByIntentBm25(behaviorRanked, limit, effectiveHours ?? startHours);
     this.lastSmartLineRanges = effectiveHours
       ? analyzeRecentLineRanges(this.getEntriesWithinHours(effectiveHours), {
           targetPaths: selectedPaths,
@@ -564,6 +566,64 @@ export class MemoryFileSelector {
     if (windowEntries.length === 0) return null;
 
     return toTimestamp(windowEntries[windowEntries.length - 1].timestamp);
+  }
+
+  private async rankByIntentBm25(filePaths: string[], limit: number, scanHours: number): Promise<string[]> {
+    const intentQuery = this.getIntentQuery(scanHours);
+    if (!intentQuery.trim()) return filePaths.slice(0, limit);
+
+    const scopedFiles = filePaths.map((filePath) => ({
+      filePath: this.toAbsolutePath(filePath),
+      scope: this.toMemoryRelativePath(this.toAbsolutePath(filePath)) ? "memoryfile" : "external",
+    }));
+
+    const bm25 = await bm25SearchMemoryFiles(scopedFiles, intentQuery, limit * 3);
+    if (bm25.length === 0) return filePaths.slice(0, limit);
+
+    const scoreMap = new Map(
+      bm25.map((item, index) => [path.resolve(item.path), item.score + (bm25.length - index) * 0.001]),
+    );
+    return [...filePaths]
+      .sort(
+        (a, b) =>
+          (scoreMap.get(path.resolve(this.toAbsolutePath(b))) ?? -1) -
+          (scoreMap.get(path.resolve(this.toAbsolutePath(a))) ?? -1),
+      )
+      .slice(0, limit);
+  }
+
+  private getIntentQuery(scanHours: number): string {
+    const entries = this.getEntriesWithinHours(scanHours);
+    const latestUserText = [...entries]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.type === "message" &&
+          (entry as { message?: { role?: string; content?: unknown } }).message?.role === "user",
+      );
+
+    const userContent = (() => {
+      const message = (latestUserText as { message?: { content?: unknown } } | undefined)?.message;
+      if (!message?.content) return "";
+      if (typeof message.content === "string") return message.content;
+      if (!Array.isArray(message.content)) return "";
+      return message.content
+        .map((block) =>
+          typeof block === "object" && block && "text" in block ? String((block as { text?: string }).text ?? "") : "",
+        )
+        .join(" ");
+    })();
+
+    const anchors = this.tapeService.getAnchorStore().search({ since: hoursAgoIso(scanHours), limit: 10 });
+    const anchorText = anchors
+      .slice(-3)
+      .map((anchor) => {
+        const meta = (anchor.meta ?? {}) as { summary?: string; purpose?: string; keywords?: string[] };
+        return [meta.summary, meta.purpose, ...(meta.keywords ?? [])].filter(Boolean).join(" ");
+      })
+      .join(" ");
+
+    return `${userContent} ${anchorText}`.trim();
   }
 
   private async scanMemoryDirectoryAsync(limit: number): Promise<string[]> {
