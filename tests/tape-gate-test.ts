@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   buildKeywordHandoffMessage,
+  buildSessionBridgeContext,
   detectKeywordHandoff,
   normalizeTapeKeywords,
   resolveTapeGate,
@@ -117,4 +118,72 @@ test("buildKeywordHandoffMessage returns the generated instruction text", () => 
   assert.match(message ?? "", /Before continuing, call tape_handoff/);
   assert.doesNotMatch(message ?? "", /- trigger: "keyword"/);
   assert.doesNotMatch(message ?? "", /- keywords:/);
+});
+
+test("buildSessionBridgeContext emits high relevance anchors and messages", async () => {
+  const tempDir = createTempDir("pi-memory-md-session-bridge");
+  const sessionFile = path.join(tempDir, "previous.jsonl");
+  const timestamp = new Date().toISOString();
+  const header = { type: "session", id: "previous-session" };
+  const entries = [
+    {
+      id: "user-1",
+      type: "message",
+      timestamp,
+      message: { role: "user", content: "Let's design session bridge BM25 continuation context." },
+    },
+    {
+      id: "assistant-1",
+      type: "message",
+      timestamp,
+      message: { role: "assistant", content: "session bridge should use tape anchors and relevant context." },
+    },
+  ];
+
+  fs.writeFileSync(sessionFile, [header, ...entries].map((entry) => JSON.stringify(entry)).join("\n"));
+
+  const xml = await buildSessionBridgeContext({
+    previousSessionFile: sessionFile,
+    prompt: "Implement session bridge BM25 relevant context",
+    anchorStore: {
+      scan: () => [
+        {
+          id: "anchor-1",
+          name: "task/session-bridge",
+          type: "handoff",
+          sessionId: "previous-session",
+          sessionEntryId: "assistant-1",
+          timestamp,
+          meta: { summary: "Design session bridge with BM25 relevant context", purpose: "design" },
+        },
+      ],
+    },
+  });
+
+  assert.match(xml ?? "", /<session_bridge>/);
+  assert.match(xml ?? "", /<tape_anchors>/);
+  assert.match(xml ?? "", /<relevant_context>/);
+});
+
+test("buildSessionBridgeContext skips low relevance content", async () => {
+  const tempDir = createTempDir("pi-memory-md-session-bridge-low-score");
+  const sessionFile = path.join(tempDir, "previous.jsonl");
+  const timestamp = new Date().toISOString();
+  const header = { type: "session", id: "previous-session" };
+  const entry = {
+    id: "user-1",
+    type: "message",
+    timestamp,
+    message: { role: "user", content: "Completely unrelated cooking recipe notes." },
+  };
+
+  fs.writeFileSync(sessionFile, [header, entry].map((item) => JSON.stringify(item)).join("\n"));
+
+  const xml = await buildSessionBridgeContext({
+    previousSessionFile: sessionFile,
+    prompt: "Implement TypeScript session bridge",
+    minScore: 999,
+  });
+
+  assert.equal(xml, null);
 });

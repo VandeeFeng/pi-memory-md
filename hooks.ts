@@ -1,8 +1,16 @@
+import type { SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import type { HookAction, HookConfig, HookTrigger, MemoryMdSettings, SyncResult } from "./types.js";
+
+export type SessionStartCause = "runtimeStart" | "switchStart";
+
+export function getSessionStartCause(reason: SessionStartEvent["reason"]): SessionStartCause {
+  return reason === "new" || reason === "resume" || reason === "fork" ? "switchStart" : "runtimeStart";
+}
 
 export const DEFAULT_HOOKS: Required<HookConfig> = {
   sessionStart: ["pull"],
   sessionEnd: [],
+  beforeAgentStart: [],
 };
 
 function isHookAction(value: unknown): value is HookAction {
@@ -14,6 +22,7 @@ export function normalizeHooks(hooks: unknown): HookConfig {
     return {
       sessionStart: [...DEFAULT_HOOKS.sessionStart],
       sessionEnd: [...DEFAULT_HOOKS.sessionEnd],
+      beforeAgentStart: [...DEFAULT_HOOKS.beforeAgentStart],
     };
   }
 
@@ -23,6 +32,7 @@ export function normalizeHooks(hooks: unknown): HookConfig {
     return {
       sessionStart: legacyHooks.onSessionStart === false ? [] : [...DEFAULT_HOOKS.sessionStart],
       sessionEnd: [],
+      beforeAgentStart: [],
     };
   }
 
@@ -35,6 +45,9 @@ export function normalizeHooks(hooks: unknown): HookConfig {
     sessionEnd: Array.isArray(config.sessionEnd)
       ? config.sessionEnd.filter(isHookAction)
       : [...DEFAULT_HOOKS.sessionEnd],
+    beforeAgentStart: Array.isArray(config.beforeAgentStart)
+      ? config.beforeAgentStart.filter(isHookAction)
+      : [...DEFAULT_HOOKS.beforeAgentStart],
   };
 }
 

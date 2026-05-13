@@ -6,7 +6,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { getHookActions, runHookTrigger } from "./hooks.js";
+import { getHookActions, getSessionStartCause, runHookTrigger } from "./hooks.js";
 import {
   buildMemoryContextAsync,
   countMemoryContextFiles,
@@ -24,6 +24,9 @@ import { MemoryFileSelector } from "./tape/tape-context.js";
 import {
   detectKeywordHandoff,
   type KeywordHandoffInstruction,
+  type PreparedSessionBridge,
+  prepareSessionBridge,
+  renderSessionBridge,
   resolveTapeGate,
   shouldBlockTapeHandoffCall,
   type TapeGateResult,
@@ -52,6 +55,11 @@ type ExtensionState = {
     selector: MemoryFileSelector;
     cacheKey: string;
   } | null;
+  sessionBridge: {
+    previousSessionFile?: string;
+    delivered: boolean;
+    warmupPromise?: Promise<PreparedSessionBridge | null>;
+  };
 };
 
 function createExtensionState(): ExtensionState {
@@ -65,6 +73,7 @@ function createExtensionState(): ExtensionState {
     pendingHandoffMatch: null,
     tapeGate: null,
     activeTapeRuntime: null,
+    sessionBridge: { delivered: false },
   };
 }
 
@@ -297,12 +306,52 @@ function handleTapeBeforeAgentStart(
   return { tapeEnabled, tapeActive };
 }
 
+function appendSessionBridge(content: string, sessionBridgeContext: string | null): string {
+  return sessionBridgeContext ? `${content}\n\n${sessionBridgeContext}` : content;
+}
+
+function queueSessionBridgeMessage(pi: ExtensionAPI, sessionBridgeContext: string | null): void {
+  if (!sessionBridgeContext) return;
+
+  pi.sendMessage(
+    { customType: "pi-memory-md-session-bridge", content: sessionBridgeContext, display: false },
+    { triggerTurn: false },
+  );
+}
+
+function scheduleSessionBridgeWarmup(settings: MemoryMdSettings, state: ExtensionState): void {
+  if (!getHookActions(settings, "beforeAgentStart").includes("sessionBridge")) return;
+  if (!state.sessionBridge.previousSessionFile) return;
+
+  state.sessionBridge.warmupPromise = prepareSessionBridge({
+    previousSessionFile: state.sessionBridge.previousSessionFile,
+    anchorStore: state.activeTapeRuntime?.service.getAnchorStore(),
+  }).catch(() => null);
+}
+
+async function maybeBuildSessionBridgeContext(
+  settings: MemoryMdSettings,
+  state: ExtensionState,
+  event: BeforeAgentStartEvent,
+): Promise<string | null> {
+  if (state.sessionBridge.delivered) return null;
+  state.sessionBridge.delivered = true;
+
+  if (!getHookActions(settings, "beforeAgentStart").includes("sessionBridge")) return null;
+
+  return renderSessionBridge({
+    prepared: (await state.sessionBridge.warmupPromise) ?? null,
+    prompt: event.prompt,
+  });
+}
+
 function deliverStartupContext(
   settings: MemoryMdSettings,
   state: ExtensionState,
   ctx: ExtensionContext,
   event: BeforeAgentStartEvent,
   tapeState: { tapeEnabled: boolean; tapeActive: boolean },
+  sessionBridgeContext: string | null,
 ): BeforeAgentStartEventResult | undefined {
   const mode = settings.delivery ?? settings.injection ?? "message-append";
   const shouldDeliverInitialContext = mode === "system-prompt" || !state.hasDeliveredInitialContext;
@@ -316,7 +365,13 @@ function deliverStartupContext(
     }
 
     state.hasDeliveredInitialContext = true;
-    return { message: { customType: "pi-memory-md-tape", content, display: false } };
+    return {
+      message: {
+        customType: "pi-memory-md-tape",
+        content: appendSessionBridge(content, sessionBridgeContext),
+        display: false,
+      },
+    };
   }
 
   if (tapeState.tapeEnabled && !tapeState.tapeActive) return undefined;
@@ -327,10 +382,21 @@ function deliverStartupContext(
 
     if (mode === "message-append") {
       state.hasDeliveredInitialContext = true;
-      return { message: { customType: "pi-memory-md", content, display: false } };
+      return {
+        message: {
+          customType: "pi-memory-md",
+          content: appendSessionBridge(content, sessionBridgeContext),
+          display: false,
+        },
+      };
     }
 
     return { systemPrompt: `${event.systemPrompt}\n\n${content}` };
+  }
+
+  if (sessionBridgeContext && shouldDeliverInitialContext && mode === "message-append") {
+    state.hasDeliveredInitialContext = true;
+    return { message: { customType: "pi-memory-md-session-bridge", content: sessionBridgeContext, display: false } };
   }
 
   return undefined;
@@ -347,7 +413,14 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
   });
 
   pi.on("session_start", async (event, ctx) => {
+    state.hasDeliveredInitialContext = false;
+    state.sessionBridge = {
+      previousSessionFile: ["new", "resume", "fork"].includes(event.reason) ? event.previousSessionFile : undefined,
+      delivered: false,
+    };
+
     ensureTapeRuntime(settings, state, ctx, { recordSessionStart: true, sessionStartReason: event.reason });
+    scheduleSessionBridgeWarmup(settings, state);
 
     if (!state.tapeToolsRegistered) {
       registerAllTapeTools(
@@ -363,19 +436,19 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       state.tapeToolsRegistered = true;
     }
 
-    if (event.previousSessionFile && (event.reason === "new" || event.reason === "fork")) {
-      state.sessionStartHookPromise = null;
-      initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: false });
-      return;
-    }
-
-    initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: true });
+    initDeliveryContent(pi, settings, state, ctx, {
+      runSessionStartHooks: getSessionStartCause(event.reason) === "runtimeStart",
+    });
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     await prepareBeforeAgentStart(pi, settings, state, ctx);
     const tapeState = handleTapeBeforeAgentStart(pi, settings, state, ctx, event);
-    return deliverStartupContext(settings, state, ctx, event, tapeState);
+    const sessionBridgeContext = await maybeBuildSessionBridgeContext(settings, state, event);
+    if ((settings.delivery ?? settings.injection ?? "message-append") === "system-prompt") {
+      queueSessionBridgeMessage(pi, sessionBridgeContext);
+    }
+    return deliverStartupContext(settings, state, ctx, event, tapeState, sessionBridgeContext);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {

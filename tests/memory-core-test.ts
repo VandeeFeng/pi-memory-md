@@ -90,6 +90,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
     assert.deepEqual(settings.hooks, {
       sessionStart: ["pull"],
       sessionEnd: [],
+      beforeAgentStart: [],
     });
     assert.equal(settings.memoryDir?.globalMemory, "global");
     assert.equal(getGlobalMemoryDir(settings), path.join(tempHome, "global-memory", "global"));

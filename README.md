@@ -159,6 +159,7 @@ When tape mode is enabled, the same delivery mode still applies, but tape change
 - `sessionStart: ["pull"]`: sync from upstream, fresh fetch/pull evidence within 12 hours skips another fetch.
   This avoids repeated network checks on every new session while still refreshing upstream periodically.
 - `sessionEnd: ["push"]`: commit and push memory when the session ends.
+- `beforeAgentStart: ["sessionBridge"]`: bridge prompt-relevant context from recent `new`/`resume`/`fork` previous sessions.
 
 More trigger actions will be added later, even custom hooks.
 
@@ -187,7 +188,8 @@ More trigger actions will be added later, even custom hooks.
     "delivery": "message-append",
     "hooks": {
       "sessionStart": ["pull"],
-      "sessionEnd": ["push"]
+      "sessionEnd": ["push"],
+      "beforeAgentStart": ["sessionBridge"]
     }
   }
 }
@@ -202,6 +204,7 @@ More trigger actions will be added later, even custom hooks.
 | `delivery` | `"message-append"` | Memory delivery mode: `"message-append"`, `"system-prompt"` |
 | `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts, `pull` syncs from upstream and skips another fetch when `FETCH_HEAD` is fresh within 12 hours |
 | `hooks.sessionEnd` | `[]` | Actions to run when a session ends |
+| `hooks.beforeAgentStart` | `[]` | Actions to run before the agent starts; `sessionBridge` bridges relevant context from recent `new`/`resume`/`fork` previous sessions |
 | `tape.enabled` | `false` | Enable tape mode for dynamic context selection |
 
 When settings change, run `/reload` to apply them.

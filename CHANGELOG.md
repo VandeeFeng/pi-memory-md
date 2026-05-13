@@ -23,17 +23,23 @@ I don't have a strong preference between storing memories as files or in a datab
 
 This project should continue to focus on long-term memory. The added `memory-digest` skill is exactly for this. LLM is good at finding connections across large amounts of data, which fits naturally with maintaining long-term memory.
 
+The `sessionBridge` hook is a tiny handoff for closely related session switches. On `new`, `resume`, or `fork`, when the previous session's last entry is within the bridge window (60 seconds by default), a small BM25 index is built from its user/assistant messages, and the prepared index is held until the next `before_agent_start`. At that point the current prompt queries the index, and only matches above the score threshold are rendered into a compact `<session_bridge>` block.
+
+When tape-mode is on, `sessionBridge` also scans handoff anchors and builds a separate BM25 index from each anchor's name, summary, and purpose. Those anchor matches are rendered as an extra `<tape_anchors>` section. Without tape, the message bridge still works.
+
 ## Breaking Changes
 
 - Migrated pi package imports and runtime dependencies to the new `@earendil-works/*` npm scope introduced in [pi v0.74.0](https://github.com/earendil-works/pi/releases/tag/v0.74.0). This GitHub version now requires pi packages from `@earendil-works` (`>=0.74.0`).
 
 ## New Features
 
+- Added `hooks.beforeAgentStart: ["sessionBridge"]`, an opt-in bridge for closely related `new`/`resume`/`fork` sessions. It indexes recent previous session messages, plus handoff anchors when tape is active, and sends only prompt-relevant matches to the next agent turn. In `message-append` delivery it joins the startup memory message; in `system-prompt` delivery it is sent as a hidden bridge message.
 - Added BM25-based ranking for memory retrieval via `@orama/orama`, with Chinese tokenization via `nodejieba`. `memory_search(query)` now uses BM25 ranking by default to prioritize relevant memory files by title/tags/description/content, and tape smart-mode delivery uses the first prompt plus recent anchor summary/purpose/keywords to rank candidate files. Chinese and mixed-language query/index text is segmented before ranking, improving fuzzy-topic recall and reducing noisy top results from pure keyword/recency ordering.
 - Added `memory-digest` skill for turning recent tape anchors and relevant session context into confirmed durable memory updates via `memory-write`.
 
 ## Changed
 
+- Classified pi's native `session_start` reasons into `runtimeStart` (`startup`/`reload`) and `switchStart` (`new`/`resume`/`fork`) so the `sessionStart` hook type maps to our runtime-start lifecycle, while switch starts remain available for `previousSessionFile`-based bridge context.
 - Updated `tape_read` formatted output controls: defaults to 300 content characters per entry, accepts `maxContentChars` for custom truncation, and uses `maxContentChars: null` for full content.
 - Improved tape edit focus extraction by counting only changed diff lines instead of surrounding context lines. Pi's native edit result returns a numbered diff that includes both changed lines and nearby context lines; tape now ignores those context lines, parses only `+` lines as the primary edit focus, falls back to `-` lines for deletion-only edits, and uses `firstChangedLine` only when no changed line can be extracted.
 - Deprecated and disabled the `memory_list` tool; use `memory_check({ directory })` for directory-scoped memory inspection.

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { create, insertMultiple, search } from "@orama/orama";
+import { type AnyOrama, create, insertMultiple, search } from "@orama/orama";
 import matter from "gray-matter";
 
 type Bm25Doc<Scope extends string> = {
@@ -13,10 +13,25 @@ type Bm25Doc<Scope extends string> = {
   content: string;
 };
 
+type GenericBm25Doc<T> = {
+  id: string;
+  content: string;
+  data: T;
+};
+
+export type PreparedBm25Docs<T> = {
+  db: AnyOrama;
+  readonly __dataType?: T;
+};
+
 const HAN_REGEX = /\p{Script=Han}/u;
 
 type JiebaModule = {
-  default?: { cut?: (text: string, hmm?: boolean) => string[] };
+  default?: {
+    cutForSearch?: (text: string, hmm?: boolean) => string[];
+    cut?: (text: string, hmm?: boolean) => string[];
+  };
+  cutForSearch?: (text: string, hmm?: boolean) => string[];
   cut?: (text: string, hmm?: boolean) => string[];
 };
 
@@ -24,7 +39,10 @@ let jiebaCutPromise: Promise<((text: string, hmm?: boolean) => string[]) | null>
 
 async function getJiebaCut(): Promise<((text: string, hmm?: boolean) => string[]) | null> {
   jiebaCutPromise ??= import("nodejieba")
-    .then((module: JiebaModule) => module.default?.cut ?? module.cut ?? null)
+    .then(
+      (module: JiebaModule) =>
+        module.default?.cutForSearch ?? module.cutForSearch ?? module.default?.cut ?? module.cut ?? null,
+    )
     .catch(() => null);
   return jiebaCutPromise;
 }
@@ -42,6 +60,60 @@ async function normalizeForBm25(text: string): Promise<string> {
   const tokens = rawTokens.map((token) => token.trim()).filter(Boolean);
   const encodedTokens = tokens.map((token) => `zh_${Buffer.from(token, "utf8").toString("hex")}`);
   return `${text} ${tokens.join(" ")} ${encodedTokens.join(" ")}`.trim();
+}
+
+export async function prepareBm25Docs<T>(
+  docs: Array<{ id: string; content: string; data: T }>,
+): Promise<PreparedBm25Docs<T> | null> {
+  const normalizedDocs: Array<GenericBm25Doc<T>> = [];
+
+  for (const doc of docs) {
+    const content = await normalizeForBm25(doc.content);
+    if (!content) continue;
+    normalizedDocs.push({ ...doc, content });
+  }
+
+  if (normalizedDocs.length === 0) return null;
+
+  const db = await create({
+    schema: {
+      id: "string",
+      content: "string",
+    },
+    components: {
+      tokenizer: { language: "english" },
+    },
+  });
+
+  await insertMultiple(db, normalizedDocs);
+  return { db };
+}
+
+export async function searchPreparedBm25Docs<T>(
+  prepared: PreparedBm25Docs<T> | null,
+  query: string,
+  limit = 20,
+): Promise<Array<{ data: T; score: number }>> {
+  if (!prepared) return [];
+
+  const result = await search(prepared.db, {
+    term: await normalizeForBm25(query),
+    properties: ["content"],
+    limit,
+  });
+
+  return result.hits.map((hit) => ({
+    data: (hit.document as GenericBm25Doc<T>).data,
+    score: hit.score,
+  }));
+}
+
+export async function bm25SearchDocs<T>(
+  docs: Array<{ id: string; content: string; data: T }>,
+  query: string,
+  limit = 20,
+): Promise<Array<{ data: T; score: number }>> {
+  return searchPreparedBm25Docs(await prepareBm25Docs(docs), query, limit);
 }
 
 export async function bm25SearchMemoryFiles<Scope extends string>(

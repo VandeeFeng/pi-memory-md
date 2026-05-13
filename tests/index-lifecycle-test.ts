@@ -86,7 +86,7 @@ function setupMemoryProject(homeDir: string, projectDir: string): { localPath: s
   return { localPath, memoryDir };
 }
 
-test("session_start registers tape tools only once and skips start hooks for replaced new/fork sessions", async () => {
+test("session_start registers tape tools only once and skips start hooks for replaced sessions", async () => {
   const homeDir = createTempDir("pi-memory-md-lifecycle-home-1");
   const projectDir = createTempDir("pi-memory-md-lifecycle-project-1");
   const { localPath } = setupMemoryProject(homeDir, projectDir);
@@ -102,7 +102,7 @@ test("session_start registers tape tools only once and skips start hooks for rep
   });
 
   const harness = bootExtension(homeDir, projectDir, async () => {
-    throw new Error("sessionStart hook should not run for new/fork");
+    throw new Error("sessionStart hook should not run for new/resume/fork");
   });
   const sessionStart = harness.handlers.get("session_start");
   assert.ok(sessionStart);
@@ -115,14 +115,18 @@ test("session_start registers tape tools only once and skips start hooks for rep
     { reason: "fork", previousSessionFile: "/tmp/old-session.jsonl" },
     { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
   );
+  await sessionStart?.(
+    { reason: "resume", previousSessionFile: "/tmp/old-session.jsonl" },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
 
   assert.equal(harness.execCalls.length, 0);
   assert.equal(harness.registeredTools.filter((name) => name === "tape_handoff").length, 1);
 });
 
-test("session_start runs start hooks for startup-created new sessions", async () => {
-  const homeDir = createTempDir("pi-memory-md-lifecycle-home-startup-new");
-  const projectDir = createTempDir("pi-memory-md-lifecycle-project-startup-new");
+test("session_start runs start hooks for startup sessions", async () => {
+  const homeDir = createTempDir("pi-memory-md-lifecycle-home-startup");
+  const projectDir = createTempDir("pi-memory-md-lifecycle-project-startup");
   const { localPath } = setupMemoryProject(homeDir, projectDir);
   initGitRepo(localPath);
 
@@ -146,7 +150,10 @@ test("session_start runs start hooks for startup-created new sessions", async ()
   const sessionStart = harness.handlers.get("session_start");
   const beforeAgentStart = harness.handlers.get("before_agent_start");
 
-  await sessionStart?.({ reason: "new" }, { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() });
+  await sessionStart?.(
+    { reason: "startup" },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+  );
   await beforeAgentStart?.(
     { prompt: "hello", systemPrompt: "SYSTEM" },
     { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
@@ -158,7 +165,7 @@ test("session_start runs start hooks for startup-created new sessions", async ()
   );
 });
 
-test("session_start runs start hooks for resume-like sessions and before_agent_start waits for them", async () => {
+test("session_start runs start hooks for startup sessions and before_agent_start waits for them", async () => {
   const homeDir = createTempDir("pi-memory-md-lifecycle-home-2");
   const projectDir = createTempDir("pi-memory-md-lifecycle-project-2");
   const { localPath } = setupMemoryProject(homeDir, projectDir);
@@ -190,7 +197,7 @@ test("session_start runs start hooks for resume-like sessions and before_agent_s
   const beforeAgentStart = harness.handlers.get("before_agent_start");
   const ui = createUi();
 
-  await sessionStart?.({ reason: "resume" }, { cwd: projectDir, ui, sessionManager: createSessionManager() });
+  await sessionStart?.({ reason: "startup" }, { cwd: projectDir, ui, sessionManager: createSessionManager() });
   const result = await beforeAgentStart?.(
     { prompt: "hello", systemPrompt: "SYSTEM" },
     { cwd: projectDir, ui, sessionManager: createSessionManager() },

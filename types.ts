@@ -45,8 +45,8 @@ export interface MemoryMeta extends ProjectMeta {
   };
 }
 
-export type HookTrigger = "sessionStart" | "sessionEnd";
-export type BuiltinHookAction = "pull" | "push";
+export type HookTrigger = "sessionStart" | "sessionEnd" | "beforeAgentStart";
+export type BuiltinHookAction = "pull" | "push" | "sessionBridge";
 export type HookAction = BuiltinHookAction | (string & {});
 export type HookConfig = Partial<Record<HookTrigger, HookAction[]>>;
 export type MemoryDeliveryMode = "system-prompt" | "message-append";
