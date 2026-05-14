@@ -67,5 +67,8 @@
     "check": "biome check --write --error-on-warnings . && tsgo --noEmit",
     "test": "node --import tsx --test --test-concurrency=1 tests/*-test.ts",
     "test:file": "node --import tsx --test"
+  },
+  "overrides": {
+    "tar": "7.5.15"
   }
 }
