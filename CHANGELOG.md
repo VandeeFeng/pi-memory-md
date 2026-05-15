@@ -47,6 +47,7 @@ When tape-mode is on, `sessionBridge` also scans handoff anchors and builds a se
 
 ## Fixed
 
+- Skipped empty tape delivery when no memory/project files are selected; tape context builders now return `null` for no content and omit empty sections, avoiding blank custom messages or system-prompt additions.
 - `tape_search` now falls back from session-scope entry and anchor search to project-scope search when the session has no matching results.
 
 ## [0.1.36] - 2026-05-06

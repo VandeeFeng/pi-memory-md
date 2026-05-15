@@ -148,15 +148,17 @@ async function cacheInitialContext(
   const memoryFiles = await tapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
   const selectedFiles = await tapeRuntime.selector.finalizeContextFiles(memoryFiles);
 
+  if (selectedFiles.length === 0) {
+    state.initialTapeContext = null;
+    return;
+  }
+
   const content = await tapeRuntime.selector.buildContextFromFilesAsync(selectedFiles, {
     highlightedFiles: [...new Set(memoryFiles.filter((filePath) => selectedFiles.includes(filePath)))].slice(0, 3),
     handoffMode: settings.tape?.anchor?.mode ?? "auto",
   });
 
-  state.initialTapeContext = {
-    content,
-    fileCount: selectedFiles.length,
-  };
+  state.initialTapeContext = content?.trim() ? { content, fileCount: selectedFiles.length } : null;
 }
 
 function scheduleContextWarmup(
@@ -321,8 +323,16 @@ function deliverStartupContext(
   const mode = settings.delivery ?? settings.injection ?? "message-append";
   const shouldDeliverInitialContext = mode === "system-prompt" || !state.hasDeliveredInitialContext;
 
-  if (tapeState.tapeActive && state.initialTapeContext && shouldDeliverInitialContext) {
-    const { content, fileCount } = state.initialTapeContext;
+  if (tapeState.tapeActive && shouldDeliverInitialContext) {
+    const tapeContext = state.initialTapeContext;
+    if (!tapeContext || tapeContext.content.trim().length === 0) {
+      if (mode === "message-append") {
+        state.hasDeliveredInitialContext = true;
+      }
+      return undefined;
+    }
+
+    const { content, fileCount } = tapeContext;
     ctx.ui.notify(`Tape mode: ${fileCount} memory files delivered (${mode})`, "info");
 
     if (mode === "system-prompt") {

@@ -326,10 +326,10 @@ export class MemoryFileSelector {
   async buildContextFromFilesAsync(
     filePaths: string[],
     options?: { highlightedFiles?: string[]; lineRangeHours?: number; handoffMode?: "auto" | "manual" },
-  ): Promise<string> {
+  ): Promise<string | null> {
     const { fileEntries, highlightedPaths, rangeMap } = this.prepareContextEntries(filePaths, options);
     if (fileEntries.length === 0) {
-      return "";
+      return null;
     }
 
     return this.renderContextFromEntriesAsync(fileEntries, highlightedPaths, rangeMap, options?.handoffMode);
@@ -390,8 +390,12 @@ export class MemoryFileSelector {
     const lines = memoryContextHeaderTpl("tape", { handoffMode });
     const groupedEntries = this.groupContextEntries(fileEntries);
 
-    await this.appendMemoryEntriesAsync(lines, groupedEntries.memoryEntries, highlightedPaths, rangeMap);
-    this.appendProjectEntries(lines, groupedEntries.projectEntries, highlightedPaths, rangeMap);
+    if (groupedEntries.memoryEntries.length > 0) {
+      await this.appendMemoryEntriesAsync(lines, groupedEntries.memoryEntries, highlightedPaths, rangeMap);
+    }
+    if (groupedEntries.projectEntries.length > 0) {
+      this.appendProjectEntries(lines, groupedEntries.projectEntries, highlightedPaths, rangeMap);
+    }
 
     lines.push("</memory_context>");
     return lines.join("\n");
@@ -400,7 +404,6 @@ export class MemoryFileSelector {
   private groupContextEntries(fileEntries: ContextFileEntry[]): {
     memoryEntries: ContextFileEntry[];
     projectEntries: ContextFileEntry[];
-    hasMemory: boolean;
   } {
     const memoryEntries: ContextFileEntry[] = [];
     const projectEntries: ContextFileEntry[] = [];
@@ -413,11 +416,7 @@ export class MemoryFileSelector {
       }
     }
 
-    return {
-      memoryEntries,
-      projectEntries,
-      hasMemory: memoryEntries.length > 0,
-    };
+    return { memoryEntries, projectEntries };
   }
 
   private async appendMemoryEntriesAsync(
@@ -427,11 +426,6 @@ export class MemoryFileSelector {
     rangeMap: Map<string, LineRange[]>,
   ): Promise<void> {
     lines.push("<memory_files>");
-
-    if (memoryEntries.length === 0) {
-      lines.push("empty", "</memory_files>");
-      return;
-    }
 
     const frontmatters = await Promise.all(
       memoryEntries.map((entry) => this.extractFrontmatterAsync(entry.absolutePath)),
@@ -479,11 +473,6 @@ export class MemoryFileSelector {
     rangeMap: Map<string, LineRange[]>,
   ): void {
     lines.push("<active_project_files>");
-
-    if (projectEntries.length === 0) {
-      lines.push("empty", "</active_project_files>");
-      return;
-    }
 
     for (const entry of projectEntries) {
       const priority = highlightedPaths.has(entry.absolutePath) ? "high" : "normal";

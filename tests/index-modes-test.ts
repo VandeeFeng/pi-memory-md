@@ -274,6 +274,49 @@ test("before_agent_start skips tape delivery and anchor recording when onlyGit i
   assert.equal(fs.existsSync(path.join(localPath, "TAPE")), false);
 });
 
+test("before_agent_start skips empty tape delivery when selected file count is zero", async () => {
+  for (const delivery of ["message-append", "system-prompt"] as const) {
+    const homeDir = createTempDir(`pi-memory-md-index-mode-home-empty-tape-${delivery}`);
+    const projectDir = createTempDir(`pi-memory-md-index-mode-project-empty-tape-${delivery}`);
+    const localPath = path.join(homeDir, "memory-root");
+    const memoryDir = path.join(localPath, path.basename(projectDir));
+    fs.mkdirSync(path.join(memoryDir, "core"), { recursive: true });
+    initGitRepo(projectDir);
+
+    writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
+      "pi-memory-md": {
+        localPath,
+        delivery,
+        tape: {
+          enabled: true,
+          context: { strategy: "recent-only", fileLimit: 5 },
+        },
+      },
+    });
+
+    const extension = bootExtension(homeDir, projectDir);
+    const beforeAgentStart = extension.handlers.get("before_agent_start");
+    const ui = createUi();
+
+    const result = await beforeAgentStart?.(
+      { prompt: "hello", systemPrompt: "SYSTEM" },
+      { cwd: projectDir, ui, sessionManager: createSessionManager() },
+    );
+    const secondResult = await beforeAgentStart?.(
+      { prompt: "hello again", systemPrompt: "SYSTEM" },
+      { cwd: projectDir, ui, sessionManager: createSessionManager() },
+    );
+
+    assert.equal(result, undefined);
+    assert.equal(secondResult, undefined);
+    assert.equal(extension.sentMessages.length, 0);
+    assert.equal(
+      ui.notifications.some((item) => item.message.includes("Tape mode:")),
+      false,
+    );
+  }
+});
+
 test("before_agent_start skips tape delivery when cwd matches excluded dirs", async () => {
   const homeDir = createTempDir("pi-memory-md-index-mode-home-excluded");
   const blockedRoot = createTempDir("pi-memory-md-index-mode-blocked-root");

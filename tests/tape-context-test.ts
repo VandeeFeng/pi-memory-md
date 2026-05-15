@@ -276,6 +276,7 @@ test("MemoryFileSelector buildContextFromFilesAsync renders highlights and line 
     lineRangeHours: 6,
   });
 
+  assert.ok(context);
   assert.match(context, /<memory_context mode="tape">/);
   assert.match(context, new RegExp(`- path: ${memoryPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   // assert.match(context, / {2}recent focus: read 3-6/);  // memory_read removed
@@ -285,6 +286,31 @@ test("MemoryFileSelector buildContextFromFilesAsync renders highlights and line 
   assert.match(context, new RegExp(projectFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(context, / {2}recent focus: read 20-22, edit 13-13/);
   assert.match(context, /priority: high/);
+});
+
+test("MemoryFileSelector omits empty tape context sections", async () => {
+  const tempDir = createTempDir("pi-memory-md-selector-no-empty-sections");
+  const memoryDir = path.join(tempDir, "memory");
+  const projectRoot = path.join(tempDir, "project");
+  const memoryPath = path.join(memoryDir, "core", "user", "identity.md");
+  const projectFile = path.join(projectRoot, "src", "index.ts");
+
+  writeMemoryFile(memoryPath, "# Identity", { description: "Identity", tags: ["user"] });
+  fs.mkdirSync(path.dirname(projectFile), { recursive: true });
+  fs.writeFileSync(projectFile, "export const ok = true;\n");
+
+  const selector = new MemoryFileSelector(createMockTapeService([]) as never, memoryDir, projectRoot);
+  const memoryOnly = await selector.buildContextFromFilesAsync([memoryPath]);
+  const projectOnly = await selector.buildContextFromFilesAsync([projectFile]);
+
+  assert.ok(memoryOnly);
+  assert.ok(projectOnly);
+  assert.match(memoryOnly, /<memory_files>/);
+  assert.doesNotMatch(memoryOnly, /<active_project_files>/);
+  assert.doesNotMatch(memoryOnly, /\nempty\n/);
+  assert.match(projectOnly, /<active_project_files>/);
+  assert.doesNotMatch(projectOnly, /<memory_files>/);
+  assert.doesNotMatch(projectOnly, /\nempty\n/);
 });
 
 test("MemoryFileSelector line ranges follow the effective smart scan window", async () => {
@@ -324,6 +350,7 @@ test("MemoryFileSelector line ranges follow the effective smart scan window", as
   });
 
   assert.deepEqual(files, [projectFile]);
+  assert.ok(context);
   assert.match(context, /recent focus: read 50-51, read 40-41, read 30-31, read 20-21, read 10-11/);
   assert.doesNotMatch(context, /90-91/);
 });
