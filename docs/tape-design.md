@@ -5,6 +5,15 @@ Tape mode is an **anchor-based conversation history management system** that use
 ## Design Philosophy
 **"On-demand memory, intelligent retrieval"**
 
+Each new agent conversation lacks continuous memory, and larger context windows do not automatically mean more effective context. pi-memory-md therefore treats input quality, indexing, and deliberate retrieval as more important than dumping more history into the prompt.
+
+The memory model is intentionally split like a computer system:
+- **Context window as RAM**: fast, temporary, limited, and not always reliable.
+- **Markdown memory files as disk**: persistent, grep-able, human-editable, and easier to organize.
+- **Anchors and metadata as the index**: a compact entry point that helps both humans and agents locate the right details only when needed.
+
+This is human-first as much as agent-first. The files should remain useful even without an agent: the user can grep tags, anchors, descriptions, and paths manually, build their own mental model, and then pass selected context to the agent. Agent retrieval should assist this workflow, not replace it.
+
 Tape mode is inspired by:
 - **LSTM memory** - Sequential context with checkpoint gates
 - **Git workflow** - Anchors as commits, conversation as branches
@@ -12,7 +21,12 @@ Tape mode is inspired by:
 
 Tape mode stores anchors as points within pi session entries, using them as the source of truth. Context delivery then selects relevant memory files and recently active project files based on configured strategy, optionally including concise `recent focus` hints. Lifecycle anchors (`session/*`) are created automatically, while handoff anchors can be created via `/memory-anchor` manually. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked, which means the agent will not create anchors automatically, though keyword-matched hidden instructions and `/memory-anchor` still work. Keyword detection can send a hidden message to guide the agent to create a keyword anchor, but the agent may refuse when unnecessary. This combination of anchors and keywords balances the agent's autonomy with user control.
 
-For pi TUI compatibility, anchor names are mirrored into `/tree` as inline labels on the session nodes they attach to. During resync, tape clears existing anchor-prefixed labels before rebuilding them to avoid stale labels on old nodes.
+The design now separates three memory horizons:
+- **Immediate delivery**: session-start warmup builds memory/tape context once and delivers it through `message-append` or `system-prompt`.
+- **Short bridge**: the optional `sessionBridge` hook uses a small BM25 index over the previous session and recent handoff anchors to carry only prompt-relevant continuity across `new` / `resume` / `fork` switches.
+- **Durable memory**: the `memory-digest` skill turns recent tape anchors and selected session context into confirmed long-term Markdown memory updates.
+
+For pi TUI compatibility, anchor names are mirrored into `/tree` as inline labels on the session nodes they attach to. During resync, tape clears existing anchor-prefixed labels before rebuilding them to avoid stale labels on old nodes. `/memory-review` adds a separate human-facing overlay for browsing, searching, deleting, and jumping to anchors without asking the agent to search for every handoff.
 
 ### Architecture Overview
 
@@ -87,11 +101,11 @@ Current JSONL write order is: `id`, `timestamp`, `name`, `type`, `meta`, `sessio
 
 **Key Methods:**
 - `append(entry)` - Add new anchor to store
-- `findByName(name)` - Find anchor by name
-- `findBySession(sessionId)` - Get anchors for session
-- `findBySessionEntryId(sessionEntryId, sessionId?)` - Get anchors attached to a specific session node
-- `getLastAnchor(sessionId)` - Get most recent anchor
-- `search({ query, since, until })` - Search anchors
+- `removeById(id)` - Delete an anchor and rebuild the JSONL index
+- `getAllAnchors()` - Return the in-memory anchor list
+- `scan(options)` - Unified anchor filtering by id/name/session/sessionEntry/type/time/meta fields, with `mode: "latest" | "all"`
+- `search(options)` - User-facing search wrapper over `scan`, with limit handling
+- `clear()` - Remove the anchor index and reset in-memory maps
 
 ### 3. Tape Service (`tape/tape-service.ts`)
 
@@ -103,11 +117,14 @@ class TapeService {
   createAnchor(name: string, type: "session" | "handoff", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
   recordSessionStart(reason?: "startup" | "reload" | "new" | "resume" | "fork"): TapeAnchor
   deleteAnchor(id: string): TapeAnchor | null
-  findAnchorByName(name: string, anchorScope?: "current-session" | "project"): TapeAnchor | null
-  getLastAnchor(anchorScope?: "current-session" | "project"): TapeAnchor | null
+  findAnchorByName(name: string, anchorScope?: "session" | "project"): TapeAnchor | null
+  getLastAnchor(anchorScope?: "session" | "project"): TapeAnchor | null
 
   // Query operations (reads from pi session)
-  query(options: TapeQueryOptions & { since?: string }): SessionEntry[]
+  scan(options: TapeSessionScanOptions & { since?: string }): SessionEntry[]
+  scanEntriesWithFallback(options: TapeSessionScanOptions): SessionEntry[]
+  searchAnchorsWithFallback(options: TapeAnchorScanOptions): TapeAnchor[]
+  getAnchorStore(): AnchorStore
   getInfo(): {
     totalEntries: number;
     anchorCount: number;
@@ -125,7 +142,7 @@ class TapeService {
 - Exists as an internal helper; current runtime delivery is driven by `MemoryFileSelector`
 
 **MemoryFileSelector**: Intelligently selects memory and project files
-- **Smart strategy**: Scans recent project history within a configurable time window (`memoryScan`), expands up to the max window when samples are too small, and ranks files with handoff-first weighting
+- **Smart strategy**: Scans recent project history within a configurable time window (`memoryScan`), expands up to the max window when samples are too small, ranks files with handoff-first weighting, then BM25 re-ranks candidates against the current intent
 - **Recent focus extraction**: After smart selection picks files, extracts up to 5 concise `recent focus` ranges per selected file from recent `read` / `edit` activity within the same effective smart-scan window
 - **Keyword handoff helper**: Normalizes configured keywords and builds a hidden handoff instruction when a user prompt in the `[10, 300]` character range matches a keyword
 - **Recent-only strategy**: Scans memory files and returns the most recently modified files
@@ -140,9 +157,9 @@ Seven tools registered with pi extension API:
 
 ```typescript
 tape_handoff(
-  name: string,                    // Anchor name (e.g., "task/begin", "handoff")
-  summary?: string,                // Optional summary
-  meta?: Record<string, unknown>   // Optional metadata (for example trigger or keywords)
+  name: string,        // Anchor name (e.g., "task/begin", "task/complete", "handoff")
+  summary?: string,    // Brief intent summary, under 18 words
+  purpose?: string     // 1-2 word label for the anchor purpose
 )
 ```
 
@@ -177,7 +194,7 @@ tape_list(
 )
 ```
 
-**Returns:** Anchor list with timestamps, kind, meta, and entry context
+**Returns:** Anchor list with timestamps, type, meta, and nearby entry context
 
 ---
 
@@ -220,9 +237,12 @@ tape_read({
   lastAnchor?: boolean,              // Read after last anchor
   betweenAnchors?: { start, end },   // Between two anchors
   betweenDates?: { start, end },     // ISO date range
-  query?: string,                    // Text search
+  scan?: string,                     // Text scan over formatted entry JSON
   types?: SessionEntry["type"][],    // Filter by type
-  limit?: number                     // Max entries (default: 20)
+  entryScope?: "session" | "project", // Default: project
+  anchorScope?: "session" | "project", // Default: session
+  limit?: number,                    // Max entries (default: 20, max: 100)
+  maxContentChars?: number | null    // Default: 300, null returns full formatted content
 })
 ```
 
@@ -235,7 +255,7 @@ tape_read({ lastAnchor: true })
 tape_read({ afterAnchor: "task/begin" })
 
 // Search messages
-tape_read({ query: "database schema", limit: 10 })
+tape_read({ scan: "database schema", limit: 10 })
 
 // Date range
 tape_read({ betweenDates: { start: "2026-04-01", end: "2026-04-16" } })
@@ -249,22 +269,32 @@ tape_read({ betweenDates: { start: "2026-04-01", end: "2026-04-16" } })
 tape_search({
   kinds?: ("entry" | "anchor" | "all")[],  // What to search
   types?: SessionEntry["type"][],          // Filter entries by type
-  limit?: number,                           // Max results (default: 20)
-  sinceAnchor?: string,                     // Search from anchor
-  lastAnchor?: boolean,                     // Search from last anchor
+  limit?: number,                           // Max results (default: 20, max: 100)
+  sinceAnchor?: string,
+  lastAnchor?: boolean,
   betweenAnchors?: { start, end },
   betweenDates?: { start, end },
-  query?: string                            // Text search
+  entryScope?: "session" | "project",
+  anchorScope?: "session" | "project",
+  scan?: string,                            // Text search in entry/anchor content
+  anchorName?: string,                      // Anchor name substring
+  anchorType?: "session" | "handoff",
+  anchorSummary?: string,
+  anchorPurpose?: string,
+  anchorKeywords?: string[]                 // All keywords must be present
 })
 ```
 
 **Example:**
 ```typescript
 // Find anchors matching query
-tape_search({ kinds: ["anchor"], query: "bug" })
+tape_search({ kinds: ["anchor"], scan: "bug" })
 
-// Find memory tool calls
-tape_search({ kinds: ["entry"], types: ["custom"], query: "memory" })
+// Find handoff anchors by metadata
+tape_search({ kinds: ["anchor"], anchorType: "handoff", anchorPurpose: "migration" })
+
+// Find memory-related tool calls
+tape_search({ kinds: ["entry"], types: ["message"], scan: "memory" })
 ```
 
 ---
@@ -302,6 +332,13 @@ session_start event
 └──────────────────────────────────────┘
        ↓
 ┌──────────────────────────────────────┐
+│ Warm up delivery context             │
+│ - run sessionStart hooks if needed   │
+│ - scan memory files asynchronously   │
+│ - preselect smart tape files         │
+└──────────────────────────────────────┘
+       ↓
+┌──────────────────────────────────────┐
 │ Anchor model stays active            │
 │ - session/* lifecycle anchors        │
 │ - handoff anchors via tape_handoff   │
@@ -312,22 +349,31 @@ session_start event
 before_agent_start event
        ↓
 ┌──────────────────────────────────────────────┐
-│ Build delivery payload for this turn         │
-│ - Select memory files (smart/recent)         │
-│ - Build memory index + tape hint             │
-│ - Optionally add hidden keyword handoff      │
-│   instruction                                │
-│ - Deliver via system-prompt or               │
+│ Deliver or reuse prepared context            │
+│ - await session-start warmup if needed       │
+│ - detect keyword handoff instructions        │
+│ - optionally render sessionBridge context    │
+│ - deliver via system-prompt or               │
 │   message-append                             │
 └──────────────────────────────────────────────┘
 ```
 
-**Important:** `before_agent_start` runs per agent turn, not just once at session startup.
+**Important:** heavy scanning is warmed up at `session_start` and cached. `before_agent_start` still runs per agent turn, but normally only awaits the warmup, handles keyword/session-bridge logic, and delivers the cached payload.
 - `message-append`: tape-selected memory is delivered once on the first agent turn as a hidden custom message (`pi-memory-md-tape`)
-- `system-prompt`: tape-selected memory is rebuilt and appended on every agent turn
+- `system-prompt`: the cached tape-selected memory is appended to the current system prompt on each agent turn
 - Keyword-triggered handoff instructions can still be delivered on later turns as a separate hidden custom message (`pi-memory-md-tape-keyword`)
 - That hidden keyword message stays within the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request.
 - In pi, appending means returning `systemPrompt: event.systemPrompt + "..."`; returning a bare string would replace the prompt for that turn
+
+## Session Bridge
+
+`hooks.beforeAgentStart: ["sessionBridge"]` is an opt-in short bridge for closely related session switches. It is not long-term memory.
+
+When a session starts through `new`, `resume`, or `fork`, pi provides `previousSessionFile`. If that previous session ended within the bridge window (60 seconds by default), pi-memory-md prepares a small BM25 index from recent user/assistant messages. If tape is active, it also indexes recent handoff anchors by name, summary, purpose, and keywords.
+
+At the next `before_agent_start`, the current prompt queries that prepared index. Only matches above the score threshold are rendered into a compact `<session_bridge>` block, with anchor matches rendered under `<tape_anchors>`. In `message-append` mode the bridge is appended to the startup memory message; in `system-prompt` mode it is sent as a separate hidden message.
+
+This bridge exists to avoid the "amnesia" feel during immediate session switches without dumping the previous conversation into context. Durable knowledge should still be written through `memory-digest` / `memory-write`.
 
 ## Memory Context Delivery
 
@@ -346,6 +392,7 @@ The delivered content is a memory index/summary plus the tape hint.
 
 // Delivery adds:
 - Memory file list with descriptions/tags
+- BM25 intent re-ranking over candidate memory/project files using the latest user prompt plus recent anchor summary/purpose/keywords; Chinese and mixed-language text is tokenized before ranking
 - Files under the memory directory still get descriptions/tags even when selected via absolute paths
 - Recently active project file paths when smart mode detects read/edit/write activity
 - `recent focus` summaries for selected memory and project files, for example `recent focus: read 340-420, edit 390-399`
@@ -361,7 +408,7 @@ The delivered content is a memory index/summary plus the tape hint.
 | Delivery mode | Tape behavior |
 |---------------|---------------|
 | `message-append` | Delivers tape-selected memory once as a hidden custom message on the first agent turn (`pi-memory-md-tape`) |
-| `system-prompt` | Rebuilds tape-selected memory and appends it to the current system prompt on every agent turn |
+| `system-prompt` | Appends the prepared tape-selected memory to the current system prompt on every agent turn |
 
 Keyword-triggered handoff instructions are independent from the main memory payload and may be delivered later as `pi-memory-md-tape-keyword` when a configured keyword matches a user prompt. This remains part of the same agent turn, so it does not trigger an extra LLM request; it only increases the current turn's token usage.
 
@@ -384,7 +431,7 @@ If any check fails, tape is skipped completely for that turn/session startup: no
 💡 Tape Context Management:
 Your conversation history is recorded in tape with anchors (checkpoints).
 - Use tape_info to check current tape status
-- Use tape_search to query historical entries by kind or content
+- Use tape_search to query historical entries by type or content
 - Use tape_list to list all anchor checkpoints
 - Use tape_handoff to create a new anchor/checkpoint when starting a new task
 ```
@@ -394,6 +441,9 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 ```json
 {
   "pi-memory-md": {
+    "hooks": {
+      "beforeAgentStart": ["sessionBridge"]
+    },
     "tape": {
       "onlyGit": true,
       "excludeDirs": [
@@ -419,6 +469,7 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 }
 ```
 
+- `hooks.beforeAgentStart: ["sessionBridge"]` is optional. Enable it only if you want short cross-session continuity for immediate `new` / `resume` / `fork` switches.
 - `onlyGit` defaults to `true`. When enabled, tape runs only inside a Git repository; otherwise tape delivery and anchor recording are skipped.
 - `excludeDirs` is a list of absolute directory paths. If `cwd` is equal to or inside any excluded directory, tape is skipped.
 - Built-in system safety excludes are also applied by default and merged with user-defined `excludeDirs`.
@@ -433,34 +484,23 @@ Your conversation history is recorded in tape with anchors (checkpoints).
   - `read` => base score `20`
   - `edit` => base score `28`
   - `write` => base score `30`
-- Repeated accesses use diminishing returns per file:
-  - 1st access: `1.0x`
-  - 2nd access: `0.6x`
-  - 3rd access: `0.35x`
-  - 4th+ access: `0.15x`
+- Repeated accesses use BM25-inspired saturation: each repeat still contributes, but the factor becomes `1 / sqrt(previousAccessCount + 1)`
 - **Boost rules** (two independent boosts, both applied if applicable):
   - Latest handoff anchor (any trigger): up to `+30`
   - Latest keyword-triggered handoff anchor: up to `+40`
 - Anchor boosts are only eligible within the first `15` tape entries after the latest matching anchor
-- Eligible anchor boosts also decay by anchor age:
-  - within 6 hours: `100%`
-  - within 24 hours: `60%`
-  - within 72 hours: `30%`
-  - after 72 hours: `0%`
-- Recency bonus is applied from the last access time:
-  - within 6 hours: `+12`
-  - within 24 hours: `+8`
-  - within 72 hours: `+4`
-- Repeated single-file activity also gets a small repeat penalty when total accesses greatly exceed distinct tool kinds
+- Access scores decay smoothly with a 24-hour exponential time decay
+- Anchor boosts decay smoothly with a 12-hour exponential time decay inside the eligible anchor window
+- Multiple tool kinds on the same file add a small diversity bonus
 - Initial scan window is `memoryScan[0]` hours
 - If total assistant tool-call accesses in that window are fewer than `MIN_SMART_ACCESS_SAMPLES` (hardcoded `5`), expand by 24-hour steps until enough samples are found or `memoryScan[1]` is reached
 - Once file selection stops, `recent focus` ranges are collected only from that same effective scan window; they are not allowed to look further back than the file-selection result
 - Final ordering:
-  1. final score (`weighted score + recency bonus - repeat penalty`)
+  1. final score (`weighted score + diversity bonus`)
   2. raw accumulated score
   3. last access time
-  3. last access time
-- Falls back to directory scan if no history
+- The behavior-ranked candidates are then re-ranked by BM25 intent matching before final delivery
+- Falls back to directory scan if no history, except worktrees skip that fallback because their tape history is intentionally isolated
 
 **Recent focus formatting:**
 - `read` ranges come from `offset + limit`
@@ -475,9 +515,9 @@ Your conversation history is recorded in tape with anchors (checkpoints).
 - Does not include project file paths from tape history
 - Faster but less context-aware
 
-### Anchor Kinds
+### Anchor Types
 
-| Kind | Behavior |
+| Type | Behavior |
 |------|----------|
 | `session` | Lifecycle anchors created by tape (`session/new`, `session/resume`) |
 | `handoff` | Phase-transition anchors created through `tape_handoff` and `/memory-anchor` |
@@ -626,17 +666,19 @@ tape_read({})
 └── TAPE/                       # Or custom settings.tape.tapePath
     └── {projectName}__anchors.jsonl
 
-~/.pi/agent/sessions/           # pi session storage (read-only)
+${PI_CODING_AGENT_SESSION_DIR:-~/.pi/agent/sessions}/  # pi session storage (read-only)
 └── --{cwd-path}--/
     └── *.jsonl                 # Session reader scans files here and matches by session header id
 ```
 
-## Related Skills
+## Related Skills and Commands
 
-- `memory-management` - Memory file CRUD operations
-- `memory-sync` - Git synchronization
-- `memory-init` - Repository initialization
-- `memory-search` - Searching memory files
+- `memory-init` - Repository initialization through the skill workflow
+- `memory-write` - Durable memory creation/update through Markdown files and frontmatter validation
+- `memory-import` - Import durable knowledge from URLs, folders, or files
+- `memory-digest` - Convert recent tape/session context into confirmed long-term memories
+- `/memory-review` - Human-facing anchor timeline, search, delete, and jump overlay
+- Native tools: `memory_check`, `memory_search`, and `memory_sync`
 
 ## Reference
 

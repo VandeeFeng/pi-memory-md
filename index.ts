@@ -15,7 +15,7 @@ import {
   getMemoryCoreDir,
   getMemoryDir,
   getMemoryMeta,
-  // initializeMemoryDirectory, // TODO: unused after memory-init moved to SKILL
+  // initializeMemoryDirectory, // unused after memory-init moved to SKILL
   loadSettings,
   renderMemoryTree,
 } from "./memory-core.js";
@@ -39,6 +39,7 @@ import { registerAllMemoryTools } from "./tools.js";
 import type { HookAction, MemoryMdSettings } from "./types.js";
 import { getTapeBasePath } from "./utils.js";
 
+// Shared extension state cached across pi lifecycle events.
 type CachedContext = { content: string; fileCount: number };
 
 type ExtensionState = {
@@ -77,6 +78,7 @@ function createExtensionState(): ExtensionState {
   };
 }
 
+// Tape runtime setup and reuse for the current project/session.
 function ensureTapeRuntime(
   settings: MemoryMdSettings,
   state: ExtensionState,
@@ -122,44 +124,7 @@ function ensureTapeRuntime(
   state.activeTapeRuntime.service.configureSessionTree(ctx.sessionManager, settings.tape?.anchor?.labelPrefix);
 }
 
-async function runHookAction(pi: ExtensionAPI, settings: MemoryMdSettings, action: HookAction) {
-  switch (action) {
-    case "pull":
-      return syncRepository(pi, settings);
-    case "push":
-      return pushRepository(pi, settings);
-    default:
-      return { success: false, message: `Unsupported hook action: ${action}` };
-  }
-}
-
-function notifyHookResults(
-  ctx: ExtensionContext,
-  settings: MemoryMdSettings,
-  phase: "sessionStart" | "sessionEnd",
-  results: Awaited<ReturnType<typeof runHookTrigger>>,
-): void {
-  if (!settings.repoUrl) return;
-
-  const label = phase === "sessionStart" ? "start" : "end";
-  for (const { action, result } of results) {
-    if (result.success && !result.updated) continue;
-    ctx.ui.notify(`${result.message} (${label}/${action})`, result.level ?? (result.success ? "info" : "error"));
-  }
-}
-
-function runHookTriggerWithNotify(
-  pi: ExtensionAPI,
-  settings: MemoryMdSettings,
-  ctx: ExtensionContext,
-  phase: "sessionStart" | "sessionEnd",
-): ReturnType<typeof runHookTrigger> {
-  return runHookTrigger(settings, phase, (action) => runHookAction(pi, settings, action)).then((results) => {
-    notifyHookResults(ctx, settings, phase, results);
-    return results;
-  });
-}
-
+// Context warmup and delivery for memory, tape, and session bridge.
 async function cacheInitialContext(
   settings: MemoryMdSettings,
   state: ExtensionState,
@@ -402,6 +367,45 @@ function deliverStartupContext(
   return undefined;
 }
 
+// Pi lifecycle handlers and hook execution.
+async function runHookAction(pi: ExtensionAPI, settings: MemoryMdSettings, action: HookAction) {
+  switch (action) {
+    case "pull":
+      return syncRepository(pi, settings);
+    case "push":
+      return pushRepository(pi, settings);
+    default:
+      return { success: false, message: `Unsupported hook action: ${action}` };
+  }
+}
+
+function notifyHookResults(
+  ctx: ExtensionContext,
+  settings: MemoryMdSettings,
+  phase: "sessionStart" | "sessionEnd",
+  results: Awaited<ReturnType<typeof runHookTrigger>>,
+): void {
+  if (!settings.repoUrl) return;
+
+  const label = phase === "sessionStart" ? "start" : "end";
+  for (const { action, result } of results) {
+    if (result.success && !result.updated) continue;
+    ctx.ui.notify(`${result.message} (${label}/${action})`, result.level ?? (result.success ? "info" : "error"));
+  }
+}
+
+function runHookTriggerWithNotify(
+  pi: ExtensionAPI,
+  settings: MemoryMdSettings,
+  ctx: ExtensionContext,
+  phase: "sessionStart" | "sessionEnd",
+): ReturnType<typeof runHookTrigger> {
+  return runHookTrigger(settings, phase, (action) => runHookAction(pi, settings, action)).then((results) => {
+    notifyHookResults(ctx, settings, phase, results);
+    return results;
+  });
+}
+
 function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
   pi.on("tool_call", async (event) => {
     if (event.toolName !== "tape_handoff") return;
@@ -470,6 +474,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
   });
 }
 
+// User-facing slash commands for memory and tape operations.
 function buildManualAnchorMessage(prompt: string): string {
   return [
     "The user explicitly requested a manual tape anchor via /memory-anchor.",
@@ -627,6 +632,7 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
   }
 }
 
+// Registers memory tools, lifecycle handlers, and commands.
 export default function memoryMdExtension(pi: ExtensionAPI): void {
   const settings = loadSettings();
   const state = createExtensionState();
