@@ -185,16 +185,17 @@ tape_handoff(
 
 ---
 
-### tape_list - List All Anchors
+### tape_search - Search Anchors and Entries
 
 ```typescript
-tape_list(
-  limit?: number,          // Max anchors (default: 20, max: 100)
-  contextLines?: number    // Context lines before/after (default: 1)
-)
+tape_search({
+  kinds?: ["anchor" | "entry" | "all"],
+  limit?: number,          // Max results (default: 20, max: 100)
+  contextLines?: number    // Nearby anchor context lines (default: 0, max: 5)
+})
 ```
 
-**Returns:** Anchor list with timestamps, type, meta, and nearby entry context
+**Returns:** Matching entries or anchors with ids, timestamps, type, meta, filters, and optional nearby dialogue context.
 
 ---
 
@@ -202,7 +203,8 @@ tape_list(
 
 ```typescript
 tape_delete(
-  id: string   // Anchor id from tape_list
+  id?: string,    // Single anchor id from tape_search
+  ids?: string[]  // Multiple exact anchor ids from tape_search
 )
 ```
 
@@ -324,7 +326,7 @@ session_start event
        ↓
 ┌──────────────────────────────────────┐
 │ Register Tape Tools (once)           │
-│ - tape_handoff, tape_list, etc.      │
+│ - tape_handoff, tape_search, etc.    │
 └──────────────────────────────────────┘
        ↓
 ┌──────────────────────────────────────┐
@@ -432,7 +434,7 @@ If any check fails, tape is skipped completely for that turn/session startup: no
 Your conversation history is recorded in tape with anchors (checkpoints).
 - Use tape_info to check current tape status
 - Use tape_search to query historical entries by type or content
-- Use tape_list to list all anchor checkpoints
+- Use tape_search({ kinds: ["anchor"] }) to list anchor checkpoints
 - Use tape_handoff to create a new anchor/checkpoint when starting a new task
 ```
 
@@ -623,7 +625,6 @@ tape_read({})
 | Tool | Token Cost | When |
 |------|------------|------|
 | `tape_handoff` | ~5-10 | When called |
-| `tape_list` | ~50-200 | When called |
 | `tape_info` | ~50-100 | When called |
 | `tape_read` | ~100-2000 | When called |
 | `tape_search` | ~50-500 | When called |
@@ -637,7 +638,7 @@ tape_read({})
 
 **Check:**
 1. Session file exists: `~/.pi/agent/sessions/`
-2. Anchor name exists: `tape_list()`
+2. Anchor name exists: `tape_search({ kinds: ["anchor"] })`
 3. Try without filters: `tape_read({ limit: 10 })`
 
 ### Issue: Keyword-triggered handoff not appearing

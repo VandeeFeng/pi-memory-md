@@ -3,9 +3,9 @@ import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { MemoryMdSettings } from "../types.js";
-import { toLocaleDateTime, toLocaleTime, toTimestamp } from "../utils.js";
+import { toLocaleDateTime, toTimestamp } from "../utils.js";
 import type { TapeAnchorMeta, TapeAnchorType } from "./tape-anchor.js";
-import { DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS, formatEntryLine } from "./tape-context.js";
+import { DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS, extractMessageContent, formatEntryLine } from "./tape-context.js";
 import type { KeywordHandoffInstruction } from "./tape-gate.js";
 import type { TapeService } from "./tape-service.js";
 import type { RenderState } from "./tape-types.js";
@@ -103,26 +103,46 @@ function getAnchorSearchBounds(
   };
 }
 
+function isAnchorToolResultContent(content: string): boolean {
+  try {
+    const anchor = JSON.parse(content) as Record<string, unknown> | null;
+    return Boolean(
+      anchor &&
+        typeof anchor.id === "string" &&
+        typeof anchor.name === "string" &&
+        typeof anchor.type === "string" &&
+        typeof anchor.timestamp === "string" &&
+        typeof anchor.sessionId === "string" &&
+        typeof anchor.sessionEntryId === "string",
+    );
+  } catch {
+    return false;
+  }
+}
+
+function formatDialogueContext(entries: SessionEntry[]): string[] {
+  return entries.flatMap((entry) => {
+    if (entry.type !== "message") return [];
+
+    const { role, content } = (entry as { message: { role: string; content?: unknown } }).message;
+    if (role !== "user" && role !== "assistant") return [];
+
+    const text = extractMessageContent(content).trim();
+    if (!text || isAnchorToolResultContent(text)) return [];
+
+    const line = formatEntryLine(entry, DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS);
+    return line === null ? [] : [line];
+  });
+}
+
 function getAnchorContext(entries: SessionEntry[], anchorTimestamp: string, contextLines: number): string[][] {
   const anchorTime = toTimestamp(anchorTimestamp);
-  const anchorIndex = entries.findIndex((entry) => toTimestamp(entry.timestamp) >= anchorTime);
-
-  if (anchorIndex === -1) {
-    return [
-      entries
-        .slice(-contextLines)
-        .map((entry) => formatEntryLine(entry, DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS) ?? entry.type),
-      [],
-    ];
-  }
+  const beforeEntries = entries.filter((entry) => toTimestamp(entry.timestamp) < anchorTime);
+  const afterEntries = entries.filter((entry) => toTimestamp(entry.timestamp) >= anchorTime);
 
   return [
-    entries
-      .slice(Math.max(0, anchorIndex - contextLines), anchorIndex)
-      .map((entry) => formatEntryLine(entry, DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS) ?? entry.type),
-    entries
-      .slice(anchorIndex, anchorIndex + contextLines)
-      .map((entry) => formatEntryLine(entry, DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS) ?? entry.type),
+    formatDialogueContext(beforeEntries).slice(-contextLines),
+    formatDialogueContext(afterEntries).slice(0, contextLines),
   ];
 }
 
@@ -262,6 +282,7 @@ export function registerTapeHandoff(
   });
 }
 
+/* Deprecated: tape_list is no longer registered. Use tape_search with contextLines instead.
 export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
     name: "tape_list",
@@ -369,49 +390,73 @@ export function registerTapeAnchors(pi: ExtensionAPI, getTapeService: TapeServic
     },
   });
 }
+*/
 
 export function registerTapeAnchorDelete(pi: ExtensionAPI, getTapeService: TapeServiceGetter): void {
   pi.registerTool({
     name: "tape_delete",
     label: "Tape Delete",
-    description: "Delete an anchor checkpoint by id",
+    description: "Delete anchor checkpoints by exact id only. Use tape_search first to find ids.",
     parameters: Type.Object({
-      id: Type.String({ description: "Anchor id to delete (use tape_list to list ids)" }),
+      id: Type.Optional(Type.String({ description: "Single anchor id to delete" })),
+      ids: Type.Optional(Type.Array(Type.String(), { description: "Multiple anchor ids to delete" })),
     }),
 
     async execute(_toolCallId, params) {
       const tapeService = getTapeService();
       if (!tapeService) return getTapeUnavailableResult();
 
-      const { id } = params as { id: string };
-      const removedAnchor = tapeService.deleteAnchor(id);
-      if (!removedAnchor) {
+      const { id, ids } = params as { id?: string; ids?: string[] };
+      const requestedIds = [
+        ...new Set([...(id?.trim() ? [id.trim()] : []), ...(ids ?? []).map((value) => value.trim()).filter(Boolean)]),
+      ];
+
+      if (requestedIds.length === 0) {
         return {
-          content: [{ type: "text", text: `Anchor not found: ${id}` }],
-          details: { id, deleted: false },
+          content: [{ type: "text", text: "No anchor ids provided. Use tape_search first to find anchors." }],
+          details: { ids: [], deleted: false, deletedCount: 0 },
+        };
+      }
+
+      const removedAnchors = requestedIds
+        .map((anchorId) => tapeService.deleteAnchor(anchorId))
+        .filter((anchor) => anchor !== null);
+
+      if (removedAnchors.length === 0) {
+        return {
+          content: [{ type: "text", text: `Anchor not found: ${requestedIds.join(", ")}` }],
+          details: { ids: requestedIds, deleted: false, deletedCount: 0 },
         };
       }
 
       return {
-        content: [{ type: "text", text: JSON.stringify(removedAnchor) }],
-        details: { id, deleted: true, name: removedAnchor.name },
+        content: [{ type: "text", text: removedAnchors.map((anchor) => JSON.stringify(anchor)).join("\n") }],
+        details: {
+          ids: requestedIds,
+          deleted: true,
+          deletedCount: removedAnchors.length,
+          names: removedAnchors.map((anchor) => anchor.name),
+        },
       };
     },
 
     renderCall(args, theme) {
-      return renderText(theme.fg("toolTitle", theme.bold("tape_delete ")) + theme.fg("accent", args.id));
+      const target = args.id ?? (args.ids?.length ? `${args.ids.length} ids` : "ids required");
+      return renderText(theme.fg("toolTitle", theme.bold("tape_delete ")) + theme.fg("accent", target));
     },
 
     renderResult(result, state: RenderState, theme) {
       if (state.isPartial) return renderText(theme.fg("warning", "Deleting anchor..."));
 
-      const details = result.details as { deleted?: boolean } | undefined;
+      const details = result.details as { deleted?: boolean; deletedCount?: number } | undefined;
       const text = (result.content[0] as { text?: string })?.text ?? "";
       if (!details?.deleted) {
         return renderText(theme.fg("warning", text || "Not found"));
       }
 
-      return renderText(`${theme.fg("success", "Anchor deleted:")}\n${theme.fg("toolOutput", text)}`);
+      return renderText(
+        `${theme.fg("success", `Deleted ${details.deletedCount ?? 0} anchor(s):`)}\n${theme.fg("toolOutput", text)}`,
+      );
     },
   });
 }
@@ -497,6 +542,13 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
       limit: Type.Optional(
         Type.Integer({ description: "Maximum number of results (default: 20)", minimum: 1, maximum: 100 }),
       ),
+      contextLines: Type.Optional(
+        Type.Integer({
+          description: "Nearby context lines around matching anchors (default: 0)",
+          minimum: 0,
+          maximum: 5,
+        }),
+      ),
       sinceAnchor: Type.Optional(Type.String({ description: "Anchor name to search from" })),
       lastAnchor: Type.Optional(Type.Boolean({ description: "Search from last anchor" })),
       betweenAnchors: Type.Optional(
@@ -535,6 +587,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         kinds = ["all"],
         types,
         limit = 20,
+        contextLines = 0,
         sinceAnchor,
         lastAnchor,
         betweenAnchors,
@@ -551,6 +604,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
         kinds?: string[];
         types?: SessionEntry["type"][];
         limit?: number;
+        contextLines?: number;
         sinceAnchor?: string;
         lastAnchor?: boolean;
         betweenAnchors?: { start: string; end: string };
@@ -600,11 +654,22 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
 
         anchorCount = anchors.length;
         if (anchorCount > 0) {
+          const contextEntries =
+            contextLines > 0 ? tapeService.scan({ entryScope: "project", anchorScope: "project" }) : [];
+
           parts.push(`${anchorCount} anchors`);
           lines.push("Anchors:");
           for (const anchor of anchors) {
             const metaStr = anchor.meta ? ` ${JSON.stringify(anchor.meta)}` : "";
-            lines.push(`  ${anchor.name} [${anchor.type}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}`);
+            lines.push(
+              `  id=${anchor.id} ${anchor.name} [${anchor.type}] (${toLocaleDateTime(anchor.timestamp)})${metaStr}`,
+            );
+
+            if (contextLines > 0) {
+              const [beforeContext, afterContext] = getAnchorContext(contextEntries, anchor.timestamp, contextLines);
+              if (beforeContext.length > 0) lines.push(`    Before: ${beforeContext.join(" | ")}`);
+              if (afterContext.length > 0) lines.push(`    After: ${afterContext.join(" | ")}`);
+            }
           }
         }
       }
@@ -647,6 +712,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
           anchorSummary,
           anchorPurpose,
           anchorKeywords,
+          contextLines,
         },
       };
     },
@@ -660,6 +726,7 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
       if (args.anchorSummary) parts.push(theme.fg("accent", `summary:${args.anchorSummary}`));
       if (args.anchorPurpose) parts.push(theme.fg("accent", `purpose:${args.anchorPurpose}`));
       if (args.scan) parts.push(theme.fg("accent", `"${args.scan}"`));
+      if (args.contextLines) parts.push(theme.fg("muted", `context=${args.contextLines}`));
       if (args.sinceAnchor) parts.push(theme.fg("muted", `@${args.sinceAnchor}`));
       return renderText(parts.join(" "));
     },
@@ -840,7 +907,8 @@ export function registerAllTapeTools(
   consumeHandoffMatch?: ConsumeHandoffMatch,
 ): void {
   registerTapeHandoff(pi, getTapeService, getSettings, consumeHandoffMatch);
-  registerTapeAnchors(pi, getTapeService);
+  // Deprecated: tape_list is replaced by tape_search({ kinds: ["anchor"], contextLines }).
+  // registerTapeAnchors(pi, getTapeService);
   registerTapeAnchorDelete(pi, getTapeService);
   registerTapeInfo(pi, getTapeService);
   registerTapeSearch(pi, getTapeService);

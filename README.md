@@ -471,11 +471,10 @@ The panel only helps you land on the right anchor. After jumping there, any deep
 | `/memory-review` | `[limit]` default: `50`, max: `100` | Slash command that opens an interactive Memory Review overlay for browsing anchors by timeline, keyword relations, stats, and `/` fuzzy search |
 | `memory-digest` | skill | Digest recent tape anchors and session context into proposed durable memory updates |
 | `tape_handoff` | `{name, summary?, purpose?}` | Create a handoff anchor checkpoint in the tape |
-| `tape_list` | `{limit?: number}` | List all anchor checkpoints |
-| `tape_delete` | `{id}` | Delete an anchor checkpoint by id |
+| `tape_delete` | `{id?, ids?}` | Delete anchor checkpoints by exact id only; use `tape_search` first to find ids |
 | `tape_info` | `{}` | Get tape statistics and information |
-| `tape_search` | `{query?, kinds?, limit?, sinceAnchor?, anchorName?, anchorType?, anchorSummary?, anchorPurpose?, anchorKeywords?}` | Search tape entries by text or type, with structured anchor-field filters |
-| `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, query?, kinds?, limit?}` | Read tape entries as formatted messages |
+| `tape_search` | `{kinds?, types?, limit?, contextLines?, sinceAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, entryScope?, anchorScope?, scan?, anchorName?, anchorType?, anchorSummary?, anchorPurpose?, anchorKeywords?}` | Search tape entries and anchors, including structured anchor filters and optional nearby anchor context |
+| `tape_read` | `{afterAnchor?, lastAnchor?, betweenAnchors?, betweenDates?, scan?, types?, entryScope?, anchorScope?, limit?, maxContentChars?}` | Read tape entries as formatted messages |
 | `tape_reset` | `{archive?: boolean}` | Reset the tape with a new session lifecycle anchor |
 
 > **Note**: Tape tools are registered when a `tape` block exists in config (opt-out: set `"enabled": false`). They provide anchor-based context management inspired by [bub](https://bub.build)'s tape mechanism.

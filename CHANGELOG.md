@@ -44,11 +44,13 @@ When tape-mode is on, `sessionBridge` also scans handoff anchors and builds a se
 - Improved tape edit focus extraction by counting only changed diff lines instead of surrounding context lines. Pi's native edit result returns a numbered diff that includes both changed lines and nearby context lines; tape now ignores those context lines, parses only `+` lines as the primary edit focus, falls back to `-` lines for deletion-only edits, and uses `firstChangedLine` only when no changed line can be extracted.
 - Deprecated and disabled the `memory_list` tool; use `memory_check({ directory })` for directory-scoped memory inspection.
 - Refined tape smart analysis scoring with smooth time decay, BM25-inspired repeated-access saturation, anchor decay boosts, and a clearer multi-signal event score model for selecting active memory and project files.
+- Removed the registered `tape_list` tool. Use `tape_search({ kinds: ["anchor"], contextLines })` for the same recent-anchor browsing workflow, now with anchor ids, filters, range options, and optional nearby context in one tool.
 
 ## Fixed
 
 - Skipped empty tape delivery when no memory/project files are selected; tape context builders now return `null` for no content and omit empty sections, avoiding blank custom messages or system-prompt additions.
 - `tape_search` now falls back from session-scope entry and anchor search to project-scope search when the session has no matching results.
+- Improved `tape_search` anchor context output: `contextLines` now skips empty handoff helper messages and anchor JSON tool results, showing the surrounding user/assistant text instead.
 
 ## [0.1.36] - 2026-05-06
 

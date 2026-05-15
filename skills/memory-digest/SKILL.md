@@ -18,7 +18,7 @@ Inspect recent intent first, read only relevant context, propose memory changes,
 
 ## Workflow
 
-1. Inspect recent anchors with `tape_list`, usually `limit: 20` and `contextLines: 1`.
+1. Inspect recent anchors with `tape_search({ kinds: ["anchor"], limit: 20, contextLines: 1 })`.
 2. Infer the user's recent intent from handoff anchor names, summaries, purposes, keywords, timestamps, and nearby context.
 3. Select the smallest useful tape range by combining anchor count and recency:
    - Use `tape_search({ kinds: ["anchor"], anchorType: "handoff", anchorScope: "project", betweenDates: { start, end }, limit: 20 })` for handoff anchors from the last 2 days.

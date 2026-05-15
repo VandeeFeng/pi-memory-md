@@ -213,10 +213,13 @@ export class AnchorStore {
   }
 
   removeById(id: string): TapeAnchor | null {
-    const anchor = this.scan({ id, mode: "latest" })[0] ?? null;
+    const { entries, error } = this.parseFileLines();
+    if (error) return null;
+
+    const anchor = entries.find((entry) => entry.id === id) ?? null;
     if (!anchor) return null;
 
-    this.rebuildIndex(this.allAnchors.filter((entry) => entry.id !== id));
+    this.rebuildIndex(entries.filter((entry) => entry.id !== id));
     return anchor;
   }
 

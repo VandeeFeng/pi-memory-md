@@ -193,6 +193,31 @@ test("AnchorStore removeById rebuilds the file and updates in-memory index", () 
   assert.match(fileContent, /"id":"a2"/);
 });
 
+test("AnchorStore removeById preserves anchors outside the memory cache", () => {
+  const { store, indexPath } = createStore();
+  const baseTime = Date.parse("2026-04-23T10:00:00.000Z");
+  const anchors = Array.from({ length: 105 }, (_, index) =>
+    createAnchor({
+      id: `a${index}`,
+      name: `task/${index}`,
+      timestamp: new Date(baseTime + index * 1000).toISOString(),
+    }),
+  );
+
+  for (const anchor of anchors) {
+    store.append(anchor);
+  }
+
+  const removed = store.removeById("a0");
+  const fileContent = fs.readFileSync(indexPath, "utf-8");
+
+  assert.equal(removed?.id, "a0");
+  assert.doesNotMatch(fileContent, /"id":"a0"/);
+  assert.match(fileContent, /"id":"a1"/);
+  assert.match(fileContent, /"id":"a104"/);
+  assert.equal(fileContent.trim().split("\n").length, 104);
+});
+
 test("AnchorStore clear removes persisted index file and all anchors", () => {
   const { store, indexPath } = createStore();
 
