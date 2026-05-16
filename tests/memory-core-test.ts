@@ -191,17 +191,21 @@ test("loadSettings enables tape when tape config exists unless explicitly disabl
   }
 });
 
-test("readMemoryFileAsync returns fallback frontmatter for missing frontmatter", async () => {
-  const tempDir = createTempDir("pi-memory-md-read-no-frontmatter");
-  const filePath = path.join(tempDir, "note.md");
+test("readMemoryFileAsync returns fallback frontmatter for missing or invalid frontmatter", async () => {
+  const tempDir = createTempDir("pi-memory-md-read-fallback-frontmatter");
+  const plainPath = path.join(tempDir, "plain.md");
+  const invalidPath = path.join(tempDir, "invalid.md");
 
-  writeText(filePath, "# Plain note\n\nNo frontmatter here.");
+  writeText(plainPath, "# Plain note\n\nNo frontmatter here.");
+  writeText(invalidPath, "---\ndescription: 123\ntags: nope\n---\n\n# Broken\n");
 
-  const memory = await readMemoryFileAsync(filePath);
+  const plain = await readMemoryFileAsync(plainPath);
+  const invalid = await readMemoryFileAsync(invalidPath);
 
-  assert.ok(memory);
-  assert.equal(memory?.frontmatter.description, "No description");
-  assert.equal(memory?.content, "# Plain note\n\nNo frontmatter here.");
+  assert.equal(plain?.frontmatter.description, "No description");
+  assert.equal(plain?.content, "# Plain note\n\nNo frontmatter here.");
+  assert.equal(invalid?.frontmatter.description, "No description");
+  assert.match(invalid?.content ?? "", /description: 123/);
 });
 
 test("loadSettings supports memoryDir unified config structure", () => {
@@ -228,19 +232,6 @@ test("loadSettings supports memoryDir unified config structure", () => {
   } finally {
     homedirMock.mock.restore();
   }
-});
-
-test("readMemoryFileAsync returns fallback frontmatter for invalid frontmatter", async () => {
-  const tempDir = createTempDir("pi-memory-md-read-invalid-frontmatter");
-  const filePath = path.join(tempDir, "note.md");
-
-  writeText(filePath, "---\ndescription: 123\ntags: nope\n---\n\n# Broken\n");
-
-  const memory = await readMemoryFileAsync(filePath);
-
-  assert.ok(memory);
-  assert.equal(memory?.frontmatter.description, "No description");
-  assert.match(memory?.content ?? "", /description: 123/);
 });
 
 test("writeMemoryFile writes YAML frontmatter and body that can be read back", async () => {

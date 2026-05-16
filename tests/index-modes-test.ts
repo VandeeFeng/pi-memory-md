@@ -7,7 +7,7 @@ import { mock, test } from "node:test";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import memoryMdExtension from "../index.js";
 import { writeMemoryFile } from "../memory-core.js";
-import { createTempDir, initGitRepo, writeJson } from "./test-helpers.js";
+import { createSessionManager, createTempDir, createUi, initGitRepo, writeJson } from "./test-helpers.js";
 
 type HandlerMap = Map<string, (event: any, ctx: any) => Promise<unknown> | unknown>;
 
@@ -16,29 +16,6 @@ type ExtensionHarness = {
   sentMessages: Array<{ message: Record<string, unknown>; options?: Record<string, unknown> }>;
   registeredCommands: string[];
 };
-
-function createSessionManager(entries: SessionEntry[] = []): any {
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  return {
-    getLeafId: () => entries[entries.length - 1]?.id ?? null,
-    getSessionId: () => "session-1",
-    getEntry: (id: string) => byId.get(id),
-    getEntries: () => entries,
-    getLabel: () => undefined,
-    labelsById: new Map<string, string>(),
-    labelTimestampsById: new Map<string, string>(),
-  };
-}
-
-function createUi() {
-  const notifications: Array<{ message: string; level: string }> = [];
-  return {
-    notifications,
-    notify(message: string, level: string) {
-      notifications.push({ message, level });
-    },
-  };
-}
 
 function bootExtension(homeDir: string, projectDir: string): ExtensionHarness {
   const handlers: HandlerMap = new Map();

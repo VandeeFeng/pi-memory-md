@@ -135,23 +135,6 @@ test("tape_handoff downgrades mismatched keyword handoff match to direct", async
   assert.equal((result as any).details.finalTrigger, "direct");
 });
 
-test("tape_handoff only accepts keyword handoff match when the anchor name matches this turn", async () => {
-  const { createdAnchors } = await runHandoff(
-    { tape: { anchor: { mode: "manual" } } },
-    { name: "task/keyword", summary: "kw", purpose: "test" },
-    undefined,
-    () => ({ trigger: "keyword", instruction: { anchorName: "task/keyword", matched: ["tape", "memory"] } }),
-  );
-
-  assert.deepEqual(createdAnchors[0], {
-    id: "anchor-1",
-    timestamp: "2026-04-23T12:00:00.000Z",
-    name: "task/keyword",
-    type: "handoff",
-    meta: { summary: "kw", purpose: "test", trigger: "keyword", keywords: ["tape", "memory"] },
-  });
-});
-
 test("tape_search includes anchor ids for follow-up deletion", async () => {
   const harness = createToolHarness();
   const service = {

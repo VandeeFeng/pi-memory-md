@@ -152,21 +152,9 @@ test("MemoryFileSelector smart mode prioritizes frequently accessed memory files
   writeMemoryFile(path.join(memoryDir, coldFile), "# Cold", { description: "Cold", tags: ["cold"] });
 
   const entries = [
-    // createMessageEntry(hoursAgoIso(5.5), "assistant", [
-    //   { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
-    // ]),
     createMessageEntry(hoursAgoIso(5), "assistant", [
       { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
     ]),
-    // createMessageEntry(hoursAgoIso(4.5), "assistant", [
-    //   { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
-    // ]),
-    // createMessageEntry(hoursAgoIso(4), "assistant", [
-    //   { type: "toolCall", name: "memory_read", arguments: { path: hotFile } },
-    // ]),
-    // createMessageEntry(hoursAgoIso(3.5), "assistant", [
-    //   { type: "toolCall", name: "memory_read", arguments: { path: coldFile } },
-    // ]),
     createMessageEntry(hoursAgoIso(3), "assistant", [
       { type: "toolCall", name: "memory_write", arguments: { path: hotFile } },
     ]),
@@ -255,9 +243,6 @@ test("MemoryFileSelector buildContextFromFilesAsync renders highlights and line 
 
   const editToolCallId = crypto.randomUUID();
   const entries = [
-    // createMessageEntry(hoursAgoIso(5), "assistant", [
-    //   { type: "toolCall", name: "memory_read", arguments: { path: "core/user/identity.md", offset: 3, limit: 4 } },
-    // ]),
     createMessageEntry(hoursAgoIso(4), "assistant", [
       { type: "toolCall", id: editToolCallId, name: "edit", arguments: { path: "src/index.ts" } },
     ]),
@@ -279,7 +264,6 @@ test("MemoryFileSelector buildContextFromFilesAsync renders highlights and line 
   assert.ok(context);
   assert.match(context, /<memory_context mode="tape">/);
   assert.match(context, new RegExp(`- path: ${memoryPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  // assert.match(context, / {2}recent focus: read 3-6/);  // memory_read removed
   assert.match(context, /description: Identity/);
   assert.match(context, /tags: user, profile/);
   assert.match(context, /<active_project_files>/);

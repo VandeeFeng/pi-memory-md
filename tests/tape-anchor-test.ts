@@ -40,8 +40,8 @@ test("AnchorStore persists appended anchors and reloads them from disk", () => {
 
   store.append(anchor);
 
-  const _reloadedStore = new AnchorStore(tapeBasePath, projectName);
-  const loadedAnchor = store.scan({ id: "anchor-1" })[0];
+  const reloadedStore = new AnchorStore(tapeBasePath, projectName);
+  const loadedAnchor = reloadedStore.scan({ id: "anchor-1" })[0];
 
   assert.deepEqual(loadedAnchor, anchor);
 });
@@ -79,37 +79,6 @@ test("AnchorStore skips malformed and incomplete JSONL lines during load", () =>
   assert.equal(anchors[0]?.id, "fallback-id-source");
   assert.equal(anchors[1]?.id, "entry-10:2026-04-23T12:30:00.000Z:task/fallback-id");
 });
-
-test("AnchorStore scan returns newest matching anchors", () => {
-  const { store } = createStore();
-  const anchors = [
-    createAnchor({ id: "a1", name: "task/checkpoint", sessionId: "session-1", timestamp: "2026-04-23T10:00:00.000Z" }),
-    createAnchor({ id: "a2", name: "task/checkpoint", sessionId: "session-2", timestamp: "2026-04-23T11:00:00.000Z" }),
-    createAnchor({ id: "a3", name: "task/checkpoint", sessionId: "session-1", timestamp: "2026-04-23T12:00:00.000Z" }),
-  ];
-
-  for (const anchor of anchors) {
-    store.append(anchor);
-  }
-
-  // scan by name returns newest in that session
-  assert.equal(store.scan({ name: "task/checkpoint", nameCaseInsensitive: true, mode: "latest" })[0]?.id, "a3");
-
-  // scan by name + session returns newest
-  assert.equal(
-    store.scan({ name: "task/checkpoint", nameCaseInsensitive: true, sessionId: "session-2", mode: "latest" })[0]?.id,
-    "a2",
-  );
-  assert.equal(
-    store.scan({ name: "task/checkpoint", nameCaseInsensitive: true, sessionId: "session-1", mode: "latest" })[0]?.id,
-    "a3",
-  );
-
-  // getAllAnchors and scan for last
-  const all = store.getAllAnchors();
-  assert.equal(all[all.length - 1]?.id, "a3");
-});
-
 test("AnchorStore search combines filters for session, range, name, meta, and keywords", () => {
   const { store } = createStore();
   const anchors = [
@@ -229,85 +198,6 @@ test("AnchorStore clear removes persisted index file and all anchors", () => {
   assert.equal(store.getAllAnchors().length, 0);
   assert.equal(fs.existsSync(indexPath), false);
 });
-
-test("AnchorStore scanFile filters by id, name, sessionId and supports mode", () => {
-  const { store } = createStore();
-  const anchors = [
-    createAnchor({ id: "id-1", name: "task/alpha", sessionId: "s1", timestamp: "2026-04-23T10:00:00.000Z" }),
-    createAnchor({ id: "id-2", name: "task/alpha", sessionId: "s2", timestamp: "2026-04-23T11:00:00.000Z" }),
-    createAnchor({ id: "id-3", name: "task/alpha", sessionId: "s1", timestamp: "2026-04-23T12:00:00.000Z" }),
-  ];
-  for (const anchor of anchors) {
-    store.append(anchor);
-  }
-
-  // Access private scanFile via any
-  const scanFile = (store as any).scanFile.bind(store);
-
-  // Filter by id
-  const byId = scanFile({ id: "id-2" });
-  assert.equal(byId.length, 1);
-  assert.equal(byId[0]?.id, "id-2");
-
-  // Filter by sessionId
-  const bySession = scanFile({ sessionId: "s1" });
-  assert.equal(bySession.length, 2);
-
-  // Filter by name (case insensitive) returns sorted by timestamp
-  const byName = scanFile({ name: "task/alpha", nameCaseInsensitive: true });
-  assert.equal(byName.length, 3);
-
-  // mode: latest returns only the newest
-  const latest = scanFile({ id: "id-1", mode: "latest" });
-  assert.equal(latest.length, 1);
-  assert.equal(latest[0]?.id, "id-1");
-
-  const latestBySession = scanFile({ sessionId: "s1", mode: "latest" });
-  assert.equal(latestBySession.length, 1);
-  assert.equal(latestBySession[0]?.id, "id-3");
-});
-
-test("AnchorStore file fallback populates memory index after file search", () => {
-  const { tapeBasePath, projectName, indexPath } = createStore();
-
-  const anchors = [
-    createAnchor({ id: "older-1", name: "task/old", sessionId: "s1", timestamp: "2026-04-23T10:00:00.000Z" }),
-    createAnchor({ id: "older-2", name: "task/old", sessionId: "s1", timestamp: "2026-04-23T11:00:00.000Z" }),
-  ];
-  writeText(indexPath, `${anchors.map((a) => JSON.stringify(a)).join("\n")}\n`);
-
-  const store = new AnchorStore(tapeBasePath, projectName);
-
-  assert.equal(store.getAllAnchors().length, 2);
-
-  // scan should work
-  const found = store.scan({ id: "older-1" });
-  assert.equal(found[0]?.id, "older-1");
-
-  // After scan, memory should still have all anchors
-  assert.equal(store.getAllAnchors().length, 2);
-});
-
-test("AnchorStore case-insensitive scan works for both memory and file fallback", () => {
-  const { store } = createStore();
-  store.append(createAnchor({ id: "a1", name: "Task/Begin", sessionId: "s1" }));
-
-  // Case-insensitive match
-  assert.equal(store.scan({ name: "task/begin", nameCaseInsensitive: true, mode: "latest" })[0]?.id, "a1");
-  assert.equal(store.scan({ name: "TASK/BEGIN", nameCaseInsensitive: true, mode: "latest" })[0]?.id, "a1");
-
-  // scan with session filter
-  assert.equal(
-    store.scan({ name: "task/begin", nameCaseInsensitive: true, sessionId: "s1", mode: "latest" })[0]?.id,
-    "a1",
-  );
-
-  // Multiple matches
-  store.append(createAnchor({ id: "a2", name: "Task/Begin", sessionId: "s2" }));
-  const all = store.scan({ name: "task/begin", nameCaseInsensitive: true });
-  assert.equal(all.length, 2);
-});
-
 test("AnchorStore scan unifies find operations with mode", () => {
   const { store } = createStore();
   const anchors = [

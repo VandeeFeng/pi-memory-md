@@ -1,41 +1,20 @@
-// Covers session lifecycle hooks, tape-tool registration timing, and config reload across extension restarts.
+// Covers session lifecycle hooks, command/tool registration timing, and config reload across extension restarts.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { mock, test } from "node:test";
 import memoryMdExtension from "../index.js";
-import { createTempDir, initGitRepo, writeJson } from "./test-helpers.js";
+import { createSessionManager, createTempDir, createUi, initGitRepo, writeJson } from "./test-helpers.js";
 
 type HandlerMap = Map<string, (event: any, ctx: any) => Promise<unknown> | unknown>;
 
 type Harness = {
   handlers: HandlerMap;
+  registeredCommands: string[];
   registeredTools: string[];
   execCalls: Array<{ command: string; args: string[]; cwd?: string }>;
 };
-
-function createSessionManager() {
-  return {
-    getLeafId: () => "entry-1",
-    getSessionId: () => "session-1",
-    getEntry: () => undefined,
-    getEntries: () => [],
-    getLabel: () => undefined,
-    labelsById: new Map<string, string>(),
-    labelTimestampsById: new Map<string, string>(),
-  };
-}
-
-function createUi() {
-  const notifications: Array<{ message: string; level: string }> = [];
-  return {
-    notifications,
-    notify(message: string, level: string) {
-      notifications.push({ message, level });
-    },
-  };
-}
 
 function bootExtension(
   homeDir: string,
@@ -43,6 +22,7 @@ function bootExtension(
   execHandler?: (command: string, args: string[], options?: { cwd?: string }) => Promise<{ stdout?: string }>,
 ): Harness {
   const handlers: HandlerMap = new Map();
+  const registeredCommands: string[] = [];
   const registeredTools: string[] = [];
   const execCalls: Array<{ command: string; args: string[]; cwd?: string }> = [];
   const homedirMock = mock.method(os, "homedir", () => homeDir);
@@ -57,7 +37,9 @@ function bootExtension(
       registerTool(tool: { name: string }) {
         registeredTools.push(tool.name);
       },
-      registerCommand() {},
+      registerCommand(name: string) {
+        registeredCommands.push(name);
+      },
       sendMessage() {},
       async exec(command: string, args: string[], options?: { cwd?: string }) {
         execCalls.push({ command, args, cwd: options?.cwd });
@@ -72,7 +54,7 @@ function bootExtension(
     homedirMock.mock.restore();
   }
 
-  return { handlers, registeredTools, execCalls };
+  return { handlers, registeredCommands, registeredTools, execCalls };
 }
 
 function setupMemoryProject(homeDir: string, projectDir: string): { localPath: string; memoryDir: string } {
@@ -85,6 +67,27 @@ function setupMemoryProject(homeDir: string, projectDir: string): { localPath: s
   );
   return { localPath, memoryDir };
 }
+
+test("memory-anchor command is only registered when tape is enabled", () => {
+  const disabledHomeDir = createTempDir("pi-memory-md-index-home-disabled");
+  const disabledProjectDir = createTempDir("pi-memory-md-index-project-disabled");
+  const enabledHomeDir = createTempDir("pi-memory-md-index-home-enabled");
+  const enabledProjectDir = createTempDir("pi-memory-md-index-project-enabled");
+
+  writeJson(path.join(disabledHomeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": { tape: { enabled: false } },
+  });
+  writeJson(path.join(enabledHomeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": { tape: {} },
+  });
+
+  const disabled = bootExtension(disabledHomeDir, disabledProjectDir);
+  const enabled = bootExtension(enabledHomeDir, enabledProjectDir);
+
+  assert.deepEqual(disabled.registeredCommands, ["memory-refresh", "memory-check"]);
+  assert.equal(disabled.registeredCommands.includes("memory-anchor"), false);
+  assert.equal(enabled.registeredCommands.includes("memory-anchor"), true);
+});
 
 test("session_start registers tape tools only once and skips start hooks for replaced sessions", async () => {
   const homeDir = createTempDir("pi-memory-md-lifecycle-home-1");
@@ -109,15 +112,15 @@ test("session_start registers tape tools only once and skips start hooks for rep
 
   await sessionStart?.(
     { reason: "new", previousSessionFile: "/tmp/old-session.jsonl" },
-    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") },
   );
   await sessionStart?.(
     { reason: "fork", previousSessionFile: "/tmp/old-session.jsonl" },
-    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") },
   );
   await sessionStart?.(
     { reason: "resume", previousSessionFile: "/tmp/old-session.jsonl" },
-    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") },
   );
 
   assert.equal(harness.execCalls.length, 0);
@@ -152,11 +155,11 @@ test("session_start runs start hooks for startup sessions", async () => {
 
   await sessionStart?.(
     { reason: "startup" },
-    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") },
   );
   await beforeAgentStart?.(
     { prompt: "hello", systemPrompt: "SYSTEM" },
-    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager() },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") },
   );
 
   assert.deepEqual(
@@ -197,10 +200,13 @@ test("session_start runs start hooks for startup sessions and before_agent_start
   const beforeAgentStart = harness.handlers.get("before_agent_start");
   const ui = createUi();
 
-  await sessionStart?.({ reason: "startup" }, { cwd: projectDir, ui, sessionManager: createSessionManager() });
+  await sessionStart?.(
+    { reason: "startup" },
+    { cwd: projectDir, ui, sessionManager: createSessionManager([], "entry-1") },
+  );
   const result = await beforeAgentStart?.(
     { prompt: "hello", systemPrompt: "SYSTEM" },
-    { cwd: projectDir, ui, sessionManager: createSessionManager() },
+    { cwd: projectDir, ui, sessionManager: createSessionManager([], "entry-1") },
   );
 
   assert.deepEqual(
@@ -247,7 +253,7 @@ test("session_shutdown runs end hooks only when memory is initialized", async ()
   const sessionShutdown = harness.handlers.get("session_shutdown");
   const ui = createUi();
 
-  await sessionShutdown?.({}, { cwd: projectDir, ui, sessionManager: createSessionManager() });
+  await sessionShutdown?.({}, { cwd: projectDir, ui, sessionManager: createSessionManager([], "entry-1") });
   assert.equal(
     harness.execCalls.some((call) => call.args[0] === "push"),
     true,
@@ -261,7 +267,7 @@ test("session_shutdown runs end hooks only when memory is initialized", async ()
   harness.execCalls.length = 0;
   ui.notifications.length = 0;
 
-  await sessionShutdown?.({}, { cwd: projectDir, ui, sessionManager: createSessionManager() });
+  await sessionShutdown?.({}, { cwd: projectDir, ui, sessionManager: createSessionManager([], "entry-1") });
   assert.equal(harness.execCalls.length, 0);
   assert.equal(ui.notifications.length, 0);
 });
