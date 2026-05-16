@@ -41,13 +41,14 @@ import { getTapeBasePath } from "./utils.js";
 
 // Shared extension state cached across pi lifecycle events.
 type CachedContext = { content: string; fileCount: number };
+type InitialContextState = { status: "pending" } | { status: "empty" } | { status: "ready"; value: CachedContext };
 
 type ExtensionState = {
   tapeToolsRegistered: boolean;
   sessionStartHookPromise: ReturnType<typeof runHookTrigger> | null;
   contextWarmupPromise: Promise<void> | null;
-  initialMemoryContext: CachedContext | null;
-  initialTapeContext: CachedContext | null;
+  initialMemoryContext: InitialContextState;
+  initialTapeContext: InitialContextState;
   hasDeliveredInitialContext: boolean;
   pendingHandoffMatch: PendingHandoffMatch | null;
   tapeGate: TapeGateResult | null;
@@ -68,8 +69,8 @@ function createExtensionState(): ExtensionState {
     tapeToolsRegistered: false,
     sessionStartHookPromise: null,
     contextWarmupPromise: null,
-    initialMemoryContext: null,
-    initialTapeContext: null,
+    initialMemoryContext: { status: "pending" },
+    initialTapeContext: { status: "pending" },
     hasDeliveredInitialContext: false,
     pendingHandoffMatch: null,
     tapeGate: null,
@@ -79,6 +80,10 @@ function createExtensionState(): ExtensionState {
 }
 
 // Tape runtime setup and reuse for the current project/session.
+function getReadyContext(context: InitialContextState): CachedContext | undefined {
+  return context.status === "ready" ? context.value : undefined;
+}
+
 function ensureTapeRuntime(
   settings: MemoryMdSettings,
   state: ExtensionState,
@@ -133,14 +138,17 @@ async function cacheInitialContext(
   const baseMemoryContext = settings.enabled ? await buildMemoryContextAsync(settings, ctx.cwd) : null;
   state.initialMemoryContext = baseMemoryContext
     ? {
-        content: formatMemoryContext(baseMemoryContext),
-        fileCount: countMemoryContextFiles(baseMemoryContext),
+        status: "ready",
+        value: {
+          content: formatMemoryContext(baseMemoryContext),
+          fileCount: countMemoryContextFiles(baseMemoryContext),
+        },
       }
-    : null;
+    : { status: "empty" };
 
   const tapeRuntime = state.tapeGate?.enabled === true ? state.activeTapeRuntime : null;
   if (!tapeRuntime) {
-    state.initialTapeContext = null;
+    state.initialTapeContext = { status: "empty" };
     return;
   }
 
@@ -149,7 +157,7 @@ async function cacheInitialContext(
   const selectedFiles = await tapeRuntime.selector.finalizeContextFiles(memoryFiles);
 
   if (selectedFiles.length === 0) {
-    state.initialTapeContext = null;
+    state.initialTapeContext = { status: "empty" };
     return;
   }
 
@@ -158,7 +166,9 @@ async function cacheInitialContext(
     handoffMode: settings.tape?.anchor?.mode ?? "auto",
   });
 
-  state.initialTapeContext = content?.trim() ? { content, fileCount: selectedFiles.length } : null;
+  state.initialTapeContext = content?.trim()
+    ? { status: "ready", value: { content, fileCount: selectedFiles.length } }
+    : { status: "empty" };
 }
 
 function scheduleContextWarmup(
@@ -196,8 +206,8 @@ function initDeliveryContent(
   const memoryExists = fs.existsSync(getMemoryCoreDir(memoryDir));
 
   state.hasDeliveredInitialContext = false;
-  state.initialMemoryContext = null;
-  state.initialTapeContext = null;
+  state.initialMemoryContext = { status: "pending" };
+  state.initialTapeContext = { status: "pending" };
 
   if (!memoryExists && !settings.tape?.enabled) {
     return false;
@@ -234,7 +244,10 @@ async function prepareBeforeAgentStart(
 ): Promise<void> {
   ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
 
-  const needsContextInit = !state.initialMemoryContext && !state.initialTapeContext && !state.contextWarmupPromise;
+  const needsContextInit =
+    state.initialMemoryContext.status === "pending" &&
+    state.initialTapeContext.status === "pending" &&
+    !state.contextWarmupPromise;
   if (needsContextInit) {
     const initialized = initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: false });
     if (!initialized && !state.contextWarmupPromise) {
@@ -324,7 +337,7 @@ function deliverStartupContext(
   const shouldDeliverInitialContext = mode === "system-prompt" || !state.hasDeliveredInitialContext;
 
   if (tapeState.tapeActive && shouldDeliverInitialContext) {
-    const tapeContext = state.initialTapeContext;
+    const tapeContext = getReadyContext(state.initialTapeContext);
     if (!tapeContext || tapeContext.content.trim().length === 0) {
       if (mode === "message-append") {
         state.hasDeliveredInitialContext = true;
@@ -351,8 +364,9 @@ function deliverStartupContext(
 
   if (tapeState.tapeEnabled && !tapeState.tapeActive) return undefined;
 
-  if (state.initialMemoryContext && shouldDeliverInitialContext) {
-    const { content, fileCount } = state.initialMemoryContext;
+  const memoryContext = getReadyContext(state.initialMemoryContext);
+  if (memoryContext && shouldDeliverInitialContext) {
+    const { content, fileCount } = memoryContext;
     ctx.ui.notify(`Memory delivered: ${fileCount} files (${mode})`, "info");
 
     if (mode === "message-append") {
@@ -537,7 +551,8 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
     handler: async (_args, ctx) => {
       await cacheInitialContext(settings, state, ctx);
 
-      if (!state.initialMemoryContext) {
+      const memoryContext = getReadyContext(state.initialMemoryContext);
+      if (!memoryContext) {
         ctx.ui.notify("No memory files found to refresh", "warning");
         return;
       }
@@ -546,7 +561,7 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
 
       const mode = settings.delivery ?? settings.injection ?? "message-append";
 
-      const { content, fileCount } = state.initialMemoryContext;
+      const { content, fileCount } = memoryContext;
 
       if (mode === "message-append") {
         pi.sendMessage({

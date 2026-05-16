@@ -274,6 +274,60 @@ test("before_agent_start skips tape delivery and anchor recording when onlyGit i
   assert.equal(fs.existsSync(path.join(localPath, "TAPE")), false);
 });
 
+test("before_agent_start does not deliver tape context later after an empty initial selection", async () => {
+  const homeDir = createTempDir("pi-memory-md-index-mode-home-empty-tape-later");
+  const projectDir = createTempDir("pi-memory-md-index-mode-project-empty-tape-later");
+  const localPath = path.join(homeDir, "memory-root");
+  const memoryDir = path.join(localPath, path.basename(projectDir));
+  const projectFile = path.join(projectDir, "src.ts");
+  const entries: SessionEntry[] = [];
+
+  fs.mkdirSync(path.join(memoryDir, "core"), { recursive: true });
+  fs.writeFileSync(projectFile, "export const value = 1;\n");
+  initGitRepo(projectDir);
+
+  writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": {
+      localPath,
+      delivery: "message-append",
+      tape: {
+        enabled: true,
+        context: { strategy: "smart", fileLimit: 5 },
+      },
+    },
+  });
+
+  const extension = bootExtension(homeDir, projectDir);
+  const beforeAgentStart = extension.handlers.get("before_agent_start");
+  const ui = createUi();
+  const sessionManager = createSessionManager(entries);
+
+  const first = await beforeAgentStart?.(
+    { prompt: "hello", systemPrompt: "SYSTEM" },
+    { cwd: projectDir, ui, sessionManager },
+  );
+
+  entries.push({
+    type: "message",
+    timestamp: new Date().toISOString(),
+    id: crypto.randomUUID(),
+    parentId: null,
+    message: {
+      role: "assistant",
+      content: [{ type: "toolCall", name: "read", arguments: { path: "src.ts" } }],
+    },
+  } as unknown as SessionEntry);
+
+  const second = await beforeAgentStart?.(
+    { prompt: "continue", systemPrompt: "SYSTEM" },
+    { cwd: projectDir, ui, sessionManager },
+  );
+
+  assert.equal(first, undefined);
+  assert.equal(second, undefined);
+  assert.equal(extension.sentMessages.length, 0);
+});
+
 test("before_agent_start skips empty tape delivery when selected file count is zero", async () => {
   for (const delivery of ["message-append", "system-prompt"] as const) {
     const homeDir = createTempDir(`pi-memory-md-index-mode-home-empty-tape-${delivery}`);
