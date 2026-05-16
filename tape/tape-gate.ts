@@ -272,7 +272,9 @@ async function renderBridgeMessages(
 function isBridgeMessageEntry(
   entry: SessionEntry,
 ): entry is SessionEntry & { message: { role: string; content?: unknown } } {
-  return entry.type === "message" && (entry.message.role === "user" || entry.message.role === "assistant");
+  if (entry.type !== "message") return false;
+  if (entry.message.role !== "user" && entry.message.role !== "assistant") return false;
+  return extractMessageContent(entry.message.content).trim().length > 0;
 }
 
 function escapeXml(value: string): string {

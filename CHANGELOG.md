@@ -3,6 +3,10 @@
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
 ## [Unreleased]
+
+<details>
+<summary>Release notes</summary>
+
 https://xavier.xfaang.com/blog/do-agents-dream.html It is written from an agent's point of view, comparing every new conversation to a kind of amnesia. I found that pretty interesting.
 
 With my still-limited understanding of context engineering, even though model providers keep claiming larger and larger maximum context windows, my actual experience is that the truly effective context window has not grown that much. Compute capacity and the model's attention mechanism are probably still the main constraints on output quality.
@@ -26,6 +30,8 @@ This project should continue to focus on long-term memory. The added `memory-dig
 The `sessionBridge` hook is a tiny handoff for closely related session switches. On `new`, `resume`, or `fork`, when the previous session's last entry is within the bridge window (60 seconds by default), a small BM25 index is built from its user/assistant messages, and the prepared index is held until the next `before_agent_start`. At that point the current prompt queries the index, and only matches above the score threshold are rendered into a compact `<session_bridge>` block.
 
 When tape-mode is on, `sessionBridge` also scans handoff anchors and builds a separate BM25 index from each anchor's name, summary, and purpose. Those anchor matches are rendered as an extra `<tape_anchors>` section. Without tape, the message bridge still works.
+
+</details>
 
 ## Breaking Changes
 
@@ -53,6 +59,9 @@ When tape-mode is on, `sessionBridge` also scans handoff anchors and builds a se
 - Improved `tape_search` anchor context output: `contextLines` now skips empty handoff helper messages and anchor JSON tool results, showing the surrounding user/assistant text instead.
 
 ## [0.1.36] - 2026-05-06
+
+<details>
+<summary>Release notes</summary>
 
 Pi is moving so fast now. I missed the releases for just one week, and there were already so many new features.
 
@@ -100,6 +109,8 @@ The trend toward industrialization and standardization is unavoidable, but as al
 
 我无法保证这些代码的质量和品味，但至少 changelog 我可以完全手写 （英文部分机翻）。
 
+</details>
+
 ## New Features
 
 - **`/memory-review` slash command**: Opens an interactive Memory Review overlay for browsing tape anchors by timeline, keyword relations, and stats, with keyboard navigation and dynamic terminal-aware layout. Pressing `enter` on a selected anchor now jumps through pi's session tree to the first assistant entry after that anchor. This slash command is only registered when tape mode is enabled.
@@ -128,6 +139,9 @@ The trend toward industrialization and standardization is unavoidable, but as al
 
 ## [0.1.35] - 2026-04-30
 
+<details>
+<summary>Release notes</summary>
+
 For global and shared knowledge, I still personally prefer AGENTS.md + manual management. So I won't add global memory writes to `memory_write`; the native `write` tool + AGENTS.md is already convenient enough.
 
 pi-memory-md should first ensure strong memory management and optimization for the project level — that's the design principle and tradeoff behind this choice.
@@ -137,6 +151,8 @@ I still believe that things requiring hand-writing should not be delegated to AI
 At the outset, I didn’t want `pi-memory-md` to become overly complex. It should be a compatible memory assistant tool, and lately I’ve been continuously experimenting with and refining that compatibility.
 
 Those new Markdown files are not mandatory, they can work well alongside the user’s custom AGENTS.md.
+
+</details>
 
 ## Changes
 
@@ -158,11 +174,16 @@ Those new Markdown files are not mandatory, they can work well alongside the use
 
 ## [0.1.34]
 
+<details>
+<summary>Release notes</summary>
+
 God damn, the LLM makes so many logic errors! Even the bash script!
 
 If it isn’t stated very explicitly in the prompt, the LLM’s logic gets confused easily once the context grows a little longer. I’ve noticed that recent LLMs seem noticeably dumber lately—maybe I’m just not paying enough.
 
 This is an emergency patch release that had to be shipped.
+
+</details>
 
 ### Changes
 
@@ -172,6 +193,9 @@ This is an emergency patch release that had to be shipped.
   To be precise: the script now only creates `core/project/` and `core/task/` for the project, plus `{globalMemory}/core/task/` when global memory is enabled. Files such as `core/prefer.md`, `core/task/task.md`, `{globalMemory}/core/prefer.md`, and `{globalMemory}/core/task/task.md` are optional and created only if the user chooses the corresponding templates or imports preferences.
 
 ## [0.1.33] - 2026-04-28
+
+<details>
+<summary>Release notes</summary>
 
 I'm really happy to have such helpful contributions — everyone's support has helped uncover and fix many issues I couldn't have found on my own.
 
@@ -190,6 +214,8 @@ This skill provides guides through creating the memory folder structure and asks
 This also better complements the design of globalMemory.
 
 The experience of this part is the same as before, even smoother.
+
+</details>
 
 ### Features
 
@@ -229,6 +255,9 @@ The experience of this part is the same as before, even smoother.
 
 ## [0.1.32] - 2026-04-27
 
+<details>
+<summary>Release notes</summary>
+
 I think the `memory_read` tool is a bad idea — it doesn't add any real value and only imposes unnecessary constraints on reading and managing memory files, also hindered feature expansion.
 
 It's gone to jail!
@@ -246,6 +275,8 @@ For modern agents, context handling is where the big gains are. Got plenty of id
 For now, this project needs to focus on the fundamentals — solid framework design, stability, and extensibility.
 
 **Strange thing**: whenever I publish an npm release, a new big issue always shows up.
+
+</details>
 
 ### Features
 
@@ -273,6 +304,9 @@ For now, this project needs to focus on the fundamentals — solid framework des
 
 ## [0.1.31] - 2026-04-25
 
+<details>
+<summary>Release notes</summary>
+
 I can't wrap my head around why LLM came up the code checking for a `.git` directory by walking up the folder tree to decide if it's a git repo — that's so dumb!
 
 In this release, all memory context and tape-mode file selections are now pre-built asynchronously at `session_start` and cached for reuse at every `before_agent_start`, significantly cutting latency and eliminating the stuttering you used to feel on each turn.
@@ -282,6 +316,8 @@ Security boundaries have also been hardened: symlink traversals inside the memor
 In my daily use, I sometimes run pi outside of a git repo. So I added `onlyGit` and `excludeDirs` to avoid triggering tape's file analysis all the time.
 
 There’s still some logic problems I need to tidy up.
+
+</details>
 
 ### Features
 
@@ -309,6 +345,9 @@ There’s still some logic problems I need to tidy up.
 
 ## [0.1.30] - 2026-04-23
 
+<details>
+<summary>Release notes</summary>
+
 I'am sorry for so many default settings changes like the tapePath in tape-mode these days. But all these default settings remain customizable.
 
 The reason is I’m thinking hard about the base logic in pi-memory-md, both the code side and the design side.
@@ -320,6 +359,8 @@ There’s still a lot of logic problems in the code I need to tidy up before nex
 After more than half a month of daily use and iteration, tape-mode is much more stable now.
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
+
+</details>
 
 ### Features
 
