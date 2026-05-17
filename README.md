@@ -62,7 +62,7 @@ Session Start
 
 ## Usage Examples
 
-Simply talk to pi - the LLM will automatically use memory tools/skiils when appropriate:
+Simply talk to pi - the LLM will automatically use memory tools/skills when appropriate:
 
 ```
 You: Save my preference for 2-space indentation in TypeScript files to memory.
@@ -114,6 +114,21 @@ The LLM can use these tools and [skills](skills/) to interact with memory:
 | `memory-write` | Create or update memory markdown files with valid frontmatter using native file tools |
 
 User can easily extend their own workflows with these skills. Although this sacrifices some stability, it improves flexibility and user autonomy. This is a deliberate tradeoff after my careful consideration.
+
+When multiple skills have the same name, pi uses the first one found in this order: project settings, project `.pi/skills/`, user settings, user `~/.pi/agent/skills/`, then packaged skills. This means project or user skills override the built-in packaged skills with the same name.
+
+To disable packaged `pi-memory-md` skills, configure the package skills filter. Use an empty array to disable all skills, or exclude specific skill paths:
+
+```md
+{
+  "packages": [
+    {
+      "source": "npm:pi-memory-md",
+      "skills": [] // or ["!skills/memory-write/SKILL.md"]
+    }
+  ]
+}
+```
 
 ## Memory Delivery Modes
 
