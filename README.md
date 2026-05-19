@@ -364,21 +364,21 @@ Each anchor has:
 - **`timestamp`**: ISO timestamp of when the anchor was created
 - **`meta`**: Optional metadata including `summary`, `trigger`, `keywords`, `purpose`. `purpose` is a 1-2 word label (e.g., `feature`, `review`, `deploy`). `trigger` can be `direct` (agent auto), `keyword` (configured keywords matched), or `manual` (explicit user/tool call)
 
-In short, tape anchors are markers that connect user intent with conversation history. When a user asks the agent to retrieve relevant information from a large memory space, the real query is often not a precise string match. It is more often a vague intention, decision, or task transition that appeared earlier in the conversation. Anchors preserve those moments as explicit markers, which can be more useful than only optimizing RAG-style retrieval over raw text or database records.
+In short, tape anchors are markers that connect user intent with conversation history.
 
-Stored within pi session entries, tape anchors link intent back to the exact place where it appeared in the session history and to the larger body of memory data around it. This makes important moments precisely locatable and traceable: context delivery can reconstruct the relevant memory path from the anchor instead of searching through everything blindly. It can then select relevant memory files and recently active project files around those points, optionally including concise `recent focus` hints like `read 340-420` or `edit 390-399`.
+When a user asks the agent to retrieve relevant information from a large memory space, the real query is often not a precise string match. It is more often a vague intention, decision, or task transition.
 
-Instead of asking the LLM to infer the user's intent from vague semantic signals later, it is better to record that intent when the user expresses it.
-
-Large context windows do not remove the need for careful context control. For a specific task, the most useful context is still the context that has been selected and shaped precisely. Before relying on RAG, traditional marking, indexing, and search discipline still matter. The quality of text given to the LLM, and the way that information is recorded and managed, directly affect how relevant the model's answers will be once the context grows large.
+Stored within pi session entries, tape anchors as explicit markers link intent back to the exact place where it appeared in the session history and to the larger body of memory data around it, which can be more useful than only optimizing RAG-style retrieval over raw text or database records.
 
 Beyond context engineering, `tape anchors` is an implementation of text recording and management.
 
-Keywords make this intent-recording process more practical. They act as lightweight signals for moments when the user is likely expressing an important intention, decision, or transition. Instead of waiting for future retrieval to guess what mattered, keyword detection can guide the agent to create a keyword anchor at the moment the intent appears.
+Large context windows do not remove the need for careful context control. Before relying on RAG, traditional marking, indexing, and search discipline still matter. The quality of text given to the LLM, and the way that information is recorded and managed, directly affect how relevant the model's answers will be.
 
-Keyword detection sends a hidden message that asks the agent to consider creating a keyword anchor, and the agent can still refuse when the anchor would not be useful. Anchor names are also mirrored into pi `/tree` labels for the session nodes they attach to, with stale labels cleaned up before resync.
+Instead of asking the LLM to infer the user's intent from vague semantic signals later, it is better to record that intent when the user expresses it.
 
-Lifecycle anchors (`session/*`) are created automatically, while handoff anchors can be created manually via `/memory-anchor`. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked, so the agent will not create anchors on its own. Keyword-matched hidden instructions and `/memory-anchor` still work, keeping explicit user control available.
+Keywords make this intent-recording process more practical. When a configured keyword matches, keyword detection sends a hidden message that asks the agent to consider creating a keyword anchor, and the agent can still refuse when the anchor would not be useful. Anchor names are also mirrored into pi `/tree` labels for the session nodes they attach to, with stale labels cleaned up before resync.
+
+Lifecycle anchors (`session/*`) are created automatically, while handoff anchors can be created manually via `/memory-anchor`. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked while keyword detection and `/memory-anchor` still work, so the agent will not create anchors on its own.
 
 The combination of anchors and keywords closes the loop: intent -> memory data -> intent, while keeping automation under user control.
 
@@ -398,7 +398,7 @@ The panel provides:
 - **Fuzzy search**: Type `/` to filter anchors across names, summaries, purposes, triggers, keywords, and timestamps — press `Esc` or `Ctrl+c` to leave search input
 - **Anchor deletion**: Select an anchor and press `Ctrl+d` to delete it
 
-The panel only helps you land on the right anchor. After jumping there, any deeper branching or tree operations still belong in Pi's native `/tree` panel. This design is intentionally non-invasive — it uses pi's native APIs without custom TUI rendering, so it won't break across pi versions.
+The panel only helps you land on the right anchor. After jumping there, any deeper branching or tree operations still belong in Pi's native `/tree` panel. This design is intentionally non-invasive.
 
 ### Full Configuration
 
