@@ -19,6 +19,7 @@ import {
   loadSettings,
   renderMemoryTree,
 } from "./memory-core.js";
+
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
 import { MemoryFileSelector } from "./tape/tape-context.js";
 import {
@@ -600,10 +601,22 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
         isDirty ? "warning" : "info",
       );
 
-      const requestedTreeOutputLines = Number.parseInt(args.trim(), 10);
-      const maxTreeOutputLines =
-        Number.isFinite(requestedTreeOutputLines) && requestedTreeOutputLines > 0 ? requestedTreeOutputLines : 25;
-      ctx.ui.notify(renderMemoryTree(info.memoryPath, maxTreeOutputLines), "info");
+      const tokens = args.trim().split(/\s+/).filter(Boolean);
+      const requestedTreeLines = tokens
+        .map((token) => Number.parseInt(token, 10))
+        .find((value) => Number.isFinite(value));
+      const maxTreeLines = requestedTreeLines && requestedTreeLines > 0 ? requestedTreeLines : 25;
+      const scope = tokens.some((token) => token === "-g" || token === "--global" || token === "global")
+        ? "global"
+        : "project";
+      const memoryScope = scope === "global" ? info.global : info.project;
+
+      if (!memoryScope.dir || !memoryScope.exists) {
+        ctx.ui.notify(`Memory ${scope} directory is not configured or does not exist.`, "warning");
+        return;
+      }
+
+      ctx.ui.notify(renderMemoryTree(memoryScope.dir, maxTreeLines), "info");
     },
   });
 

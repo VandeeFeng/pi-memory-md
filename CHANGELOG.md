@@ -45,6 +45,7 @@ When tape-mode is on, `sessionBridge` also scans handoff anchors and builds a se
 
 ## Changed
 
+- Added `/memory-check` scope options (`-g`/`--global`/`global` and `-p`/`--project`/`project`) while keeping tree line-count arguments order-independent.
 - Classified pi's native `session_start` reasons into `runtimeStart` (`startup`/`reload`) and `switchStart` (`new`/`resume`/`fork`) so the `sessionStart` hook type maps to our runtime-start lifecycle, while switch starts remain available for `previousSessionFile`-based bridge context.
 - Updated `tape_read` formatted output controls: defaults to 300 content characters per entry, accepts `maxContentChars` for custom truncation, and uses `maxContentChars: null` for full content.
 - Improved tape edit focus extraction by counting only changed diff lines instead of surrounding context lines. Pi's native edit result returns a numbered diff that includes both changed lines and nearby context lines; tape now ignores those context lines, parses only `+` lines as the primary edit focus, falls back to `-` lines for deletion-only edits, and uses `firstChangedLine` only when no changed line can be extracted.
