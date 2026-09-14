@@ -36,8 +36,13 @@ type JiebaModule = {
 };
 
 let jiebaCutPromise: Promise<((text: string, hmm?: boolean) => string[]) | null> | null = null;
+let jiebaCutUsable = true;
 
 async function getJiebaCut(): Promise<((text: string, hmm?: boolean) => string[]) | null> {
+  // nodejieba loads its native addon lazily, so a successful import() does not
+  // prove the binding can be dlopen'd. Once a call fails we stop retrying and
+  // permanently fall back to fallbackChineseTokens.
+  if (!jiebaCutUsable) return null;
   jiebaCutPromise ??= import("nodejieba")
     .then(
       (module: JiebaModule) =>
@@ -47,8 +52,31 @@ async function getJiebaCut(): Promise<((text: string, hmm?: boolean) => string[]
   return jiebaCutPromise;
 }
 
+function cutWithJiebaFallback(jiebaCut: ((text: string, hmm?: boolean) => string[]) | null, text: string): string[] {
+  if (!jiebaCut) return fallbackChineseTokens(text);
+  try {
+    const tokens = jiebaCut(text, true);
+    if (!Array.isArray(tokens)) throw new Error("nodejieba returned a non-array result");
+    return tokens;
+  } catch {
+    jiebaCutUsable = false;
+    return fallbackChineseTokens(text);
+  }
+}
+
 function fallbackChineseTokens(text: string): string[] {
-  return [...text.matchAll(/\p{Script=Han}+/gu)].map((match) => match[0]);
+  const tokens: string[] = [];
+  for (const match of text.matchAll(/\p{Script=Han}+/gu)) {
+    const run = match[0];
+    tokens.push(run);
+    // Chinese has no whitespace, so a whole run is one token and only exact
+    // phrase matches hit. Emit bigrams (and lone chars) as subtokens to keep
+    // partial queries searchable. normalizeForBm25 runs on both docs and
+    // queries, so the extra subtokens stay symmetric and do not skew scoring.
+    if (run.length === 1) continue;
+    for (let i = 0; i < run.length - 1; i += 1) tokens.push(run.slice(i, i + 2));
+  }
+  return tokens;
 }
 
 async function normalizeForBm25(text: string): Promise<string> {
@@ -56,7 +84,7 @@ async function normalizeForBm25(text: string): Promise<string> {
   if (!HAN_REGEX.test(text)) return text;
 
   const jiebaCut = await getJiebaCut();
-  const rawTokens = jiebaCut?.(text, true) ?? fallbackChineseTokens(text);
+  const rawTokens = cutWithJiebaFallback(jiebaCut, text);
   const tokens = rawTokens.map((token) => token.trim()).filter(Boolean);
   const encodedTokens = tokens.map((token) => `zh_${Buffer.from(token, "utf8").toString("hex")}`);
   return `${text} ${tokens.join(" ")} ${encodedTokens.join(" ")}`.trim();
