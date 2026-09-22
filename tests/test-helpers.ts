@@ -8,7 +8,9 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 const tempDirs: string[] = [];
 
 export function createTempDir(prefix: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  // realpath: macOS hands out `/var/...` while git reports `/private/var/...` for
+  // the same directory, which breaks tests that compare paths literally.
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`)));
   tempDirs.push(dir);
   return dir;
 }

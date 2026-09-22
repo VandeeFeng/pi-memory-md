@@ -103,6 +103,12 @@ The LLM can use these tools and [skills](skills/) to interact with memory:
 |------|------------|-------------|
 | `memory_sync` | `{action: "pull" / "push" / "status"}` | Git operations |
 | `memory_search` | `{query?, grep?, rg?}` | Search by tags/description and custom grep/ripgrep patterns |
+
+`query` is BM25 over `title`, `tags`, `description`, and body, boosted in that order.
+The tokenizer splits on Unicode boundaries and folds diacritics, so `đặt tên` and `dat ten`
+match the same documents; Vietnamese and English function words are stripped; results below
+30% of the best hit are dropped (so "no strong match" is a valid answer); and identifiers
+keep their hyphens. Use `grep`/`rg` when you need exact text instead of ranking.
 | `memory_check` | `{directory?: string}` | Check current project memory folder structure or a specific project subdirectory |
 
 #### Memory SKILLs
@@ -148,6 +154,8 @@ When tape mode is enabled, the same delivery mode still applies, but tape change
 ```
 
 - Memory is sent as a custom message delivered only once per session (on first agent turn)
+- Re-injected after every successful compaction, because pi may summarize the custom
+  message away as part of the compaction cut point. `/memory-refresh` does the same on demand
 - Not visible in the TUI (`display: false` in pi-tui)
   This hidden message is delivered in the same agent turn, so it does not create a second LLM request; it only adds tokens to the current request
 - Persists in the session history
@@ -201,6 +209,16 @@ More trigger actions will be added later, even custom hooks.
 
     // `injection` is still accepted as a legacy alias for `delivery`.
     "delivery": "message-append",
+
+    // Budget for the injected index, in characters. Entries past it are dropped
+    // (project tail first) and a truncation line names what was left out.
+    // 0 disables the cap.
+    "maxContextChars": 24000,
+
+    // Write core/state.md before a compaction: files edited this session plus the
+    // last request. Deterministic, no model call. Off by default.
+    "stateCapture": false,
+
     "hooks": {
       "sessionStart": ["pull"],
       "sessionEnd": ["push"],
@@ -217,6 +235,8 @@ More trigger actions will be added later, even custom hooks.
 | `memoryDir.localPath` | `~/.pi/memory-md` | Local memory clone path |
 | `memoryDir.globalMemory` | disabled | Shared memory folder name (relative to `localPath`), enabled only when explicitly configured |
 | `delivery` | `"message-append"` | Memory delivery mode: `"message-append"`, `"system-prompt"` |
+| `maxContextChars` | `24000` | Character budget for the injected index. Entries past it are dropped from the end (project memory before global memory) and a truncation line reports `kept/total`. `0` disables the cap |
+| `stateCapture` | `false` | Write `<memoryDir>/core/state.md` in `session_before_compact` with the files edited this session and the last user request. Deterministic: no model call |
 | `hooks.sessionStart` | `["pull"]` | Actions to run when a session starts, `pull` syncs from upstream and skips another fetch when `FETCH_HEAD` is fresh within 12 hours |
 | `hooks.sessionEnd` | `[]` | Actions to run when a session ends |
 | `hooks.beforeAgentStart` | `[]` | Actions to run before the agent starts; `sessionBridge` bridges relevant context from recent `new`/`resume`/`fork` previous sessions |

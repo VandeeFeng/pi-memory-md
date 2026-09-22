@@ -26,6 +26,220 @@ export type PreparedBm25Docs<T> = {
 
 const HAN_REGEX = /\p{Script=Han}/u;
 
+/**
+ * Orama's tokenizer only knows English stopwords. Vietnamese is written with
+ * space-separated syllables, so function words like "cách" or "không" otherwise
+ * match nearly every document and a Vietnamese query returns the whole store.
+ * Only function words belong here — domain nouns ("file", "biến", "tên", "số") stay.
+ */
+const VI_STOPWORDS = new Set([
+  "ai",
+  "bao",
+  "bị",
+  "bởi",
+  "cả",
+  "các",
+  "cái",
+  "cần",
+  "cách",
+  "chỉ",
+  "cho",
+  "chưa",
+  "có",
+  "còn",
+  "của",
+  "cũng",
+  "do",
+  "dưới",
+  "đã",
+  "đang",
+  "để",
+  "đến",
+  "đều",
+  "đó",
+  "được",
+  "đúng",
+  "gì",
+  "hay",
+  "hơn",
+  "hoặc",
+  "khi",
+  "không",
+  "lại",
+  "là",
+  "làm",
+  "lên",
+  "lắm",
+  "lúc",
+  "mà",
+  "một",
+  "mỗi",
+  "nào",
+  "này",
+  "nếu",
+  "nên",
+  "nhiều",
+  "như",
+  "nhưng",
+  "những",
+  "nữa",
+  "phải",
+  "quá",
+  "ra",
+  "rất",
+  "rồi",
+  "sẽ",
+  "sao",
+  "tại",
+  "tất",
+  "thì",
+  "theo",
+  "thế",
+  "trong",
+  "trên",
+  "từ",
+  "tới",
+  "và",
+  "vào",
+  "vẫn",
+  "về",
+  "với",
+  "vì",
+  "xuống",
+]);
+
+const EN_STOPWORDS = new Set([
+  "a",
+  "about",
+  "after",
+  "all",
+  "also",
+  "an",
+  "and",
+  "any",
+  "are",
+  "as",
+  "at",
+  "be",
+  "because",
+  "been",
+  "being",
+  "both",
+  "but",
+  "by",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "each",
+  "few",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "how",
+  "if",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "may",
+  "might",
+  "more",
+  "most",
+  "must",
+  "of",
+  "on",
+  "only",
+  "or",
+  "other",
+  "our",
+  "out",
+  "over",
+  "should",
+  "some",
+  "such",
+  "than",
+  "that",
+  "the",
+  "their",
+  "them",
+  "then",
+  "there",
+  "these",
+  "they",
+  "this",
+  "those",
+  "to",
+  "under",
+  "up",
+  "was",
+  "we",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "while",
+  "who",
+  "why",
+  "will",
+  "with",
+  "would",
+  "you",
+  "your",
+]);
+
+// Hyphen/underscore/dot stay inside a token: they glue identifiers such as
+// `pointer-events`, `fill-to-fill` or `manager_avatar_url` that a query searches by.
+const TOKEN_SPLIT_REGEX = /[^\p{L}\p{N}_.-]+/u;
+
+/**
+ * Orama's default tokenizer splits on ASCII word boundaries, so every accented
+ * letter acts as a separator: "đặt tên file biến" tokenizes to ["t","n","file","bi"]
+ * and "số" to ["s"]. Those one-character fragments collide across every document,
+ * which is why a query used to return the whole store with a flat score spread.
+ * This tokenizer splits on Unicode boundaries and folds diacritics instead, so
+ * "đặt tên" and "dat ten" both index as ["dat","ten"].
+ */
+const COMBINING_MARKS_REGEX = /\p{Mn}+/gu;
+
+/** Fold accents onto ASCII: NFD strips combining marks, then đ is handled by hand. */
+export function foldDiacritics(token: string): string {
+  return token
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(COMBINING_MARKS_REGEX, "")
+    .replace(/\u0111/g, "d")
+    .normalize("NFC");
+}
+
+const FOLDED_STOPWORDS = new Set([...VI_STOPWORDS, ...EN_STOPWORDS].map(foldDiacritics));
+type MemoryTokenizer = {
+  language: string;
+  normalizationCache: Map<string, string>;
+  tokenize: (raw: string) => string[];
+};
+
+export function createMemoryTokenizer(): MemoryTokenizer {
+  return {
+    language: "multilingual",
+    normalizationCache: new Map(),
+    tokenize(raw: string): string[] {
+      const tokens: string[] = [];
+      for (const piece of raw.split(TOKEN_SPLIT_REGEX)) {
+        const token = foldDiacritics(piece);
+        if (!token || FOLDED_STOPWORDS.has(token)) continue;
+        tokens.push(token);
+      }
+      return tokens;
+    },
+  };
+}
+
 type JiebaModule = {
   default?: {
     cutForSearch?: (text: string, hmm?: boolean) => string[];
@@ -51,8 +265,11 @@ function fallbackChineseTokens(text: string): string[] {
   return [...text.matchAll(/\p{Script=Han}+/gu)].map((match) => match[0]);
 }
 
-async function normalizeForBm25(text: string): Promise<string> {
+export async function normalizeForBm25(text: string): Promise<string> {
   if (!text.trim()) return "";
+  // Han text needs segmentation, which the tokenizer cannot do on its own. Every other
+  // script is left as-is: createMemoryTokenizer splits it, folds diacritics and drops
+  // stopwords, so doing any of that here as well would just be a second pass.
   if (!HAN_REGEX.test(text)) return text;
 
   const jiebaCut = await getJiebaCut();
@@ -81,7 +298,7 @@ export async function prepareBm25Docs<T>(
       content: "string",
     },
     components: {
-      tokenizer: { language: "english" },
+      tokenizer: createMemoryTokenizer() as never,
     },
   });
 
@@ -96,8 +313,12 @@ export async function searchPreparedBm25Docs<T>(
 ): Promise<Array<{ data: T; score: number }>> {
   if (!prepared) return [];
 
+  const term = await normalizeForBm25(query);
+  // An empty term must not fall through to Orama, which would score every document.
+  if (!term) return [];
+
   const result = await search(prepared.db, {
-    term: await normalizeForBm25(query),
+    term,
     properties: ["content"],
     limit,
   });
@@ -106,6 +327,25 @@ export async function searchPreparedBm25Docs<T>(
     data: (hit.document as GenericBm25Doc<T>).data,
     score: hit.score,
   }));
+}
+
+/**
+ * Fraction of the best hit's score a result must reach to be kept. Without a
+ * floor, a query whose terms are all common words returns the entire store and
+ * the tail looks as relevant as the head. "No strong match" is a useful answer.
+ */
+export const DEFAULT_MIN_SCORE_RATIO = 0.3;
+
+export function applyMinScoreRatio<T extends { score: number }>(
+  hits: T[],
+  minScoreRatio = DEFAULT_MIN_SCORE_RATIO,
+): T[] {
+  if (hits.length <= 1 || minScoreRatio <= 0) return hits;
+  const best = hits[0].score;
+  if (!Number.isFinite(best) || best <= 0) return hits;
+  const floor = best * minScoreRatio;
+  const kept = hits.filter((hit) => hit.score >= floor);
+  return kept.length > 0 ? kept : hits.slice(0, 1);
 }
 
 export async function bm25SearchDocs<T>(
@@ -120,6 +360,7 @@ export async function bm25SearchMemoryFiles<Scope extends string>(
   filePaths: Array<{ filePath: string; scope: Scope }>,
   query: string,
   limit = 20,
+  options: { minScoreRatio?: number } = {},
 ): Promise<Array<{ path: string; scope: Scope; score: number }>> {
   const docs: Bm25Doc<Scope>[] = [];
 
@@ -151,14 +392,17 @@ export async function bm25SearchMemoryFiles<Scope extends string>(
       content: "string",
     },
     components: {
-      tokenizer: { language: "english" },
+      tokenizer: createMemoryTokenizer() as never,
     },
   });
 
   await insertMultiple(db, docs);
 
+  const term = await normalizeForBm25(query);
+  if (!term) return [];
+
   const result = await search(db, {
-    term: await normalizeForBm25(query),
+    term,
     properties: ["title", "tags", "description", "content"],
     limit,
     boost: {
@@ -169,9 +413,12 @@ export async function bm25SearchMemoryFiles<Scope extends string>(
     },
   });
 
-  return result.hits.map((hit) => ({
-    path: (hit.document as Bm25Doc<Scope>).path,
-    scope: (hit.document as Bm25Doc<Scope>).scope,
-    score: hit.score,
-  }));
+  return applyMinScoreRatio(
+    result.hits.map((hit) => ({
+      path: (hit.document as Bm25Doc<Scope>).path,
+      scope: (hit.document as Bm25Doc<Scope>).scope,
+      score: hit.score,
+    })),
+    options.minScoreRatio,
+  );
 }

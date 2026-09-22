@@ -67,8 +67,21 @@ export function resolveFrom(root: string, filePath: string): string {
   return path.isAbsolute(filePath) ? filePath : path.resolve(root, filePath);
 }
 
+/**
+ * Resolve symlinks so the same directory compares equal however it was spelled.
+ * macOS reports `/var/...` for `os.tmpdir()` while git returns `/private/var/...`;
+ * without this a repo under a symlinked path looks like "not a git repo".
+ */
+function realpathIfPossible(filePath: string): string {
+  try {
+    return fs.realpathSync.native(filePath);
+  } catch {
+    return filePath;
+  }
+}
+
 export function normalizePathForComparison(filePath: string): string {
-  const resolvedPath = path.resolve(filePath);
+  const resolvedPath = realpathIfPossible(path.resolve(filePath));
   const normalized = process.platform === "win32" ? resolvedPath.replace(/\\/g, "/") : resolvedPath;
   return normalized.toLowerCase();
 }

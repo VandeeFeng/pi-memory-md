@@ -1,6 +1,6 @@
 {
   "name": "pi-memory-md",
-  "version": "0.1.38",
+  "version": "0.2.2",
   "description": "Letta-like memory management for pi using structured markdown files in a git repository",
   "type": "module",
   "license": "MIT",
@@ -64,7 +64,7 @@
   ],
   "scripts": {
     "prepare": "node .husky/install.mjs",
-    "check": "biome check --write --error-on-warnings . && tsgo --noEmit",
+    "check": "biome check --write --error-on-warnings . && tsc --noEmit",
     "test": "node --import tsx --test --test-concurrency=1 tests/*-test.ts",
     "test:file": "node --import tsx --test"
   },

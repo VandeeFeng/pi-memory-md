@@ -6,7 +6,14 @@ import matter from "gray-matter";
 import { DEFAULT_HOOKS, normalizeHooks } from "./hooks.js";
 import { normalizeTapeKeywords } from "./tape/tape-gate.js";
 import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, MemoryMeta, ParsedFrontmatter } from "./types.js";
-import { DEFAULT_LOCAL_PATH, DEFAULT_TAPE_EXCLUDE_DIRS, escapeXml, expandHomePath, getProjectMeta } from "./utils.js";
+import {
+  DEFAULT_LOCAL_PATH,
+  DEFAULT_TAPE_EXCLUDE_DIRS,
+  escapeXml,
+  expandHomePath,
+  getCurrentDate,
+  getProjectMeta,
+} from "./utils.js";
 
 export * from "./types.js";
 export { DEFAULT_LOCAL_PATH, getCurrentDate } from "./utils.js";
@@ -391,12 +398,74 @@ export async function listMemoryFilesAsync(memoryDir: string): Promise<string[]>
   }
 
   await walkDir(memoryDir);
-  return files;
+  // readdir + Promise.all completes in filesystem order, which varies between runs and
+  // machines. Sorting keeps the injected index byte-stable so prompt caches survive a
+  // restart, and makes the block reproducible. Plain sort: code-unit order, no locale.
+  return files.sort();
 }
 
 export function writeMemoryFile(filePath: string, content: string, frontmatter: MemoryFrontmatter): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, matter.stringify(content, frontmatter));
+}
+
+/** Overwritten in place — state is a snapshot, not a log, so history here misleads. */
+export const SESSION_STATE_FILENAME = "state.md";
+
+export type SessionStateInput = {
+  cwd: string;
+  filesTouched: string[];
+  lastPrompt: string;
+  compactionCount: number;
+  now?: Date;
+};
+
+function readFrontmatterValue(filePath: string, key: "created"): string | undefined {
+  try {
+    const parsed = matter(fs.readFileSync(filePath, "utf-8"));
+    const value = parsed.data?.[key];
+    return typeof value === "string" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function renderSessionState(input: SessionStateInput): string {
+  const iso = (input.now ?? new Date()).toISOString();
+  const lines = [
+    "# Session state (auto-captured)",
+    "",
+    "Snapshot taken right before a compaction summarized this session. It is current",
+    "state, not a durable rule: overwrite or delete it once the work is finished.",
+    "",
+    `- captured: ${iso}`,
+    `- cwd: ${input.cwd}`,
+    `- compactions so far: ${input.compactionCount}`,
+  ];
+
+  if (input.filesTouched.length > 0) {
+    lines.push("", "## Files edited this session", "");
+    for (const filePath of input.filesTouched) lines.push(`- ${filePath}`);
+  }
+
+  if (input.lastPrompt.trim()) {
+    lines.push("", "## Last user request", "", input.lastPrompt.trim());
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+/** Writes `<memoryDir>/core/state.md`, preserving the original `created` date. */
+export function writeSessionStateFile(memoryDir: string, input: SessionStateInput): string {
+  const filePath = path.join(getMemoryCoreDir(memoryDir), SESSION_STATE_FILENAME);
+  const today = getCurrentDate();
+  writeMemoryFile(filePath, renderSessionState(input), {
+    description: "Session state auto-captured before compaction: edited files and last request",
+    tags: ["state", "session"],
+    created: readFrontmatterValue(filePath, "created") ?? today,
+    updated: today,
+  });
+  return filePath;
 }
 
 // Deprecated after migrating initialization to memory-init skill.
@@ -551,19 +620,42 @@ type MemoryContextScope = {
   scanDir?: string;
 };
 
-async function buildMemoryContextSection(scope: MemoryContextScope): Promise<string[] | null> {
+type MemoryContextSection = {
+  source: "global" | "project";
+  directory: string;
+  /** One entry per memory file, each already rendered as its own lines. */
+  entries: string[][];
+};
+
+/**
+ * The index is injected once per session, so an unbounded store silently grows
+ * the context. 24k chars is roughly 6k tokens: enough for a few hundred entries,
+ * small enough to notice. Override with `maxContextChars`, 0 to disable.
+ */
+export const DEFAULT_MAX_CONTEXT_CHARS = 24_000;
+
+/** Head-room reserved for the truncation notice inside the injected budget. */
+const MAX_TRUNCATION_NOTICE_CHARS = 240;
+
+async function buildMemoryContextSection(scope: MemoryContextScope): Promise<MemoryContextSection | null> {
   const scannedFiles = await readMemoryFiles(scope.scanDir ?? scope.memoryDir);
   if (!scannedFiles) return null;
 
   const source = scope.label === "Shared Global Memory" ? "global" : "project";
-  const lines: string[] = [`<memory_files source="${source}" directory="${escapeXml(scope.memoryDir)}">`];
   const entries = scannedFiles.files
     .map((filePath, index) => ({ path: filePath, memory: scannedFiles.memories[index] }))
-    .filter((entry): entry is { path: string; memory: MemoryFile } => Boolean(entry.memory));
+    .filter((entry): entry is { path: string; memory: MemoryFile } => Boolean(entry.memory))
+    .map((entry) =>
+      memoryContextItemTpl({
+        path: entry.path,
+        description: entry.memory.frontmatter.description,
+        tags: entry.memory.frontmatter.tags,
+      }),
+    );
 
-  lines.push(...memoryContextTpl(entries, { includeHeader: false }));
-  lines.push("</memory_files>");
-  return lines;
+  if (entries.length === 0) return null;
+
+  return { source, directory: scope.memoryDir, entries };
 }
 
 export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: string): Promise<string> {
@@ -585,17 +677,49 @@ export async function buildMemoryContextAsync(settings: MemoryMdSettings, cwd: s
   });
 
   const sections = (await Promise.all(scopes.map((scope) => buildMemoryContextSection(scope)))).filter(
-    (section): section is string[] => section !== null,
+    (section): section is MemoryContextSection => section !== null,
   );
 
   if (sections.length === 0) {
     return "";
   }
 
+  const maxChars = settings.maxContextChars ?? DEFAULT_MAX_CONTEXT_CHARS;
+  const totalEntries = sections.reduce((count, section) => count + section.entries.length, 0);
   const lines = memoryContextTpl([], { mode: "normal" });
+  // Reserve room for the closing tag plus a truncation notice so the notice itself
+  // can never push the block past the budget.
+  const tailChars = "</memory_context>".length + 1 + MAX_TRUNCATION_NOTICE_CHARS;
+  let chars = lines.join("\n").length;
+  let omitted = 0;
+  let kept = 0;
 
   for (const section of sections) {
-    lines.push(...section);
+    const opening = `<memory_files source="${section.source}" directory="${escapeXml(section.directory)}">`;
+    const closing = "</memory_files>";
+    chars += opening.length + closing.length + 2;
+    lines.push(opening);
+
+    for (const entry of section.entries) {
+      const entryChars = entry.join("\n").length + 1;
+      // Global entries come first, so the project tail is what gets dropped.
+      if (maxChars > 0 && chars + entryChars + tailChars > maxChars) {
+        omitted += 1;
+        continue;
+      }
+      chars += entryChars;
+      kept += 1;
+      lines.push(...entry);
+    }
+
+    lines.push(closing);
+  }
+
+  if (omitted > 0) {
+    lines.push(
+      `[memory index truncated: kept ${kept} of ${totalEntries} entries at maxContextChars=${maxChars}. ` +
+        "Consolidate memory files, move detail to archive/, or raise pi-memory-md.maxContextChars.]",
+    );
   }
 
   lines.push("</memory_context>");

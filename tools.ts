@@ -432,6 +432,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
       ].map((root) => ({ ...root, coreDir: getMemoryCoreDir(root.memoryDir) }));
       const existingRoots = searchRoots.filter((root) => fs.existsSync(root.coreDir));
       const sections: string[] = [];
+      let bm25Miss = false;
       const matchedFiles = new Map<string, string>();
 
       if (existingRoots.length === 0) {
@@ -482,6 +483,9 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
             return `${index + 1}. ${displayPath} (score: ${item.score.toFixed(3)})`;
           });
           sections.push(`## BM25 ranking: ${query}`, ...lines);
+        } else {
+          // Deferred: a hint must not turn a zero-result search into a non-empty report.
+          bm25Miss = true;
         }
       }
 
@@ -574,6 +578,14 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
       }
 
       const fileList = Array.from(matchedFiles.keys());
+
+      if (bm25Miss && sections.length > 0) {
+        sections.push(
+          "",
+          `## BM25 ranking: ${query}`,
+          "No strong match. Try more specific terms (nouns, file or symbol names), or grep/rg for exact text.",
+        );
+      }
 
       if (sections.length === 0) {
         return {

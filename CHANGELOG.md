@@ -22,8 +22,21 @@ See you!
 
 ## [Unreleased]
 
+### Added
+
+- `maxContextChars` (default `24000`, `0` disables): the injected index is now bounded. Entries past the budget are dropped from the end (project memory first, global memory survives) and a truncation line reports `kept/total` so the model knows the index is incomplete.
+- `stateCapture` (default `false`): writes `<memoryDir>/core/state.md` in `session_before_compact` with the files edited this session and the last user request. Deterministic — no model call, no added latency.
+- The memory index is re-injected after a successful compaction.
+- Memory files are listed in sorted order. `readdir` plus `Promise.all` completed in filesystem order, so the injected index could differ between runs of the same store and defeat prompt caching; the block is now byte-stable. pi treats custom messages as a valid compaction cut point, so a long session could lose the whole index with nothing restoring it.
+
 ### Fixed
 
+- Accented languages were shredded by the tokenizer. Orama's default tokenizer splits on ASCII word boundaries, so each accented letter acts as a separator: `"đặt tên file biến"` became `["t","n","file","bi"]` and `"số"` became `["s"]`. Those one-character fragments collided across every document, so a query returned the whole store with a flat score spread. A custom tokenizer now splits on Unicode boundaries and folds diacritics, so `đặt` and `dat` index as the same token.
+  Measured on a 16-file Vietnamese store, query `cách đặt tên file biến không mang số issue`: the default tokenizer returns all 16 files with a nearly flat spread (top score 46.0, every file inside 30% of it) so no threshold can separate them; with the Unicode tokenizer the spread becomes meaningful and the 30% floor keeps 2 files (top 6.1). The tokenizer on its own returns 14 of 16 - it is what makes the scores discriminable, and the floor is what trims the tail. An unaccented query now returns exactly what the accented one returns.
+- macOS and other symlinked paths: `normalizePathForComparison()` now resolves symlinks, so a repository under `/var/...` is no longer mistaken for "not a git repo" because git reports `/private/var/...`. Fixes 14 failing tests on macOS (`getProjectMeta`, `syncRepository`, `pushRepository`, `resolveTapeGate`, lifecycle hooks).
+- Vietnamese search: Orama only knows English stopwords, so a Vietnamese query matched nearly every memory file and returned the whole store. Vietnamese and English function words are now stripped from both the index and the query, identifiers keep their hyphens (`pointer-events`), a query made only of stopwords returns no hits instead of scoring every document, and hits below 30% of the best score are dropped so "no strong match" is a possible answer.
+- `/memory-refresh` no longer queues a second copy of the index on the next prompt.
+- `check` script and pre-commit hook use the declared `typescript` instead of an undeclared `tsgo` binary, so a fresh clone can run the gate.
 - Avoid uncaught stale extension context errors when async hook notifications finish after pi session replacement or reload.
 - [#9](https://github.com/VandeeFeng/pi-memory-md/issues/9): Windows: "not a git repo" error due to path separator mismatch (forward vs backslash)
 - [#10](https://github.com/VandeeFeng/pi-memory-md/issues/10): `isMemoryInitialized()` only checks for core folder existence

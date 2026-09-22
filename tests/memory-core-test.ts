@@ -10,6 +10,7 @@ import {
   DEFAULT_SETTINGS,
   getGlobalMemoryDir,
   getMemoryDir,
+  listMemoryFilesAsync,
   loadSettings,
   readMemoryFileAsync,
   writeMemoryFile,
@@ -397,4 +398,71 @@ test("getMemoryDir uses mainRoot project name for worktrees", () => {
 
   const memoryDir = getMemoryDir(settings, worktreePath);
   assert.equal(memoryDir, path.join(settings.localPath, "main-project"));
+});
+
+test("buildMemoryContextAsync drops entries past maxContextChars and says so", async () => {
+  const tempDir = createTempDir("pi-memory-md-context-cap");
+  const projectDir = path.join(tempDir, "project-cap");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+    maxContextChars: 700,
+  };
+  const memoryDir = getMemoryDir(settings, projectDir);
+
+  for (let index = 1; index <= 6; index += 1) {
+    writeMemoryFile(path.join(memoryDir, "core", "notes", `note-${index}.md`), `# Note ${index}`, {
+      description: `Description for note number ${index} that takes a realistic amount of room`,
+      tags: ["notes"],
+    });
+  }
+
+  const context = await buildMemoryContextAsync(settings, projectDir);
+  const listed = context.split("\n").filter((line) => line.startsWith("- path:")).length;
+
+  assert.ok(context.length <= settings.maxContextChars, `expected ${context.length} <= ${settings.maxContextChars}`);
+  assert.ok(listed < 6, `expected the tail to be dropped, listed ${listed}`);
+  assert.match(context, /memory index truncated: kept \d+ of 6 entries at maxContextChars=700/);
+  assert.match(context, /<\/memory_context>$/);
+});
+
+test("buildMemoryContextAsync keeps every entry when maxContextChars is 0", async () => {
+  const tempDir = createTempDir("pi-memory-md-context-uncapped");
+  const projectDir = path.join(tempDir, "project-uncapped");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+    maxContextChars: 0,
+  };
+  const memoryDir = getMemoryDir(settings, projectDir);
+
+  for (let index = 1; index <= 4; index += 1) {
+    writeMemoryFile(path.join(memoryDir, "core", "notes", `note-${index}.md`), `# Note ${index}`, {
+      description: `Description for note number ${index} that takes a realistic amount of room`,
+      tags: ["notes"],
+    });
+  }
+
+  const context = await buildMemoryContextAsync(settings, projectDir);
+
+  assert.equal(context.split("\n").filter((line) => line.startsWith("- path:")).length, 4);
+  assert.doesNotMatch(context, /truncated/);
+});
+
+test("listMemoryFilesAsync returns a sorted, reproducible order", async () => {
+  const tempDir = createTempDir("pi-memory-md-list-order");
+  const memoryDir = path.join(tempDir, "memory");
+  const coreDir = path.join(memoryDir, "core");
+
+  // Created out of order, and spread across nested directories, so an unsorted
+  // readdir walk cannot come back in this order by accident.
+  writeMemoryFile(path.join(coreDir, "zulu.md"), "# Z", { description: "z" });
+  writeMemoryFile(path.join(coreDir, "alpha.md"), "# A", { description: "a" });
+  writeMemoryFile(path.join(coreDir, "nested", "mike.md"), "# M", { description: "m" });
+  writeMemoryFile(path.join(coreDir, "nested", "bravo.md"), "# B", { description: "b" });
+
+  const first = await listMemoryFilesAsync(coreDir);
+  const second = await listMemoryFilesAsync(coreDir);
+
+  assert.deepEqual(first, second);
+  assert.deepEqual(first, [...first].sort());
+  assert.equal(first.length, 4);
 });
