@@ -24,8 +24,15 @@
   "dependencies": {
     "@orama/orama": "^3.1.12",
     "gray-matter": "^4.0.3",
-    "nodejieba": "^3.5.8",
-    "typebox": "^1.1.36"
+    "nodejieba": "^3.5.8"
+  },
+  "peerDependencies": {
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "typebox": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
@@ -34,6 +41,7 @@
     "@types/node": "^20.0.0",
     "husky": "^9.1.7",
     "tsx": "^4.21.0",
+    "typebox": "^1.1.36",
     "typescript": "^5.0.0"
   },
   "pi": {
