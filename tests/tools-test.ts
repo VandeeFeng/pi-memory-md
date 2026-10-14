@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { writeMemoryFile } from "../memory-core.js";
 import { registerMemoryCheck, registerMemorySearch } from "../tools.js";
-import { createTempDir } from "./test-helpers.js";
+import { createTempDir, writeText } from "./test-helpers.js";
 
 type RegisteredTool = {
   name: string;
@@ -322,4 +322,52 @@ test("memory_search passes timeout and max-result limits to grep and rg", async 
   assert.equal(calls[1]?.command, "rg");
   assert.deepEqual(calls[1]?.args.slice(0, 5), ["-t", "md", "-m", "50", "identity"]);
   assert.equal(calls[1]?.hasSignal, true);
+});
+
+test("memory_search global scope searches a flat global memory dir", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-search-global-flat");
+  const projectDir = path.join(tempDir, "project");
+  const settings = {
+    localPath: path.join(tempDir, "memory-root"),
+    memoryDir: { globalMemory: "global" },
+  };
+  const coreDir = path.join(settings.localPath, path.basename(projectDir), "core");
+  const identityPath = path.join(coreDir, "user", "identity.md");
+  writeMemoryFile(identityPath, "# Identity", { description: "User identity", tags: ["profile"] });
+
+  // Per the README the global folder is flat: USER.md / MEMORY.md / TASK.md sit
+  // directly in it. Only the per-project folder nests core/.
+  const globalDir = path.join(settings.localPath, "global");
+  const globalHostPath = path.join(globalDir, "HOST.md");
+  writeText(globalHostPath, "# Host\n\nseparate WSL install\n");
+
+  const pi = createMockPi((command, args) => {
+    // rg is invoked once per search root with that root's directory as args[5].
+    // Only the flat global root contains HOST.md.
+    if (command === "rg" && args[4] === "host" && args[5] === globalDir) {
+      return { stdout: `${globalHostPath}:1:# Host\n` };
+    }
+
+    return { stdout: "" };
+  });
+
+  registerMemorySearch(pi as never, settings);
+
+  const globalResult = (await executeTool(pi, "memory_search", { rg: "host", scope: "global" }, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { count?: number };
+  };
+  const allResult = (await executeTool(pi, "memory_search", { rg: "host", scope: "all" }, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { count?: number };
+  };
+
+  // The flat global root stays in the search set, and under scope "all" the
+  // section header carries the "global" label, which proves the hit came from
+  // the global root rather than the project one.
+  assert.equal(globalResult.details?.count, 1);
+  assert.match(globalResult.content[0]?.text ?? "", /## Custom ripgrep: host/);
+
+  assert.equal(allResult.details?.count, 1);
+  assert.match(allResult.content[0]?.text ?? "", /## global Custom ripgrep: host/);
 });
