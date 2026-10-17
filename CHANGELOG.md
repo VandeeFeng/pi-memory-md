@@ -1,5 +1,8 @@
 # Changelog
 
+<details>
+<summary>See you</summary>
+
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
 到目前为止，差不多把我计划投入给这个项目的 token 都用完了，想实现的核心功能差不多也完成了。
@@ -20,10 +23,29 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 See you!
 
+</details>
+
 ## [Unreleased]
+我已经在 phi 里完整重新设计了 memory 部分
+
+最新的 commit 是 jev 的实验
+
+### New Features
+
+- Added `/memory-inject [prompt]` to retrieve task-specific workspace and project/shared memory excerpts with source citations. With a prompt, send context and task together; without one, append expandable context for the latest user request.
+- Added optional Jev relevance filtering for manual recall through pi's native classifier API with OpenRouter or direct TypeSafe support, provider-specific model defaults, and separate memory/workspace diagnostics. Billing is shown only when reported by the provider. Failed evaluation never injects unfiltered fallback context.
+
+### Changed
+
+- Reuse unchanged recall excerpts and BM25 indexes across prompts, while revalidating source files and search scope.
+- Removed the packaged `memory-write` skill and script; import/digest workflows now use native file tools.
+- Moved `typebox` to peer dependencies to share the host's schema runtime.
 
 ### Fixed
 
+- Handle custom-message agent starts without assuming a user prompt, preserving session bridges for the next user request.
+- Improve Chinese BM25 fallback tokenization when the native `nodejieba` binding is unavailable or fails.
+- Prevent duplicate automatic context delivery after manual injection and discard recall results when the session or branch changes.
 - Avoid uncaught stale extension context errors when async hook notifications finish after pi session replacement or reload.
 - [#9](https://github.com/VandeeFeng/pi-memory-md/issues/9): Windows: "not a git repo" error due to path separator mismatch (forward vs backslash)
 - [#10](https://github.com/VandeeFeng/pi-memory-md/issues/10): `isMemoryInitialized()` only checks for core folder existence

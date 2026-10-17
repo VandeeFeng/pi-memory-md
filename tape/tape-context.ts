@@ -1,7 +1,5 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import matter from "gray-matter";
 import { bm25SearchMemoryFiles } from "../bm25.js";
@@ -15,6 +13,7 @@ import {
   getProjectMeta,
   hoursAgoIso,
   isPathInside,
+  listProjectFiles,
   resolveFrom,
   toLocaleTime,
   toRelativeIfInside,
@@ -32,7 +31,6 @@ import type { TapeService } from "./tape-service.js";
 
 const CHARS_PER_TOKEN = 4;
 export const DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS = 300;
-const execFileAsync = promisify(execFile);
 
 export interface TapeMessage {
   role: "user" | "assistant" | "system" | "tool";
@@ -204,26 +202,6 @@ export function matchesDefaultIgnoredPath(filePath: string, projectRoot?: string
   if (baseName.startsWith(".")) return true;
 
   return segments.some((segment) => DEFAULT_IGNORED_DIRS.has(segment) || segment.startsWith("."));
-}
-
-async function getRipgrepVisibleProjectPaths(projectRoot: string): Promise<Set<string> | null> {
-  try {
-    const { stdout } = await execFileAsync("rg", ["--files"], {
-      cwd: projectRoot,
-      encoding: "utf-8",
-      windowsHide: true,
-    });
-
-    return new Set(
-      stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((filePath) => path.resolve(projectRoot, filePath)),
-    );
-  } catch {
-    return null;
-  }
 }
 
 // Memory file selection.
@@ -517,7 +495,7 @@ export class MemoryFileSelector {
       (filePath) => path.isAbsolute(filePath) && !this.toMemoryRelativePath(filePath),
     );
     const ripgrepVisiblePaths = projectPaths.some((filePath) => isPathInside(this.projectRoot, filePath))
-      ? await getRipgrepVisibleProjectPaths(this.projectRoot)
+      ? await listProjectFiles(this.projectRoot).catch(() => null)
       : new Set<string>();
 
     return existingPaths.filter((filePath) => {

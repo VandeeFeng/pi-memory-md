@@ -1,11 +1,13 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { ProjectMeta } from "./types.js";
 
 export const DEFAULT_LOCAL_PATH = path.join(os.homedir(), ".pi", "memory-md");
 export const DEFAULT_TAPE_DIRNAME = "TAPE";
+const execFileAsync = promisify(execFile);
 const DEFAULT_TAPE_EXCLUDE_DIRS_BY_PLATFORM: Record<string, string[]> = {
   darwin: ["/System"],
   linux: ["/proc", "/sys", "/dev", "/run", "/nix/store", "/snap"],
@@ -125,6 +127,21 @@ export function toRelativeIfInside(parentDir: string, targetPath: string): strin
   const resolvedTarget = path.resolve(targetPath);
 
   return isPathInside(resolvedParent, resolvedTarget) ? path.relative(resolvedParent, resolvedTarget) : resolvedTarget;
+}
+
+export async function listProjectFiles(projectRoot: string, signal?: AbortSignal): Promise<Set<string>> {
+  const { stdout } = await execFileAsync("rg", ["--no-config", "--files", "--null", "--no-require-git"], {
+    cwd: projectRoot,
+    encoding: "utf8",
+    windowsHide: true,
+    signal,
+  });
+  return new Set(
+    stdout
+      .split("\0")
+      .filter(Boolean)
+      .map((file) => path.resolve(projectRoot, file)),
+  );
 }
 
 function execGitSync(cwd: string, args: string[]): string | null {

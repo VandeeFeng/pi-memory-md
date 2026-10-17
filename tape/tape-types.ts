@@ -69,6 +69,15 @@ export interface TapeKeywordConfig {
 
 export type TapeHandoffMode = "auto" | "manual";
 
+export interface TapeRelevanceConfig {
+  enabled?: boolean;
+  provider?: "openrouter" | "typesafe";
+  model?: string;
+  timeoutMs?: number;
+  /** Minimum normalized relevance score in [0, 1] (default: 0.5). */
+  minScore?: number;
+}
+
 export interface TapeConfig {
   /** Enable tape mode. If the tape block exists, tape is on unless this is false. */
   enabled?: boolean;
@@ -84,6 +93,8 @@ export interface TapeConfig {
   context?: {
     /** Selection strategy: "smart" (default) or "recent-only" */
     strategy?: TapeContextStrategy;
+    /** Global-only, opt-in Jev filtering for manual recall. */
+    jev?: TapeRelevanceConfig;
     /** Maximum number of memory files to deliver (default: 10) */
     fileLimit?: number;
     /** Smart-mode scan range as [startHours, maxHours] (default: [72, 168]) */

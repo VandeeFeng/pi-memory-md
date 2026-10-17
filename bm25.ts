@@ -48,7 +48,10 @@ async function getJiebaCut(): Promise<((text: string, hmm?: boolean) => string[]
 }
 
 function fallbackChineseTokens(text: string): string[] {
-  return [...text.matchAll(/\p{Script=Han}+/gu)].map((match) => match[0]);
+  const segments = new Intl.Segmenter("zh", { granularity: "word" }).segment(text);
+  return Array.from(segments)
+    .filter((segment) => segment.isWordLike && HAN_REGEX.test(segment.segment))
+    .map((segment) => segment.segment);
 }
 
 async function normalizeForBm25(text: string): Promise<string> {
@@ -56,8 +59,17 @@ async function normalizeForBm25(text: string): Promise<string> {
   if (!HAN_REGEX.test(text)) return text;
 
   const jiebaCut = await getJiebaCut();
-  const rawTokens = jiebaCut?.(text, true) ?? fallbackChineseTokens(text);
-  const tokens = rawTokens.map((token) => token.trim()).filter(Boolean);
+  let rawTokens: string[] | undefined;
+
+  if (jiebaCut) {
+    try {
+      rawTokens = jiebaCut(text, true);
+    } catch {
+      jiebaCutPromise = Promise.resolve(null);
+    }
+  }
+
+  const tokens = (rawTokens ?? fallbackChineseTokens(text)).map((token) => token.trim()).filter(Boolean);
   const encodedTokens = tokens.map((token) => `zh_${Buffer.from(token, "utf8").toString("hex")}`);
   return `${text} ${tokens.join(" ")} ${encodedTokens.join(" ")}`.trim();
 }

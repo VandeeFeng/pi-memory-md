@@ -9,12 +9,12 @@ Turn recent tape anchors and nearby session context into concise, durable memory
 
 ## Core rule
 
-Inspect recent intent first, read only relevant context, propose memory changes, then write only after user confirmation using the `memory-write` skill.
+Inspect recent intent first, read only relevant context, propose memory changes, then write only after user confirmation.
 
 - Keep each proposed memory focused on one durable topic.
 - Keep proposal details lightweight: explain only why each candidate should be created, updated, or skipped.
 - For possible updates, identify the existing memory file and briefly state why it should change.
-- Defer final description, tags, frontmatter shape, timestamp handling, and file creation/update mechanics to the `memory-write` skill.
+- Use the [frontmatter format](../../README.md#memory-file-format): a concise `description`, lowercase string-array `tags`, and `created`/`updated` dates (`YYYY-MM-DD`). Preserve `created` when updating.
 
 ## Workflow
 
@@ -26,13 +26,9 @@ Inspect recent intent first, read only relevant context, propose memory changes,
    - Use `tape_read({ betweenAnchors })` when a clear start/end pair exists.
 4. Extract durable memory candidates only when they are useful across future sessions.
 5. Compare candidates with existing memory using `memory_check({ directory })` or `memory_search` before proposing creates or updates. Then read the specific memory file if needed.
-6. Apply the `memory-write` skill rules before showing proposed paths:
-   - Treat `memory-write` as the single source of truth for placement, filename conventions, and frontmatter shape.
-   - Validate every proposed relative path against `memory-write` rules.
-   - Do not invent root folders or naming schemes outside `memory-write`.
-   - If the correct path is uncertain, propose the candidate without a final path and ask the user to choose or confirm placement.
+6. Verify the memory directory with `memory_check` before proposing paths. Reuse existing topic folders; place always-needed project context in `core/project/`, never a root-level `project/` folder. Ask when placement is uncertain.
 7. Present proposed changes and ask for confirmation.
-8. After confirmation, use the `memory-write` skill to create or update memory files.
+8. After confirmation, use native `write`/`edit` tools. Read existing files before updating, preserve frontmatter, and refresh `updated`.
 9. Ask before `memory_sync` unless the user explicitly requested sync.
 
 ## Save candidates
@@ -77,7 +73,3 @@ Before writing, respond with:
 ```
 
 End by explicitly asking the user for confirmation with: `Proceed with these memory updates?`
-
-## Related skills
-
-- `memory-write`: Create or update memory files with valid frontmatter.

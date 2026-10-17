@@ -9,7 +9,7 @@ Use this skill to curate durable memory from external sources. Do not treat impo
 
 ## Core rule
 
-Analyze first, ask when focus is unclear, then generate confirmed memories using the `memory-write` skill.
+Analyze first, ask when focus is unclear, then write confirmed memories with native file tools.
 
 ## Workflow
 
@@ -18,7 +18,7 @@ Analyze first, ask when focus is unclear, then generate confirmed memories using
 3. Build a source profile: summary, detected topics, useful memory areas, and risks/noise.
 4. Ask the user what to preserve unless they already gave a clear focus.
 5. Ask the user to confirm the final memory folder/file path, and provide 3 concrete path options.
-6. Generate memories with the `memory-write` skill, using confirmed paths, descriptions, tags, source refs, and concise content.
+6. Write memories using confirmed paths, descriptions, tags, source refs, and concise content.
 7. Ask before running `memory_sync` unless the user requested sync.
 
 ## Source inspection
@@ -85,7 +85,8 @@ Pick one, or provide a custom folder/file path.
 ## Write rules
 
 - Use concise, topic-based paths such as `core/project/<topic>.md` or `notes/<slug>.md`.
-- Use the `memory-write` skill for each memory, with `description` as a string and `tags` as a string array.
+- Resolve and verify the project memory directory with `memory_check` before writing.
+- Use native `write`/`edit` tools and the [frontmatter format](../../README.md#memory-file-format). Preserve `created`; set `updated` to today's date (`YYYY-MM-DD`).
 - Prefer existing project memory structure when known.
 - Avoid overwriting existing memories unless the user explicitly approves an update.
 - When updating an existing memory, read it first and merge rather than replacing blindly.
@@ -111,5 +112,4 @@ Avoid importing:
 
 ## Related Skills
 
-- `memory-write`: Create or update pi-memory-md memory files with proper metadata and path handling.
-- `memory-sync`: Sync memory repository changes after imports when the user requests or confirms synchronization.
+- Use `memory_sync` only when the user requests or confirms synchronization.

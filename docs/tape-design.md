@@ -375,7 +375,7 @@ When a session starts through `new`, `resume`, or `fork`, pi provides `previousS
 
 At the next `before_agent_start`, the current prompt queries that prepared index. Only matches above the score threshold are rendered into a compact `<session_bridge>` block, with anchor matches rendered under `<tape_anchors>`. In `message-append` mode the bridge is appended to the startup memory message; in `system-prompt` mode it is sent as a separate hidden message.
 
-This bridge exists to avoid the "amnesia" feel during immediate session switches without dumping the previous conversation into context. Durable knowledge should still be written through `memory-digest` / `memory-write`.
+This bridge exists to avoid the "amnesia" feel during immediate session switches without dumping the previous conversation into context. Durable knowledge should still be curated through `memory-digest` and written with native file tools.
 
 ## Memory Context Delivery
 
@@ -675,7 +675,6 @@ ${PI_CODING_AGENT_SESSION_DIR:-~/.pi/agent/sessions}/  # pi session storage (rea
 ## Related Skills and Commands
 
 - `memory-init` - Repository initialization through the skill workflow
-- `memory-write` - Durable memory creation/update through Markdown files and frontmatter validation
 - `memory-import` - Import durable knowledge from URLs, folders, or files
 - `memory-digest` - Convert recent tape/session context into confirmed long-term memories
 - `/memory-review` - Human-facing anchor timeline, search, delete, and jump overlay

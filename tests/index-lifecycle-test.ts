@@ -40,6 +40,7 @@ function bootExtension(
       registerCommand(name: string) {
         registeredCommands.push(name);
       },
+      registerMessageRenderer() {},
       sendMessage() {},
       async exec(command: string, args: string[], options?: { cwd?: string }) {
         execCalls.push({ command, args, cwd: options?.cwd });
@@ -84,7 +85,7 @@ test("memory-anchor command is only registered when tape is enabled", () => {
   const disabled = bootExtension(disabledHomeDir, disabledProjectDir);
   const enabled = bootExtension(enabledHomeDir, enabledProjectDir);
 
-  assert.deepEqual(disabled.registeredCommands, ["memory-refresh", "memory-check"]);
+  assert.deepEqual(disabled.registeredCommands, ["memory-inject", "memory-refresh", "memory-check"]);
   assert.equal(disabled.registeredCommands.includes("memory-anchor"), false);
   assert.equal(enabled.registeredCommands.includes("memory-anchor"), true);
 });

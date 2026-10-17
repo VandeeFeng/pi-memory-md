@@ -374,7 +374,7 @@ before_agent_start 事件
 
 在下一次 `before_agent_start`，当前 prompt 会查询这个准备好的索引。只有超过分数阈值的匹配会被渲染成紧凑的 `<session_bridge>` 块，anchor 匹配会放在 `<tape_anchors>` 下。在 `message-append` 模式下，bridge 会追加到启动 memory 消息；在 `system-prompt` 模式下，它会作为单独隐藏消息发送。
 
-这个 bridge 是为了减少紧邻 session 切换时的“失忆感”，但不会把上一段对话整段塞进上下文。真正需要长期保存的内容仍应通过 `memory-digest` / `memory-write` 写入。
+这个 bridge 是为了减少紧邻 session 切换时的“失忆感”，但不会把上一段对话整段塞进上下文。真正需要长期保存的内容仍应通过 `memory-digest` 整理，再用原生文件工具写入。
 
 ## 内存上下文投递
 
@@ -674,7 +674,6 @@ ${PI_CODING_AGENT_SESSION_DIR:-~/.pi/agent/sessions}/  # pi 会话存储（只�
 ## 相关技能和命令
 
 - `memory-init` - 通过 skill 工作流初始化仓库
-- `memory-write` - 通过 Markdown 文件和 frontmatter 校验创建/更新长期记忆
 - `memory-import` - 从 URL、文件夹或文件导入长期知识
 - `memory-digest` - 将近期 tape/session context 转换为经确认的长期记忆
 - `/memory-review` - 面向人的 anchor 时间线、搜索、删除和跳转 overlay

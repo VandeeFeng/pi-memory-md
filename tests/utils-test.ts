@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { getProjectMeta, isPathInside, normalizePathForComparison } from "../utils.js";
+import { getProjectMeta, isPathInside, listProjectFiles, normalizePathForComparison } from "../utils.js";
 import { createTempDir } from "./test-helpers.js";
 
 function createGitRepo(repoPath: string): void {
@@ -80,6 +80,18 @@ describe("normalizePathForComparison", () => {
     const withSlash = repoPath.endsWith("/") ? repoPath : `${repoPath}/`;
     const normalized = normalizePathForComparison(withSlash);
     assert.equal(normalized, normalizePathForComparison(repoPath));
+  });
+});
+
+describe("listProjectFiles", () => {
+  it("respects ignore rules outside Git and preserves whitespace in filenames", async () => {
+    const root = createTempDir("utils-visible-project");
+    const names = ["plain.ts", " leading name.ts", "two\nlines.ts"];
+    for (const name of names) fs.writeFileSync(path.join(root, name), "export const value = 1;\n");
+    fs.writeFileSync(path.join(root, ".gitignore"), "ignored.ts\n");
+    fs.writeFileSync(path.join(root, "ignored.ts"), "ignored fixture");
+    const files = await listProjectFiles(root);
+    assert.deepEqual(files, new Set(names.map((name) => path.join(root, name))));
   });
 });
 

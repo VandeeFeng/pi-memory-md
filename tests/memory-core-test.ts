@@ -37,6 +37,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
         enabled: true,
         context: {
           memoryScan: [3.8, 1.2],
+          jev: { enabled: false, model: "global-model" },
           whitelist: [" core/user/identity.md ", "core/user/identity.md"],
         },
         anchor: {
@@ -63,6 +64,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
         excludeDirs: ["~/blocked", "relative/path"],
         context: {
           fileLimit: 3,
+          jev: { enabled: true, model: "project-model" },
           memoryScan: [10.9, 5.1],
           alwaysInclude: [" docs/tape-design.md "],
           blacklist: [" node_modules ", "node_modules"],
@@ -97,6 +99,7 @@ test("loadSettings merges defaults, global/project settings, and normalizes valu
     assert.equal(settings.tape?.enabled, true);
     assert.equal(settings.tape?.onlyGit, true);
     assert.equal(settings.tape?.context?.fileLimit, 3);
+    assert.deepEqual(settings.tape?.context?.jev, { enabled: false, model: "global-model" });
     assert.deepEqual(settings.tape?.context?.memoryScan, [10, 10]);
     assert.equal(settings.tape?.tapePath, undefined);
     assert.deepEqual(settings.tape?.excludeDirs, [...DEFAULT_TAPE_EXCLUDE_DIRS, path.join(tempHome, "blocked")]);

@@ -90,8 +90,23 @@ The LLM automatically:
 
 You can also use these slash commands directly in pi:
 
+- `/memory-inject [prompt]`: Append a skill-style `[memory]` message, collapsed by default; use Pi's tools-expand shortcut shown in the header to inspect the full injected context. With a prompt, queue memory via Pi's `nextTurn` delivery and submit the task, so both enter the same agent input batch and only the task starts a turn. Without one, use the latest ordinary user request on the current branch for selection and inject only, without starting a turn.
 - `/memory-refresh`: Refresh memory context from files (rebuild cache and deliver into current session)
 - `/memory-check [max-lines] [-p|-g|project|global]`: Check memory repository status and folder structure (tree output defaults to 25 lines). Examples: `/memory-check -g 30`, `/memory-check 21 -p`
+
+#### Manual Injection
+
+```text
+/memory-inject Recall the constraints for this change
+/memory-inject
+```
+
+- With a prompt, send context and task together. Without one, use the latest user request to select context and append an expandable `[memory]` message without starting a turn.
+- Search workspace text files and current-project/shared-global Markdown memories, independent of recent access. Requires `rg`; respects ignore rules and excludes sensitive paths, archived memories and other projects' memory.
+- Use local BM25 matching, or enable [Jev filtering](#jev-filtering-for-manual-recall) for semantic relevance. Jev evaluates at most 30 candidates: 15 per source kind when both exist. Final selection follows scores, not source priority.
+- Inject source excerpts with paths and line ranges, within 16 KB. Prompts are limited to 2,000 characters. Bounded retrieval can miss relevant content.
+- Separate memory/workspace diagnostics show available, candidate, evaluated, relevant and injected counts, distinguishing no candidates, relevance rejection, budget exclusion and evaluation failure.
+- Works with automatic delivery or tape disabled. Does not rewrite memories, remove previous context or sync git. Empty results, Jev failure, cancellation or session changes start no task.
 
 ### Built-in Tools & SKILLs
 
@@ -111,7 +126,6 @@ The LLM can use these tools and [skills](skills/) to interact with memory:
 |-------|-------------|
 | `memory-init` | Initialize the memory repository, clone/sync git, and create the basic directory structure |
 | `memory-import` | Curate durable memory from URLs, folders, or files after confirming what should be preserved |
-| `memory-write` | Create or update memory markdown files with valid frontmatter using native file tools |
 
 User can easily extend their own workflows with these skills. Although this sacrifices some stability, it improves flexibility and user autonomy. This is a deliberate tradeoff after my careful consideration.
 
@@ -124,7 +138,7 @@ To disable packaged `pi-memory-md` skills, configure the package skills filter. 
   "packages": [
     {
       "source": "npm:pi-memory-md",
-      "skills": [] // or ["!skills/memory-write/SKILL.md"]
+      "skills": [] // or ["!skills/memory-import/SKILL.md"]
     }
   ]
 }
@@ -344,6 +358,40 @@ Handoff mode: manual. `tape_handoff` is blocked unless the keyword is triggered 
 </active_project_files>
 </memory_context>
 ```
+
+### Jev Filtering for Manual Recall
+
+Optional semantic filtering uses pi's native classifier API with OpenRouter (default) or TypeSafe directly. OpenRouter uses your existing login (`/login`) or `OPENROUTER_API_KEY`; TypeSafe uses `TYPESAFE_API_KEY` in the Pi process environment or credentials stored through `/login`. No additional SDK is needed. Requires a pi version with `modelRegistry.classify()` and the selected provider's classifier support.
+
+Configure this **globally** in `~/.pi/agent/settings.json`, then `/reload`:
+
+```json
+{
+  "pi-memory-md": {
+    "tape": {
+      "enabled": true,
+      "context": {
+        "strategy": "smart",
+        "jev": {
+          "enabled": true,
+          "provider": "openrouter",
+          "model": "typesafe/jev-1.13",
+          "timeoutMs": 10000,
+          "minScore": 0.6666666666666666
+        }
+      }
+    }
+  }
+}
+```
+
+For TypeSafe's own API, set `"provider": "typesafe"` and `"model": "jev-latest"` in the same `jev` block. If `model` is omitted, it defaults to `typesafe/jev-1.13` for OpenRouter and `jev-latest` for TypeSafe. Providers never fall back to one another.
+
+Jev applies only to `/memory-inject`, scoring source excerpts against the retrieval prompt. Automatic hooks keep the existing access-history and local BM25 selection, with no Jev calls or charges, regardless of delivery mode.
+
+- A separate `Jev:` notification reports relevant/evaluated excerpt counts. When available, the provider response's `usage.cost` is shown as actual USD cost. Otherwise, pi's `usage.cost.total` is shown as estimated cost; if it is zero or unavailable, pi's input/output token counts are shown instead. Costs and tokens are summed across batches. TypeSafe currently has zero catalog prices in pi, so its direct API shows tokens rather than claiming a free request. If neither billing nor token usage is available, it shows `actual cost unavailable`. Billed responses still report cost when scoring fails.
+- Missing classifier support/model, authentication or provider failures, timeouts, and invalid answers abort manual recall without injecting fallback context.
+- Disabled by default. Project settings cannot enable or override `tape.context.jev`; enabling it sends retrieval prompts and source excerpts to an external provider and may incur charges from the selected provider.
 
 ### Tape Anchors
 

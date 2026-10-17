@@ -24,8 +24,10 @@
   "dependencies": {
     "@orama/orama": "^3.1.12",
     "gray-matter": "^4.0.3",
-    "nodejieba": "^3.5.8",
-    "typebox": "^1.1.36"
+    "nodejieba": "^3.5.8"
+  },
+  "peerDependencies": {
+    "typebox": "*"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
@@ -43,7 +45,6 @@
     "skills": [
       "./skills/memory-import/SKILL.md",
       "./skills/memory-init/SKILL.md",
-      "./skills/memory-write/SKILL.md",
       "./skills/memory-digest/SKILL.md"
     ]
   },
@@ -52,6 +53,7 @@
     "index.ts",
     "memory-git.ts",
     "memory-core.ts",
+    "memory-recall.ts",
     "tools.ts",
     "types.ts",
     "utils.ts",

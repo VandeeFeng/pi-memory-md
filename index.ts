@@ -6,6 +6,8 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { keyText } from "@earendil-works/pi-coding-agent";
+import { Box, Text } from "@earendil-works/pi-tui";
 import { getHookActions, getSessionStartCause, runHookTrigger } from "./hooks.js";
 import {
   buildMemoryContextAsync,
@@ -15,13 +17,12 @@ import {
   getMemoryCoreDir,
   getMemoryDir,
   getMemoryMeta,
-  // initializeMemoryDirectory, // unused after memory-init moved to SKILL
   loadSettings,
   renderMemoryTree,
 } from "./memory-core.js";
-
 import { gitExec, pushRepository, syncRepository } from "./memory-git.js";
-import { MemoryFileSelector } from "./tape/tape-context.js";
+import { clearRecallCache, type RecallDiagnostics, recallMemory } from "./memory-recall.js";
+import { extractMessageContent, MemoryFileSelector } from "./tape/tape-context.js";
 import {
   detectKeywordHandoff,
   type KeywordHandoffInstruction,
@@ -32,6 +33,7 @@ import {
   shouldBlockTapeHandoffCall,
   type TapeGateResult,
 } from "./tape/tape-gate.js";
+import type { TapeRelevanceReport } from "./tape/tape-relevance.js";
 import { DEFAULT_MEMORY_REVIEW_LIMIT, normalizeMemoryReviewLimit, openMemoryReview } from "./tape/tape-review.js";
 import { TapeService } from "./tape/tape-service.js";
 import { registerAllTapeThreadTools } from "./tape/tape-thread-tools.js";
@@ -52,6 +54,7 @@ type ExtensionState = {
   initialMemoryContext: InitialContextState;
   initialTapeContext: InitialContextState;
   hasDeliveredInitialContext: boolean;
+  hasManualContext: boolean;
   pendingHandoffMatch: PendingHandoffMatch | null;
   pendingThreadTrigger: "manual" | null;
   tapeGate: TapeGateResult | null;
@@ -75,6 +78,7 @@ function createExtensionState(): ExtensionState {
     initialMemoryContext: { status: "pending" },
     initialTapeContext: { status: "pending" },
     hasDeliveredInitialContext: false,
+    hasManualContext: false,
     pendingHandoffMatch: null,
     pendingThreadTrigger: null,
     tapeGate: null,
@@ -175,6 +179,47 @@ async function cacheInitialContext(
     : { status: "empty" };
 }
 
+function notifyRecallDiagnostics(ctx: ExtensionContext, diagnostics: RecallDiagnostics): void {
+  for (const [kind, label] of [
+    ["memory", "Memory"],
+    ["project", "Workspace"],
+  ] as const) {
+    const counts = diagnostics[kind];
+    let outcome = `${counts.injected} excerpts selected`;
+    if (diagnostics.status === "failed") outcome = "incomplete (recall failed)";
+    else if (!counts.available) outcome = "no hit (no eligible excerpts)";
+    else if (!counts.candidates) outcome = "no hit (no candidates)";
+    else if (!counts.relevant) outcome = "no hit (none passed relevance)";
+    else if (!counts.injected) outcome = "no injection (output budget)";
+    const method = diagnostics.method === "jev" ? "Jev" : "BM25 only; relevance not evaluated";
+    const stages = Object.entries(counts)
+      .map(([stage, count]) => `${stage}=${count}`)
+      .join(", ");
+    const excluded = diagnostics.status === "complete" ? counts.relevant - counts.injected : 0;
+    ctx.ui.notify(
+      `${label} recall: ${outcome}; ${method}; ${stages}; not-shortlisted=${counts.available - counts.candidates}, budget-excluded=${excluded}`,
+      diagnostics.status === "failed" ? "warning" : "info",
+    );
+  }
+}
+
+function notifyJevEvaluation(ctx: ExtensionContext, evaluation?: TapeRelevanceReport): void {
+  if (!evaluation) return;
+  let usage = "actual cost unavailable";
+  if (evaluation.actualCostUsd !== null) {
+    usage = `$${evaluation.actualCostUsd.toPrecision(6)} USD (actual)`;
+  } else if (evaluation.estimatedCostUsd !== undefined) {
+    usage = `$${evaluation.estimatedCostUsd.toPrecision(6)} USD (estimated)`;
+  } else if (evaluation.tokenUsage) {
+    usage = `${evaluation.tokenUsage.input} input / ${evaluation.tokenUsage.output} output tokens`;
+  }
+  let outcome = `${evaluation.relevant}/${evaluation.candidates} excerpts relevant`;
+  if (evaluation.status === "fallback") outcome = "recall failed";
+  if (evaluation.status === "skipped") outcome = "skipped (no evaluation)";
+  if (evaluation.reason) outcome += ` (${evaluation.reason})`;
+  ctx.ui.notify(`Jev: ${outcome}; ${usage}`, evaluation.status === "fallback" ? "warning" : "info");
+}
+
 function scheduleContextWarmup(
   settings: MemoryMdSettings,
   state: ExtensionState,
@@ -209,7 +254,6 @@ function initDeliveryContent(
   const memoryDir = getMemoryDir(settings, ctx.cwd);
   const memoryExists = fs.existsSync(getMemoryCoreDir(memoryDir));
 
-  state.hasDeliveredInitialContext = false;
   state.initialMemoryContext = { status: "pending" };
   state.initialTapeContext = { status: "pending" };
 
@@ -276,13 +320,14 @@ function handleTapeBeforeAgentStart(
 ): { tapeEnabled: boolean; tapeActive: boolean } {
   const tapeEnabled = settings.tape?.enabled === true;
   const tapeActive = state.tapeGate?.enabled === true && state.activeTapeRuntime !== null;
-  const keywordHandoff = tapeActive ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
+  const keywordHandoff =
+    tapeActive && "prompt" in event ? detectKeywordHandoff(event.prompt, settings.tape?.anchor?.keywords) : null;
 
   if (state.pendingHandoffMatch?.trigger !== "manual") {
     state.pendingHandoffMatch = keywordHandoff ? { trigger: "keyword", instruction: keywordHandoff } : null;
   }
 
-  if (state.pendingThreadTrigger === "manual" && !event.prompt.includes("/memory-thread")) {
+  if (state.pendingThreadTrigger === "manual" && "prompt" in event && !event.prompt.includes("/memory-thread")) {
     state.pendingThreadTrigger = null;
   }
 
@@ -322,7 +367,7 @@ async function maybeBuildSessionBridgeContext(
   state: ExtensionState,
   event: BeforeAgentStartEvent,
 ): Promise<string | null> {
-  if (state.sessionBridge.delivered) return null;
+  if (!("prompt" in event) || state.sessionBridge.delivered) return null;
   state.sessionBridge.delivered = true;
 
   if (!getHookActions(settings, "beforeAgentStart").includes("sessionBridge")) return null;
@@ -455,6 +500,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
 
   pi.on("session_start", async (event, ctx) => {
     state.hasDeliveredInitialContext = false;
+    state.hasManualContext = false;
     state.sessionBridge = {
       previousSessionFile: ["new", "resume", "fork"].includes(event.reason) ? event.previousSessionFile : undefined,
       delivered: false,
@@ -491,16 +537,22 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    await prepareBeforeAgentStart(pi, settings, state, ctx);
+    const manualContext = state.hasManualContext;
+    state.hasManualContext = false;
+    if (manualContext) ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
+    else await prepareBeforeAgentStart(pi, settings, state, ctx);
     const tapeState = handleTapeBeforeAgentStart(pi, settings, state, ctx, event);
+    const delivery = settings.delivery ?? settings.injection ?? "message-append";
     const sessionBridgeContext = await maybeBuildSessionBridgeContext(settings, state, event);
-    if ((settings.delivery ?? settings.injection ?? "message-append") === "system-prompt") {
+    if (manualContext || delivery === "system-prompt") {
       queueSessionBridgeMessage(pi, sessionBridgeContext);
     }
+    if (manualContext) return;
     return deliverStartupContext(settings, state, ctx, event, tapeState, sessionBridgeContext);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    clearRecallCache();
     const activeTapeRuntime = state.activeTapeRuntime;
     state.activeTapeRuntime = null;
     activeTapeRuntime?.service.detachSessionTree();
@@ -554,36 +606,109 @@ function buildManualAnchorMessage(prompt: string): string {
 }
 
 function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, state: ExtensionState): void {
-  // memory-init moved to SKILL
-  // pi.registerCommand("memory-init", {
-  //   description: "Initialize memory repository",
-  //   handler: async (_args, ctx) => {
-  //     const memoryDir = getMemoryDir(settings, ctx.cwd);
-  //     const alreadyInitialized = isMemoryInitialized(memoryDir);
-  //     const result = await syncRepository(pi, settings);
+  pi.registerMessageRenderer<{ fileCount: number; diagnostics?: RecallDiagnostics }>(
+    "pi-memory-md-inject",
+    (message, options, theme) => {
+      const diagnostics = message.details?.diagnostics;
+      const summary = diagnostics
+        ? `${diagnostics.memory.injected} memory + ${diagnostics.project.injected} workspace excerpts`
+        : `${message.details?.fileCount ?? 0} memory files`;
+      const hint = options.expanded ? "" : theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`);
+      const outputPad = (options as typeof options & { outputPad?: number }).outputPad ?? 1;
+      const box = new Box(outputPad, 1, (text) => theme.bg("customMessageBg", text));
+      const label = theme.fg("customMessageLabel", theme.bold("[memory]"));
+      box.addChild(new Text(`${label} ${theme.fg("customMessageText", summary)}${hint}`, 0, 0));
+      if (options.expanded) box.addChild(new Text(extractMessageContent(message.content), 0, 0));
+      return box;
+    },
+  );
 
-  //     if (!result.success) {
-  //       ctx.ui.notify(`Initialization failed: ${result.message}`, "error");
-  //       return;
-  //     }
-
-  //     initializeMemoryDirectory(memoryDir);
-
-  //     if (alreadyInitialized) {
-  //       ctx.ui.notify(`Memory already exists: ${result.message}`, "info");
-  //       return;
-  //     }
-
-  //     ctx.ui.notify(
-  //       `Memory initialized: ${result.message}\n\nCreated:\n  - core/user\n  - core/project\n  - reference`,
-  //       "info",
-  //     );
-  //   },
-  // });
+  let injecting = false;
+  pi.registerCommand("memory-inject", {
+    description: "Inject existing memory context and run the prompt; without a prompt, inject only",
+    handler: async (args, ctx) => {
+      if (injecting) {
+        ctx.ui.notify("A memory injection is already running.", "warning");
+        return;
+      }
+      injecting = true;
+      const explicitPrompt = args.trim();
+      let taskMessage: string | undefined;
+      let evaluation: TapeRelevanceReport | undefined;
+      let diagnostics: RecallDiagnostics | undefined;
+      try {
+        await ctx.waitForIdle();
+        const sessionId = ctx.sessionManager.getSessionId();
+        const leafId = ctx.sessionManager.getLeafId();
+        let prompt = explicitPrompt;
+        if (!prompt) {
+          for (const entry of [...ctx.sessionManager.getBranch()].reverse()) {
+            if (entry.type !== "message" || entry.message.role !== "user") continue;
+            const text = extractMessageContent(entry.message.content)
+              .trim()
+              .replace(/^<memory_context\b[^>]*>[\s\S]*?<\/memory_context>\s*/, "")
+              .trim();
+            if (text && !text.startsWith("/")) {
+              prompt = text;
+              break;
+            }
+          }
+        }
+        if (!prompt) {
+          ctx.ui.notify("Usage: /memory-inject <prompt> (or use the latest user request)", "warning");
+          return;
+        }
+        ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
+        if (settings.tape?.enabled && !state.activeTapeRuntime) {
+          throw new Error("Tape runtime is unavailable; memory was not injected.");
+        }
+        const selected = await recallMemory(settings, ctx.cwd, prompt, {
+          signal: ctx.signal,
+          registry: ctx.modelRegistry,
+          onEvaluation: (report) => {
+            evaluation = report;
+          },
+          onDiagnostics: (report) => {
+            diagnostics = report;
+          },
+        });
+        if (ctx.sessionManager.getSessionId() !== sessionId || ctx.sessionManager.getLeafId() !== leafId) {
+          throw new Error("Session or branch changed; no memory was injected. Run /memory-inject again.");
+        }
+        if (ctx.signal?.aborted) return;
+        notifyRecallDiagnostics(ctx, selected.diagnostics);
+        if (!selected.content) {
+          ctx.ui.notify("No context excerpts selected; no task was started.", "warning");
+          return;
+        }
+        pi.sendMessage(
+          {
+            customType: "pi-memory-md-inject",
+            content: selected.content,
+            display: true,
+            details: { fileCount: selected.fileCount, evaluation, diagnostics: selected.diagnostics },
+          },
+          explicitPrompt ? { deliverAs: "nextTurn", triggerTurn: false } : { triggerTurn: false },
+        );
+        if (explicitPrompt) taskMessage = explicitPrompt;
+        state.hasDeliveredInitialContext = true;
+        state.hasManualContext = true;
+        ctx.ui.notify(`Context injected: ${selected.excerptCount} excerpts from ${selected.fileCount} files`, "info");
+      } catch (error) {
+        if (diagnostics?.status === "failed" && !ctx.signal?.aborted) notifyRecallDiagnostics(ctx, diagnostics);
+        ctx.ui.notify(error instanceof Error ? error.message : "Memory injection failed.", "error");
+      } finally {
+        injecting = false;
+        notifyJevEvaluation(ctx, evaluation);
+      }
+      if (taskMessage) pi.sendUserMessage(taskMessage);
+    },
+  });
 
   pi.registerCommand("memory-refresh", {
     description: "Refresh memory context from files",
     handler: async (_args, ctx) => {
+      clearRecallCache();
       await cacheInitialContext(settings, state, ctx);
 
       const memoryContext = getReadyContext(state.initialMemoryContext);

@@ -130,6 +130,7 @@ function sanitizeProjectSettings(
     sanitized.tape = {
       ...sanitized.tape,
       tapePath: undefined,
+      context: sanitized.tape.context ? { ...sanitized.tape.context, jev: undefined } : undefined,
     };
   }
 
