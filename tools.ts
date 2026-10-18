@@ -429,7 +429,13 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         (scope === "global" || scope === "all")
           ? [{ label: "global", memoryDir: memoryMeta.global.dir }]
           : []),
-      ].map((root) => ({ ...root, coreDir: getMemoryCoreDir(root.memoryDir) }));
+      ].map((root) => {
+        // The global folder is flat per the README, while only the per-project
+        // folder nests core/. Falling back to the memory dir keeps a flat global
+        // root in the search set instead of silently dropping it.
+        const coreDir = getMemoryCoreDir(root.memoryDir);
+        return { ...root, coreDir: fs.existsSync(coreDir) ? coreDir : root.memoryDir };
+      });
       const existingRoots = searchRoots.filter((root) => fs.existsSync(root.coreDir));
       const sections: string[] = [];
       const matchedFiles = new Map<string, string>();
