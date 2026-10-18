@@ -126,6 +126,7 @@ The LLM can use these tools and [skills](skills/) to interact with memory:
 |-------|-------------|
 | `memory-init` | Initialize the memory repository, clone/sync git, and create the basic directory structure |
 | `memory-import` | Curate durable memory from URLs, folders, or files after confirming what should be preserved |
+| `planning-with-files` | Track complex tasks with persistent plans, findings, and progress logs in the memory repository |
 
 User can easily extend their own workflows with these skills. Although this sacrifices some stability, it improves flexibility and user autonomy. This is a deliberate tradeoff after my careful consideration.
 
@@ -143,6 +144,16 @@ To disable packaged `pi-memory-md` skills, configure the package skills filter. 
   ]
 }
 ```
+
+### Planning with Files
+
+A simple version of [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files).
+
+Use `/skill:planning-with-files <task>` for complex, multi-step work. See the [skill instructions](skills/planning-with-files/SKILL.md) for the full workflow.
+
+- Requires a Git project, Bash, `jq`, and `uv` (with Python available).
+- Configure `pi-memory-md.memoryDir.localPath` in `~/.pi/agent/settings.json`. The initialization script prefers this field and falls back to legacy `pi-memory-md.localPath` when absent.
+- Plans live under `<localPath>/<project-name>/plan/<timestamp>-<plan-description>/`, not in the working project. The script initializes `findings.md` and `progress.md`; the agent writes a task-specific `task_plan.md`.
 
 ## Memory Delivery Modes
 
@@ -283,6 +294,12 @@ Markdown content...
     │   ├── TASK.md         # Optional project task template
     │   └── project/        # Project memory
     │       └── tech-stack.md
+    ├── plan/               # Optional planning-with-files task records
+    │   └── timestamp-plan-description/
+    │       ├── task_plan.md
+    │       ├── findings.md
+    │       ├── progress.md
+    │       └── archive/    # Prior-phase records when a live file exceeds 1200 lines
     └── notes/              # Optional other custom directories
 ```
 

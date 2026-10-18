@@ -45,7 +45,8 @@
     "skills": [
       "./skills/memory-import/SKILL.md",
       "./skills/memory-init/SKILL.md",
-      "./skills/memory-digest/SKILL.md"
+      "./skills/memory-digest/SKILL.md",
+      "./skills/planning-with-files/SKILL.md"
     ]
   },
   "files": [

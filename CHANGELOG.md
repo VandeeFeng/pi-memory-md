@@ -32,6 +32,7 @@ See you!
 
 ### New Features
 
+- Added the packaged `planning-with-files` skill.
 - Added `/memory-inject [prompt]` to retrieve task-specific workspace and project/shared memory excerpts with source citations. With a prompt, send context and task together; without one, append expandable context for the latest user request.
 - Added optional Jev relevance filtering for manual recall through pi's native classifier API with OpenRouter or direct TypeSafe support, provider-specific model defaults, and separate memory/workspace diagnostics. Billing is shown only when reported by the provider. Failed evaluation never injects unfiltered fallback context.
 
@@ -43,6 +44,7 @@ See you!
 
 ### Fixed
 
+- [PR #23](https://github.com/VandeeFeng/pi-memory-md/pull/23): Include flat global memory folders without `core/` in `memory_search` results, fixing [#17](https://github.com/VandeeFeng/pi-memory-md/issues/17).
 - Handle custom-message agent starts without assuming a user prompt, preserving session bridges for the next user request.
 - Improve Chinese BM25 fallback tokenization when the native `nodejieba` binding is unavailable or fails.
 - Prevent duplicate automatic context delivery after manual injection and discard recall results when the session or branch changes.

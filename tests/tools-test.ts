@@ -297,6 +297,60 @@ test("memory_search BM25 ranks English and Chinese queries", async () => {
   assert.match(chinese.content[0]?.text ?? "", /1\. core\/user\/偏好\.md \(score: /);
 });
 
+for (const mode of ["query", "grep"] as const) {
+  for (const scope of ["project", "global", "all"] as const) {
+    test(`memory_search ${mode} respects ${scope} scope with flat global memory`, async () => {
+      const tempDir = createTempDir("pi-memory-md-tools-search-global-scopes");
+      const projectDir = path.join(tempDir, "project");
+      const settings = {
+        localPath: path.join(tempDir, "memory-root"),
+        memoryDir: { globalMemory: "global" },
+      };
+      const projectMemoryDir = path.join(settings.localPath, path.basename(projectDir));
+      const projectCoreDir = path.join(projectMemoryDir, "core");
+      const globalDir = path.join(settings.localPath, "global");
+      const projectFile = path.join(projectCoreDir, "project", "release.md");
+      const globalFile = path.join(globalDir, "MEMORY.md");
+      const notesFile = path.join(projectMemoryDir, "notes", "release.md");
+
+      for (const filePath of [projectFile, globalFile, notesFile]) {
+        writeMemoryFile(filePath, "# Release", { description: "Release conventions", tags: ["release"] });
+      }
+
+      const pi = createMockPi((command, args) => {
+        if (command !== "grep" || args[5] !== "release") return { stdout: "" };
+        const matchedFile = new Map([
+          [globalDir, globalFile],
+          [projectCoreDir, projectFile],
+        ]).get(args[6]);
+        return { stdout: matchedFile ? `${matchedFile}:6:# Release\n` : "" };
+      });
+      registerMemorySearch(pi as never, settings);
+
+      const result = (await executeTool(pi, "memory_search", { [mode]: "release", scope }, projectDir)) as {
+        content: Array<{ text?: string }>;
+        details?: { files?: string[]; count?: number; scope?: string };
+      };
+      const expectedFiles = [
+        ...(scope !== "global" ? [path.relative(projectMemoryDir, projectFile)] : []),
+        ...(scope !== "project" ? [globalFile] : []),
+      ];
+
+      assert.deepEqual(result.details?.files?.slice().sort(), expectedFiles.sort());
+      assert.equal(result.details?.count, expectedFiles.length);
+      assert.equal(result.details?.scope, scope);
+      const text = result.content[0]?.text ?? "";
+      if (mode === "query") {
+        assert.match(text, /## BM25 ranking: release/);
+      } else {
+        for (const label of scope === "all" ? ["project ", "global "] : [""]) {
+          assert.ok(text.includes(`## ${label}Custom grep: release`));
+        }
+      }
+    });
+  }
+}
+
 test("memory_search passes timeout and max-result limits to grep and rg", async () => {
   const tempDir = createTempDir("pi-memory-md-tools-search-timeout");
   const projectDir = path.join(tempDir, "project");
