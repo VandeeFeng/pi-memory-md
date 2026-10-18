@@ -1,9 +1,9 @@
 # Changelog
 
+The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
+
 <details>
 <summary>See you</summary>
-
-The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
 到目前为止，差不多把我计划投入给这个项目的 token 都用完了，想实现的核心功能差不多也完成了。
 
@@ -26,9 +26,12 @@ See you!
 </details>
 
 ## [Unreleased]
-我已经在 phi 里完整重新设计了 memory 部分
 
-最新的 commit 是 jev 的实验
+没想到还有 新的 PR，很抱歉！GitHub 网页我使用的时间不多，gh 需要一些权限所以我也没有安装。
+
+现在日常的编码活动在 phi 和 pi 里交叉进行，pi 可以调用 phi 来暴露 phi 现在的问题，因此还是会用到这个项目。我已经在 phi 里完整重新设计了这个项目，后续可能会让 AI 转写一份过来。
+
+最新的 commit 是 jev 的实验。感觉准确性稍微增强了一点。
 
 ### New Features
 
@@ -40,10 +43,10 @@ See you!
 
 - Reuse unchanged recall excerpts and BM25 indexes across prompts, while revalidating source files and search scope.
 - Removed the packaged `memory-write` skill and script; import/digest workflows now use native file tools.
-- Moved `typebox` to peer dependencies to share the host's schema runtime.
 
 ### Fixed
 
+- Moved `typebox` to peer dependencies to share the host's schema runtime.
 - [PR #23](https://github.com/VandeeFeng/pi-memory-md/pull/23): Include flat global memory folders without `core/` in `memory_search` results, fixing [#17](https://github.com/VandeeFeng/pi-memory-md/issues/17).
 - Handle custom-message agent starts without assuming a user prompt, preserving session bridges for the next user request.
 - Improve Chinese BM25 fallback tokenization when the native `nodejieba` binding is unavailable or fails.
