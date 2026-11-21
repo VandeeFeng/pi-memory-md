@@ -15,12 +15,12 @@ function getRepoName(settings: MemoryMdSettings): string {
   return match ? match[1] : "memory-md";
 }
 
-async function hasUpstreamBranch(pi: ExtensionAPI, cwd: string): Promise<boolean> {
+async function hasUpstreamBranch(pi: Pick<ExtensionAPI, "exec">, cwd: string): Promise<boolean> {
   const upstreamResult = await gitExec(pi, cwd, ["rev-parse", "--abbrev-ref", "@{u}"]);
   return upstreamResult.success;
 }
 
-async function getBehindCount(pi: ExtensionAPI, cwd: string): Promise<number | null> {
+async function getBehindCount(pi: Pick<ExtensionAPI, "exec">, cwd: string): Promise<number | null> {
   if (!(await hasUpstreamBranch(pi, cwd))) return null;
 
   const behindResult = await gitExec(pi, cwd, ["rev-list", "--count", "HEAD..@{u}"]);
@@ -29,7 +29,7 @@ async function getBehindCount(pi: ExtensionAPI, cwd: string): Promise<number | n
   return Number(behindResult.stdout.trim() || "0");
 }
 
-async function hasCommitsToPush(pi: ExtensionAPI, cwd: string): Promise<boolean> {
+async function hasCommitsToPush(pi: Pick<ExtensionAPI, "exec">, cwd: string): Promise<boolean> {
   if (!(await hasUpstreamBranch(pi, cwd))) return true;
 
   const aheadResult = await gitExec(pi, cwd, ["rev-list", "--count", "@{u}..HEAD"]);
@@ -38,7 +38,7 @@ async function hasCommitsToPush(pi: ExtensionAPI, cwd: string): Promise<boolean>
   return Number(aheadResult.stdout.trim() || "0") > 0;
 }
 
-async function shouldFetch(pi: ExtensionAPI, cwd: string): Promise<boolean> {
+async function shouldFetch(pi: Pick<ExtensionAPI, "exec">, cwd: string): Promise<boolean> {
   const fetchHeadResult = await gitExec(pi, cwd, ["rev-parse", "--git-path", "FETCH_HEAD"]);
   if (!fetchHeadResult.success) return true;
 
@@ -56,7 +56,7 @@ async function shouldFetch(pi: ExtensionAPI, cwd: string): Promise<boolean> {
 }
 
 export async function gitExec(
-  pi: ExtensionAPI,
+  pi: Pick<ExtensionAPI, "exec">,
   cwd: string,
   args: string[],
   timeoutMs = TIMEOUT_MS,
@@ -81,7 +81,7 @@ export async function gitExec(
   }
 }
 
-export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSettings): Promise<SyncResult> {
+export async function syncRepository(pi: Pick<ExtensionAPI, "exec">, settings: MemoryMdSettings): Promise<SyncResult> {
   const localPath = settings.localPath ?? DEFAULT_LOCAL_PATH;
   const { repoUrl } = settings;
 
@@ -149,7 +149,7 @@ export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSetting
   return { success: false, message: cloneResult.stdout || "Clone failed" };
 }
 
-export async function pushRepository(pi: ExtensionAPI, settings: MemoryMdSettings): Promise<SyncResult> {
+export async function pushRepository(pi: Pick<ExtensionAPI, "exec">, settings: MemoryMdSettings): Promise<SyncResult> {
   const localPath = settings.localPath ?? DEFAULT_LOCAL_PATH;
   const { repoUrl } = settings;
 

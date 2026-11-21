@@ -1,3 +1,4 @@
+import childProcess from "node:child_process";
 import fs from "node:fs";
 import { setImmediate as waitForNextTick } from "node:timers/promises";
 import type {
@@ -48,6 +49,7 @@ type CachedContext = { content: string; fileCount: number };
 type InitialContextState = { status: "pending" } | { status: "empty" } | { status: "ready"; value: CachedContext };
 
 type ExtensionState = {
+  isSessionActive: boolean;
   tapeToolsRegistered: boolean;
   sessionStartHookPromise: ReturnType<typeof runHookTrigger> | null;
   contextWarmupPromise: Promise<void> | null;
@@ -72,6 +74,7 @@ type ExtensionState = {
 
 function createExtensionState(): ExtensionState {
   return {
+    isSessionActive: true,
     tapeToolsRegistered: false,
     sessionStartHookPromise: null,
     contextWarmupPromise: null,
@@ -138,13 +141,10 @@ function ensureTapeRuntime(
 }
 
 // Context warmup and delivery for memory, tape, and session bridge.
-async function cacheInitialContext(
-  settings: MemoryMdSettings,
-  state: ExtensionState,
-  ctx: ExtensionContext,
-): Promise<void> {
-  const baseMemoryContext = settings.enabled ? await buildMemoryContextAsync(settings, ctx.cwd) : null;
-  state.initialMemoryContext = baseMemoryContext
+async function cacheInitialContext(settings: MemoryMdSettings, state: ExtensionState, cwd: string): Promise<void> {
+  const tapeRuntime = state.tapeGate?.enabled === true ? state.activeTapeRuntime : null;
+  const baseMemoryContext = settings.enabled ? await buildMemoryContextAsync(settings, cwd) : null;
+  const initialMemoryContext: InitialContextState = baseMemoryContext
     ? {
         status: "ready",
         value: {
@@ -154,29 +154,26 @@ async function cacheInitialContext(
       }
     : { status: "empty" };
 
-  const tapeRuntime = state.tapeGate?.enabled === true ? state.activeTapeRuntime : null;
-  if (!tapeRuntime) {
-    state.initialTapeContext = { status: "empty" };
-    return;
+  let initialTapeContext: InitialContextState = { status: "empty" };
+  if (tapeRuntime) {
+    const { fileLimit = 10, strategy = "smart", memoryScan = DEFAULT_MEMORY_SCAN } = settings.tape?.context ?? {};
+    const memoryFiles = await tapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
+    const selectedFiles = await tapeRuntime.selector.finalizeContextFiles(memoryFiles);
+
+    if (selectedFiles.length > 0) {
+      const content = await tapeRuntime.selector.buildContextFromFilesAsync(selectedFiles, {
+        highlightedFiles: [...new Set(memoryFiles.filter((filePath) => selectedFiles.includes(filePath)))].slice(0, 3),
+        handoffMode: settings.tape?.anchor?.mode ?? "auto",
+      });
+      if (content?.trim()) {
+        initialTapeContext = { status: "ready", value: { content, fileCount: selectedFiles.length } };
+      }
+    }
   }
 
-  const { fileLimit = 10, strategy = "smart", memoryScan = DEFAULT_MEMORY_SCAN } = settings.tape?.context ?? {};
-  const memoryFiles = await tapeRuntime.selector.selectFilesForContext(strategy, fileLimit, { memoryScan });
-  const selectedFiles = await tapeRuntime.selector.finalizeContextFiles(memoryFiles);
-
-  if (selectedFiles.length === 0) {
-    state.initialTapeContext = { status: "empty" };
-    return;
-  }
-
-  const content = await tapeRuntime.selector.buildContextFromFilesAsync(selectedFiles, {
-    highlightedFiles: [...new Set(memoryFiles.filter((filePath) => selectedFiles.includes(filePath)))].slice(0, 3),
-    handoffMode: settings.tape?.anchor?.mode ?? "auto",
-  });
-
-  state.initialTapeContext = content?.trim()
-    ? { status: "ready", value: { content, fileCount: selectedFiles.length } }
-    : { status: "empty" };
+  if (!state.isSessionActive) return;
+  state.initialMemoryContext = initialMemoryContext;
+  state.initialTapeContext = initialTapeContext;
 }
 
 function notifyRecallDiagnostics(ctx: ExtensionContext, diagnostics: RecallDiagnostics): void {
@@ -226,12 +223,13 @@ function scheduleContextWarmup(
   ctx: ExtensionContext,
   waitFor?: Promise<unknown> | null,
 ): void {
+  const cwd = ctx.cwd;
   const warmup = (async () => {
     if (waitFor) {
       await waitFor;
     }
     await waitForNextTick();
-    await cacheInitialContext(settings, state, ctx);
+    await cacheInitialContext(settings, state, cwd);
   })();
 
   const trackedWarmup = warmup.finally(() => {
@@ -240,10 +238,10 @@ function scheduleContextWarmup(
     }
   });
   state.contextWarmupPromise = trackedWarmup;
+  void trackedWarmup.catch((error) => console.error("Memory context warmup failed:", error));
 }
 
 function initDeliveryContent(
-  pi: ExtensionAPI,
   settings: MemoryMdSettings,
   state: ExtensionState,
   ctx: ExtensionContext,
@@ -262,7 +260,7 @@ function initDeliveryContent(
   }
 
   if (options.runSessionStartHooks && settings.localPath && getHookActions(settings, "sessionStart").length > 0) {
-    state.sessionStartHookPromise = runHookTriggerWithNotify(pi, settings, ctx, "sessionStart");
+    state.sessionStartHookPromise = runHookTriggerWithNotify(settings, ctx, "sessionStart", state);
   } else {
     state.sessionStartHookPromise = null;
   }
@@ -285,7 +283,6 @@ function queueKeywordHandoffMessage(pi: ExtensionAPI, keywordHandoff: KeywordHan
 }
 
 async function prepareBeforeAgentStart(
-  pi: ExtensionAPI,
   settings: MemoryMdSettings,
   state: ExtensionState,
   ctx: ExtensionContext,
@@ -297,7 +294,7 @@ async function prepareBeforeAgentStart(
     state.initialTapeContext.status === "pending" &&
     !state.contextWarmupPromise;
   if (needsContextInit) {
-    const initialized = initDeliveryContent(pi, settings, state, ctx, { runSessionStartHooks: false });
+    const initialized = initDeliveryContent(settings, state, ctx, { runSessionStartHooks: false });
     if (!initialized && !state.contextWarmupPromise) {
       state.contextWarmupPromise = Promise.resolve();
     }
@@ -445,7 +442,28 @@ function deliverStartupContext(
 }
 
 // Pi lifecycle handlers and hook execution.
-async function runHookAction(pi: ExtensionAPI, settings: MemoryMdSettings, action: HookAction) {
+// Hooks may outlive the extension runtime, so their executor must not use pi.
+const hookExecutor: Pick<ExtensionAPI, "exec"> = {
+  async exec(command, args, options) {
+    return new Promise((resolve, reject) => {
+      childProcess.execFile(
+        command,
+        args,
+        {
+          cwd: options?.cwd,
+          signal: options?.signal,
+          encoding: "utf8",
+        },
+        (error, stdout, stderr) => {
+          if (error) reject(error);
+          else resolve({ stdout, stderr, code: 0, killed: false });
+        },
+      );
+    });
+  },
+};
+
+async function runHookAction(pi: Pick<ExtensionAPI, "exec">, settings: MemoryMdSettings, action: HookAction) {
   switch (action) {
     case "pull":
       return syncRepository(pi, settings);
@@ -468,22 +486,18 @@ function notifyHookResults(
   for (const { action, result } of results) {
     if (result.success && !result.updated) continue;
 
-    try {
-      ctx.ui.notify(`${result.message} (${label}/${action})`, result.level ?? (result.success ? "info" : "error"));
-    } catch (error) {
-      if (!(error instanceof Error && error.message.includes("extension ctx is stale"))) throw error;
-    }
+    ctx.ui.notify(`${result.message} (${label}/${action})`, result.level ?? (result.success ? "info" : "error"));
   }
 }
 
 function runHookTriggerWithNotify(
-  pi: ExtensionAPI,
   settings: MemoryMdSettings,
   ctx: ExtensionContext,
   phase: "sessionStart" | "sessionEnd",
+  state?: ExtensionState,
 ): ReturnType<typeof runHookTrigger> {
-  return runHookTrigger(settings, phase, (action) => runHookAction(pi, settings, action)).then((results) => {
-    notifyHookResults(ctx, settings, phase, results);
+  return runHookTrigger(settings, phase, (action) => runHookAction(hookExecutor, settings, action)).then((results) => {
+    if (!state || state.isSessionActive) notifyHookResults(ctx, settings, phase, results);
     return results;
   });
 }
@@ -531,7 +545,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       state.tapeToolsRegistered = true;
     }
 
-    initDeliveryContent(pi, settings, state, ctx, {
+    initDeliveryContent(settings, state, ctx, {
       runSessionStartHooks: getSessionStartCause(event.reason) === "runtimeStart",
     });
   });
@@ -540,7 +554,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
     const manualContext = state.hasManualContext;
     state.hasManualContext = false;
     if (manualContext) ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
-    else await prepareBeforeAgentStart(pi, settings, state, ctx);
+    else await prepareBeforeAgentStart(settings, state, ctx);
     const tapeState = handleTapeBeforeAgentStart(pi, settings, state, ctx, event);
     const delivery = settings.delivery ?? settings.injection ?? "message-append";
     const sessionBridgeContext = await maybeBuildSessionBridgeContext(settings, state, event);
@@ -552,6 +566,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    state.isSessionActive = false;
     clearRecallCache();
     const activeTapeRuntime = state.activeTapeRuntime;
     state.activeTapeRuntime = null;
@@ -567,7 +582,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
       return;
     }
 
-    await runHookTriggerWithNotify(pi, settings, ctx, "sessionEnd");
+    await runHookTriggerWithNotify(settings, ctx, "sessionEnd");
   });
 }
 
@@ -709,7 +724,7 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
     description: "Refresh memory context from files",
     handler: async (_args, ctx) => {
       clearRecallCache();
-      await cacheInitialContext(settings, state, ctx);
+      await cacheInitialContext(settings, state, ctx.cwd);
 
       const memoryContext = getReadyContext(state.initialMemoryContext);
       if (!memoryContext) {

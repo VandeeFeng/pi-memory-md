@@ -46,6 +46,15 @@ See you!
 
 ### Fixed
 
+- Fixed background memory warmup and startup hooks accessing stale `ctx` / `pi` after session replacement or reload on pi **1.5.2** (current installed version). Warmup captures plain data before awaiting; Git hooks run independently of the extension runtime. Shutdown neither waits for nor cancels startup tasks. Late results do not notify or update the closed session, and background rejections are handled.
+
+  Full warning reported:
+
+  ```text
+  Warning: pi crashed on 11/21/2026, 10:59:17 PM (This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after
+  ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use
+  the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().). Run /bug to report it; the crash details are attached automatically.
+  ```
 - Moved `typebox` to peer dependencies to share the host's schema runtime.
 - [PR #23](https://github.com/VandeeFeng/pi-memory-md/pull/23): Include flat global memory folders without `core/` in `memory_search` results, fixing [#17](https://github.com/VandeeFeng/pi-memory-md/issues/17).
 - Handle custom-message agent starts without assuming a user prompt, preserving session bridges for the next user request.

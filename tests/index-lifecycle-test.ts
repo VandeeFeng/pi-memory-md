@@ -1,11 +1,15 @@
 // Covers session lifecycle hooks, command/tool registration timing, and config reload across extension restarts.
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { mock, test } from "node:test";
+import { afterEach, mock, test } from "node:test";
 import memoryMdExtension from "../index.js";
+import { MemoryFileSelector } from "../tape/tape-context.js";
 import { createSessionManager, createTempDir, createUi, initGitRepo, writeJson } from "./test-helpers.js";
+
+afterEach(() => mock.restoreAll());
 
 type HandlerMap = Map<string, (event: any, ctx: any) => Promise<unknown> | unknown>;
 
@@ -14,6 +18,7 @@ type Harness = {
   registeredCommands: string[];
   registeredTools: string[];
   execCalls: Array<{ command: string; args: string[]; cwd?: string }>;
+  invalidateRuntime: () => void;
 };
 
 function bootExtension(
@@ -27,6 +32,23 @@ function bootExtension(
   const execCalls: Array<{ command: string; args: string[]; cwd?: string }> = [];
   const homedirMock = mock.method(os, "homedir", () => homeDir);
   const previousCwd = process.cwd();
+  let runtimeActive = true;
+  async function execute(command: string, args: string[], options?: { cwd?: string }) {
+    execCalls.push({ command, args, cwd: options?.cwd });
+    return execHandler ? execHandler(command, args, options) : { stdout: "" };
+  }
+  mock.method(childProcess, "execFile", ((
+    command: string,
+    args: string[],
+    options: { cwd?: string },
+    callback: (error: unknown, stdout: string, stderr: string) => void,
+  ) => {
+    void execute(command, args, options).then(
+      (result) => callback(null, result.stdout ?? "", ""),
+      (error) => callback(error, "", ""),
+    );
+    return {};
+  }) as unknown as typeof childProcess.execFile);
 
   try {
     process.chdir(projectDir);
@@ -43,11 +65,8 @@ function bootExtension(
       registerMessageRenderer() {},
       sendMessage() {},
       async exec(command: string, args: string[], options?: { cwd?: string }) {
-        execCalls.push({ command, args, cwd: options?.cwd });
-        if (execHandler) {
-          return execHandler(command, args, options);
-        }
-        return { stdout: "" };
+        assert.equal(runtimeActive, true, "stale extension pi");
+        return execute(command, args, options);
       },
     } as never);
   } finally {
@@ -55,7 +74,15 @@ function bootExtension(
     homedirMock.mock.restore();
   }
 
-  return { handlers, registeredCommands, registeredTools, execCalls };
+  return {
+    handlers,
+    registeredCommands,
+    registeredTools,
+    execCalls,
+    invalidateRuntime: () => {
+      runtimeActive = false;
+    },
+  };
 }
 
 function setupMemoryProject(homeDir: string, projectDir: string): { localPath: string; memoryDir: string } {
@@ -67,6 +94,21 @@ function setupMemoryProject(homeDir: string, projectDir: string): { localPath: s
     "---\ndescription: Identity\n---\n\n# Identity\n",
   );
   return { localPath, memoryDir };
+}
+
+function observeMemoryRead(memoryDir: string): Promise<void> {
+  const readFile = fs.promises.readFile;
+  return new Promise((resolve) => {
+    mock.method(fs.promises, "readFile", ((...args: Parameters<typeof readFile>) => {
+      const pending = readFile(...args);
+      if (String(args[0]).startsWith(memoryDir))
+        void pending.then(
+          () => resolve(),
+          () => resolve(),
+        );
+      return pending;
+    }) as typeof readFile);
+  });
 }
 
 test("memory-anchor command is only registered when tape is enabled", () => {
@@ -151,47 +193,6 @@ test("session_start registers tape tools only once and skips start hooks for rep
   assert.equal(harness.registeredTools.filter((name) => name === "tape_handoff").length, 1);
 });
 
-test("session_start runs start hooks for startup sessions", async () => {
-  const homeDir = createTempDir("pi-memory-md-lifecycle-home-startup");
-  const projectDir = createTempDir("pi-memory-md-lifecycle-project-startup");
-  const { localPath } = setupMemoryProject(homeDir, projectDir);
-  initGitRepo(localPath);
-
-  writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
-    "pi-memory-md": {
-      localPath,
-      repoUrl: "https://github.com/acme/memory.git",
-      hooks: { sessionStart: ["pull"] },
-    },
-  });
-
-  const harness = bootExtension(homeDir, projectDir, async (_command, args) => {
-    const gitCommand = args.join(" ");
-    if (gitCommand === "rev-parse --git-path FETCH_HEAD") return { stdout: ".git/FETCH_HEAD\n" };
-    if (gitCommand === "fetch") return { stdout: "" };
-    if (gitCommand === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
-    if (gitCommand === "rev-list --count HEAD..@{u}") return { stdout: "0\n" };
-    throw new Error(`Unexpected git call: ${gitCommand}`);
-  });
-
-  const sessionStart = harness.handlers.get("session_start");
-  const beforeAgentStart = harness.handlers.get("before_agent_start");
-
-  await sessionStart?.(
-    { reason: "startup" },
-    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") },
-  );
-  await beforeAgentStart?.(
-    { prompt: "hello", systemPrompt: "SYSTEM" },
-    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") },
-  );
-
-  assert.deepEqual(
-    harness.execCalls.map((call) => call.args.join(" ")),
-    ["rev-parse --git-path FETCH_HEAD", "fetch", "rev-parse --abbrev-ref @{u}", "rev-list --count HEAD..@{u}"],
-  );
-});
-
 test("session_start runs start hooks for startup sessions and before_agent_start waits for them", async () => {
   const homeDir = createTempDir("pi-memory-md-lifecycle-home-2");
   const projectDir = createTempDir("pi-memory-md-lifecycle-project-2");
@@ -250,6 +251,104 @@ test("session_start runs start hooks for startup sessions and before_agent_start
     ui.notifications.some((item) => item.message.includes("Pulled latest changes from [memory] (start/pull)")),
     true,
   );
+});
+
+test("shutdown does not wait for startup hooks and hooks finish without stale ctx", async () => {
+  const homeDir = createTempDir("pi-memory-md-hook-home");
+  const projectDir = createTempDir("pi-memory-md-hook-project");
+  const { localPath, memoryDir } = setupMemoryProject(homeDir, projectDir);
+  const memoryRead = observeMemoryRead(memoryDir);
+  initGitRepo(localPath);
+  writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": {
+      localPath,
+      repoUrl: "https://github.com/acme/memory.git",
+      hooks: { sessionStart: ["pull", "unsupported"] },
+      tape: { enabled: false },
+    },
+  });
+  let releaseHook!: () => void;
+  const pendingHook = new Promise<void>((resolve) => {
+    releaseHook = resolve;
+  });
+  const harness = bootExtension(homeDir, projectDir, async (_command, args) => {
+    if (args.join(" ") === "rev-parse --git-path FETCH_HEAD") {
+      await pendingHook;
+      return { stdout: ".git/FETCH_HEAD\n" };
+    }
+    if (args[0] === "fetch") return { stdout: "" };
+    if (args.join(" ") === "rev-parse --abbrev-ref @{u}") return { stdout: "origin/main\n" };
+    if (args[0] === "rev-list") return { stdout: "0\n" };
+    throw new Error(`Unexpected git call: ${args.join(" ")}`);
+  });
+  let active = true;
+  let staleReads = 0;
+  const ctx = new Proxy(
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") },
+    {
+      get(target, key) {
+        if (!active) {
+          staleReads += 1;
+          throw new Error("stale extension ctx");
+        }
+        return Reflect.get(target, key);
+      },
+    },
+  );
+  await harness.handlers.get("session_start")?.({ reason: "startup" }, ctx);
+  let shutdownFinished = false;
+  const shutdown = Promise.resolve(harness.handlers.get("session_shutdown")?.({ reason: "reload" }, ctx)).then(() => {
+    shutdownFinished = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const exitedBeforeHook = shutdownFinished;
+  active = false;
+  harness.invalidateRuntime();
+  releaseHook();
+  await shutdown;
+  await memoryRead;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(exitedBeforeHook, true);
+  assert.equal(staleReads, 0);
+  assert.equal(
+    harness.execCalls.some((call) => call.args[0] === "rev-list"),
+    true,
+  );
+});
+
+test("background warmup errors are handled after shutdown", async () => {
+  const homeDir = createTempDir("pi-memory-md-warmup-error-home");
+  const projectDir = createTempDir("pi-memory-md-warmup-error-project");
+  const { localPath } = setupMemoryProject(homeDir, projectDir);
+  writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": { localPath, hooks: { sessionStart: [] }, tape: { enabled: true, onlyGit: false } },
+  });
+  let startWarmup!: () => void;
+  const warmupStarted = new Promise<void>((resolve) => {
+    startWarmup = resolve;
+  });
+  let failWarmup!: (error: Error) => void;
+  const pendingSelection = new Promise<string[]>((_resolve, reject) => {
+    failWarmup = reject;
+  });
+  mock.method(MemoryFileSelector.prototype, "selectFilesForContext", () => {
+    startWarmup();
+    return pendingSelection;
+  });
+  let reportError!: () => void;
+  const errorReported = new Promise<void>((resolve) => {
+    reportError = resolve;
+  });
+  const errors = mock.method(console, "error", () => reportError());
+  const harness = bootExtension(homeDir, projectDir);
+  const ctx = { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") };
+  await harness.handlers.get("session_start")?.({ reason: "startup" }, ctx);
+  await warmupStarted;
+  await harness.handlers.get("session_shutdown")?.({ reason: "reload" }, ctx);
+  const failure = new Error("context selection failed");
+  failWarmup(failure);
+  await errorReported;
+  assert.deepEqual(errors.mock.calls[0].arguments, ["Memory context warmup failed:", failure]);
 });
 
 test("session_shutdown runs end hooks only when memory is initialized", async () => {
